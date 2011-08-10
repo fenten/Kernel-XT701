@@ -1,3 +1,4 @@
+EXPORT_SYMBOL_GPL(nr_running);
 /*
  *  kernel/sched.c
  *
