@@ -1,0 +1,18 @@
+diff a/lib/Kconfig.debug b/lib/Kconfig.debug	(rejected hunks)
+@@ -298,6 +298,16 @@ config SLUB_STATS
+ 	  out which slabs are relevant to a particular load.
+ 	  Try running: slabinfo -DA
+ 
++config SLQB_DEBUG_ON
++	bool "SLQB debugging on by default"
++	depends on SLQB_DEBUG
++	default n
++
++config SLQB_STATS2
++	default n
++	bool "Enable SLQB performance statistics"
++	depends on SLQB
++
+ config DEBUG_PREEMPT
+ 	bool "Debug preemptible kernel"
+ 	depends on DEBUG_KERNEL && PREEMPT && (TRACE_IRQFLAGS_SUPPORT || PPC64)

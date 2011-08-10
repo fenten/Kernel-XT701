@@ -716,6 +716,21 @@ static const char * const vmstat_text[] = {
 	"unevictable_pgs_mlockfreed",
 #endif
 #endif
+	"slqb_alloc",
+	"slqb_alloc_from_page",
+	"slqb_offnode_alloc",
+	"slqb_free",
+	"slqb_remote_free",
+	"slqb_offnode_free",
+	"slqb_flush_remote_free_cache",
+	"slqb_claim_remote_free_cache",
+	"slqb_flush_free_list",
+	"slqb_page_free_partial",
+	"slqb_page_free_empty",
+	"slqb_page_alloc_partial",
+	"slqb_page_alloc_full",
+	"slqb_page_alloc",
+	"slqb_page_free",
 };
 
 static void zoneinfo_show_print(struct seq_file *m, pg_data_t *pgdat,
