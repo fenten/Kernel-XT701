@@ -24,8 +24,6 @@
 #include <linux/spi/cpcap-regbits.h>
 #include <linux/spi/cpcap.h>
 
-#define AUDIO_I2S_MODE
-
 enum {
 	CPCAP_AUDIO_MODE_NORMAL,	/* mode of normal audio operation */
 	CPCAP_AUDIO_MODE_DAI,	/* CPCAP_AUDIO is configured for DAI testing */
@@ -140,6 +138,7 @@ enum {
 	CPCAP_AUDIO_OUT_EMU_STEREO = SOUND_MASK_LINE3,
 	CPCAP_AUDIO_OUT_LINEOUT = SOUND_MASK_LINE,
 	CPCAP_AUDIO_OUT_BT_MONO = SOUND_MASK_DIGITAL1,
+	CPCAP_AUDIO_OUT_AUX_I2S = SOUND_MASK_DIGITAL2,
 	CPCAP_AUDIO_OUT_NUM_OF_PATHS
 		/* Max number of audio output paths */
 };
@@ -148,18 +147,17 @@ enum {
 	CPCAP_AUDIO_IN_NONE,
 		/* No audio input selected */
 	CPCAP_AUDIO_IN_HANDSET = SOUND_MASK_PHONEIN,
+	CPCAP_AUDIO_IN_PRIMARY_INTERNAL = CPCAP_AUDIO_IN_HANDSET,
 		/* handset (internal) microphone */
 	CPCAP_AUDIO_IN_AUX_INTERNAL = SOUND_MASK_MIC,
+	CPCAP_AUDIO_IN_SECONDARY_INTERNAL = CPCAP_AUDIO_IN_AUX_INTERNAL,
 		/* Auxiliary (second) internal mic */
-	CPCAP_AUDIO_IN_DUAL_INTERNAL = SOUND_MASK_LINE3,
-		/* both internal microphones are connected */
+	CPCAP_AUDIO_IN_TERTIARY_INTERNAL = SOUND_MASK_LINE2,
+		/* tertiary (third) internal mic */
+	CPCAP_AUDIO_IN_QUATERNARY_INTERNAL = SOUND_MASK_LINE3,
+		/* quaternary (fourth) internal mic */
 	CPCAP_AUDIO_IN_HEADSET = SOUND_MASK_LINE1,
 		/* Audio <- x.5mm headset microphone */
-	CPCAP_AUDIO_IN_EXT_BUS = SOUND_MASK_LINE2,
-		/* Audio <- accessory bus analog input (EMU) */
-	CPCAP_AUDIO_IN_EMU = CPCAP_AUDIO_IN_EXT_BUS,
-	CPCAP_AUDIO_IN_HEADSET_BIAS_ONLY = SOUND_MASK_LINE1,
-		/* 3.5mm headset control when no mic is selected */
 	CPCAP_AUDIO_IN_DUAL_EXTERNAL = SOUND_MASK_LINE,
 		/* Recording from external source */
 	CPCAP_AUDIO_IN_BT_MONO = SOUND_MASK_DIGITAL1,
@@ -187,6 +185,24 @@ enum {
 	CPCAP_AUDIO_RAT_CDMA	/* In CDMA call mode */
 };
 
+enum {
+	CPCAP_AUDIO_DAI_CONFIG_NORMAL, /*stdac on 1, codec on 0, independent*/
+	CPCAP_AUDIO_DAI_CONFIG_HIFI_DUAL, /*stdac on 1, codec on 0, shared PLL*/
+	CPCAP_AUDIO_DAI_CONFIG_HIFI_DUPLEX_0, /*stdac and codec on 0*/
+	CPCAP_AUDIO_DAI_CONFIG_HIFI_DUPLEX_1, /*stdac and codec on 1*/
+};
+
+/* Clock multipliers for A2LA register */
+enum {
+	CPCAP_AUDIO_A2_CLOCK_MASK  = CPCAP_BIT_A2_CLK2 | CPCAP_BIT_A2_CLK1 | CPCAP_BIT_A2_CLK0,
+	CPCAP_AUDIO_A2_CLOCK_15_36 = CPCAP_BIT_A2_CLK0,
+	CPCAP_AUDIO_A2_CLOCK_16_80 = CPCAP_BIT_A2_CLK1,
+	CPCAP_AUDIO_A2_CLOCK_19_20 = CPCAP_BIT_A2_CLK1 | CPCAP_BIT_A2_CLK0,
+	CPCAP_AUDIO_A2_CLOCK_26_00 = CPCAP_BIT_A2_CLK2,
+	CPCAP_AUDIO_A2_CLOCK_33_60 = CPCAP_BIT_A2_CLK2 | CPCAP_BIT_A2_CLK0,
+	CPCAP_AUDIO_A2_CLOCK_38_40 = CPCAP_BIT_A2_CLK2 | CPCAP_BIT_A2_CLK1
+};
+
 struct cpcap_audio_state {
 	struct cpcap_device *cpcap;
 	int mode;
@@ -210,10 +226,13 @@ struct cpcap_audio_state {
 	int microphone;
 	unsigned int input_gain;
 	int rat_type;
+	int dai_config;
 };
 
 void cpcap_audio_set_audio_state(struct cpcap_audio_state *state);
 
 void cpcap_audio_init(struct cpcap_audio_state *state);
+
+int cpcap_audio_is_cdma_shadow(void);
 
 #endif /* CPCAP_AUDIO_DRIVER_H */
