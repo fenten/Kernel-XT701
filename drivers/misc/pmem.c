@@ -250,7 +250,8 @@ static int pmem_free(int id, int index)
 	 */
 	do {
 		buddy = PMEM_BUDDY_INDEX(id, curr);
-		if (PMEM_IS_FREE(id, buddy) &&
+        if (buddy < pmem[id].num_entries &&
+                PMEM_IS_FREE(id, buddy) &&
 				PMEM_ORDER(id, buddy) == PMEM_ORDER(id, curr)) {
 			PMEM_ORDER(id, buddy)++;
 			PMEM_ORDER(id, curr)++;
@@ -1148,6 +1149,15 @@ static long pmem_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		DLOG("connect\n");
 		return pmem_connect(arg, file);
 		break;
+	case PMEM_CACHE_FLUSH:
+		{
+			struct pmem_region region;
+			if (copy_from_user(&region, (void __user *)arg,
+						sizeof(struct pmem_region)))
+				return -EFAULT;
+			flush_pmem_file(file, region.offset, region.len);
+			break;
+		}
 	default:
 		if (pmem[id].ioctl)
 			return pmem[id].ioctl(file, cmd, arg);

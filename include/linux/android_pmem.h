@@ -21,6 +21,7 @@
 #define PMEM_MAP		_IOW(PMEM_IOCTL_MAGIC, 2, unsigned int)
 #define PMEM_GET_SIZE		_IOW(PMEM_IOCTL_MAGIC, 3, unsigned int)
 #define PMEM_UNMAP		_IOW(PMEM_IOCTL_MAGIC, 4, unsigned int)
+#define PMEM_CACHE_FLUSH    _IOW(PMEM_IOCTL_MAGIC, 8, unsigned int)
 /* This ioctl will allocate pmem space, backing the file, it will fail
  * if the file already has an allocation, pass it the len as the argument
  * to the ioctl */
