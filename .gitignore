@@ -25,7 +25,7 @@
 *.elf
 *.bin
 *.gz
-
+00*
 #
 # Top-level generic files
 #
