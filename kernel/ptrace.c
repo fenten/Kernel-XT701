@@ -237,7 +237,8 @@ out:
 
 int ptrace_detach(struct task_struct *child, unsigned int data)
 {
-	int dead = 0;
+	int dead = 0;	
+	
 	if (!valid_signal(data))
 		return -EIO;
 

@@ -133,11 +133,15 @@ apply_relocate(Elf32_Shdr *sechdrs, const char *strtab, unsigned int symindex,
 			*(u32 *)loc |= offset & 0x00ffffff;
 			break;
 
-        case R_ARM_V4BX:
+       case R_ARM_V4BX:
+	       /* Preserve Rm and the condition code. Alter
+			* other bits to re-code instruction as
+			* MOV PC,Rm.
+			*/
+	       *(u32 *)loc &= 0xf000000f;
+	       *(u32 *)loc |= 0x01a0f000;
+	       break;
 
-		    *(u32 *)loc &= 0xf000000f;
-		    *(u32 *)loc |= 0x01a0f000;
-		    break;
 
 		case R_ARM_MOVW_ABS_NC:
 		case R_ARM_MOVT_ABS:

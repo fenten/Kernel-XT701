@@ -14,6 +14,7 @@
 
 #include <linux/kernel.h>
 #include <linux/device.h>
+#include <linux/tty.h>
 
 #include "u_serial.h"
 #include "gadget_chips.h"
@@ -106,7 +107,7 @@ static struct usb_descriptor_header *null_acm_descs[] = {
 /* notification endpoint uses smallish and infrequent fixed-size messages */
 
 #define GS_LOG2_NOTIFY_INTERVAL		5	/* 1 << 5 == 32 msec */
-#define GS_NOTIFY_MAXPACKET		10	/* notification + 2 bytes */
+#define GS_NOTIFY_MAXPACKET		64	/* notification + 2 bytes */
 
 /* interface and class descriptors: */
 
@@ -590,6 +591,38 @@ static void acm_cdc_notify_complete(struct usb_ep *ep, struct usb_request *req)
 		acm_notify_serial_state(acm);
 }
 
+#ifdef CONFIG_USB_MOT_ANDROID
+static void acm_tiocmset(struct gserial *port, int set, int clear)
+{
+	struct f_acm            *acm = port_to_acm(port);
+
+	if (set & TIOCM_DTR)
+		acm->serial_state |= ACM_CTRL_DCD;
+	if (clear & TIOCM_DTR)
+		acm->serial_state &= ~ACM_CTRL_DCD;
+
+	if (set & TIOCM_DSR)
+		acm->serial_state |= ACM_CTRL_DSR;
+	if (clear & TIOCM_DSR)
+		acm->serial_state &= ~ACM_CTRL_DSR;
+
+	if (set & TIOCM_OUT1)
+		acm->serial_state |= ACM_CTRL_RI;
+	if (clear & TIOCM_OUT1)
+		acm->serial_state &= ~ACM_CTRL_RI;
+
+	if (set & TIOCM_OUT2)
+		acm->serial_state |= ACM_CTRL_OVERRUN;
+	if (clear & TIOCM_OUT2)
+		acm->serial_state &= ~ACM_CTRL_OVERRUN;
+
+	/*
+	*  TODO:  configure DSR/DCD/OUT1, etc according to set/clear
+	*/
+	acm_notify_serial_state(acm);
+}
+#endif
+
 /* connect == the TTY link is open */
 
 static void acm_connect(struct gserial *port)
@@ -846,6 +879,7 @@ int __init acm_bind_config(struct usb_configuration *c, u8 port_num)
 	acm->port.func.disable = acm_disable;
 
 #ifdef CONFIG_USB_MOT_ANDROID
+	acm->port.tiocmset = acm_tiocmset;
 	g_acm_dev = acm;
 #endif
 

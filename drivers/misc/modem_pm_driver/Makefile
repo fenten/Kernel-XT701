@@ -18,4 +18,9 @@
 # Motorola 2009-Feb-18 - Initial Creation
 #
 
-obj-y           += modem_pm_driver_main.o
+MODULE_NAME = modem_pm_driver
+
+obj-$(CONFIG_MODEM_PM_DRIVER) += $(MODULE_NAME).o
+$(MODULE_NAME)-objs := modem_pm_driver_main.o
+
+#obj-y           += modem_pm_driver_main.o

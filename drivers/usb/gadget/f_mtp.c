@@ -59,22 +59,33 @@
  *
  */
 #define STRING_INTERFACE	0
-#define STRING_MTP      	1
+#define STRING_MTP      	0
 
 /* static strings, in UTF-8 */
-static struct usb_string mtp_string_defs[] = {
+static struct usb_string mtp_string_defs1[] = {
 	[STRING_INTERFACE].s = "Motorola MTP Interface",
-	[STRING_MTP].s = "MSFT100\034",
 	{  /* ZEROES END LIST */ },
 };
 
-static struct usb_gadget_strings mtp_string_table = {
+static struct usb_string mtp_string_defs2[] = {
+     [STRING_MTP].s = "MSFT100\034",
+     {  /* ZEROES END LIST */ },
+};
+
+
+static struct usb_gadget_strings mtp_string_table1 = {
 	.language =		0x0409,	/* en-us */
-	.strings =		mtp_string_defs,
+	.strings =		mtp_string_defs1,
+};
+
+static struct usb_gadget_strings mtp_string_table2 = {
+     .language =     0x0, /* en-us */
+     .strings =      mtp_string_defs2,
 };
 
 static struct usb_gadget_strings *mtp_strings[] = {
-	&mtp_string_table,
+	&mtp_string_table1,
+	&mtp_string_table2,
 	NULL,
 };
 
@@ -1153,11 +1164,11 @@ int __init mtp_function_add(struct usb_composite_dev *cdev,
 
 	status = usb_string_id(c->cdev);
 	if (status >= 0) {
-		mtp_string_defs[STRING_INTERFACE].id = status;
+		mtp_string_defs1[STRING_INTERFACE].id = status;
 		intf_desc.iInterface = status;
 	}
 
-	mtp_string_defs[STRING_MTP].id = mtp_ext_str_idx;
+	mtp_string_defs2[STRING_MTP].id = mtp_ext_str_idx;
 
 	g_usb_mtp_context.cdev = cdev;
 	g_usb_mtp_context.function.name = "mtp";

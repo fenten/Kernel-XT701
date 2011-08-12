@@ -998,10 +998,27 @@ static int gs_break_ctl(struct tty_struct *tty, int duration)
 	return status;
 }
 
+#ifdef CONFIG_USB_MOT_ANDROID
+/* Add TIOCMSET which is used by ATCMD */
+static int gs_tiocmset(struct tty_struct *tty, struct file *file,
+	unsigned int set, unsigned int clear)
+{
+	struct gs_port  *port = tty->driver_data;
+
+	printk(KERN_INFO "%s set=%x clear=%x \n", __func__, set, clear);
+	port->port_usb->tiocmset(port->port_usb, set, clear);
+	return 0;
+}
+#endif
+
 static const struct tty_operations gs_tty_ops = {
 	.open =			gs_open,
 	.close =		gs_close,
 	.write =		gs_write,
+
+#ifdef CONFIG_USB_MOT_ANDROID
+	.tiocmset =             gs_tiocmset,
+#endif
 	.put_char =		gs_put_char,
 	.flush_chars =		gs_flush_chars,
 	.write_room =		gs_write_room,

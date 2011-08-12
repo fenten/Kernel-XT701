@@ -17,7 +17,7 @@ NAME = Temporary Tasmanian Devil
 MAKEFLAGS += -rR --no-print-directory
 
 # Add custom flags here to avoid conflict with updates
-#EXTRAVERSION := $(EXTRAVERSION)-HaHa
+#EXTRAVERSION := $(EXTRAVERSION)-omap1
 
 # We are using a recursive build, so we need to do a little thinking
 # to get the ordering right.

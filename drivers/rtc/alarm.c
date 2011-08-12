@@ -373,7 +373,6 @@ int alarm_suspend(struct platform_device *pdev, pm_message_t state)
 				elapsed_realtime_alarm_time, rtc_delta).tv_sec;
 		rtc_time_to_tm(rtc_alarm_time, &rtc_alarm.time);
 		rtc_alarm.enabled = 1;
-		rtc_alarm_irq_enable(alarm_rtc_dev, 1);
 		rtc_set_alarm(alarm_rtc_dev, &rtc_alarm);
 		rtc_read_time(alarm_rtc_dev, &rtc_current_rtc_time);
 		rtc_tm_to_time(&rtc_current_rtc_time, &rtc_current_time);
@@ -384,7 +383,6 @@ int alarm_suspend(struct platform_device *pdev, pm_message_t state)
 		if (rtc_current_time + 1 >= rtc_alarm_time) {
 			ANDROID_ALARM_DPRINTF(ANDROID_ALARM_PRINT_INFO,
 					      "alarm about to go off\n");
-			memset(&rtc_alarm, 0, sizeof(rtc_alarm));
 			rtc_alarm.enabled = 0;
 			rtc_set_alarm(alarm_rtc_dev, &rtc_alarm);
 
@@ -405,14 +403,13 @@ err1:
 
 int alarm_resume(struct platform_device *pdev)
 {
-	struct rtc_wkalrm alarm;
+	struct rtc_wkalrm rtc_alarm;
 	ANDROID_ALARM_DPRINTF(ANDROID_ALARM_PRINT_FLOW,
 			      "alarm_resume(%p)\n", pdev);
 	if (alarm_enabled & ANDROID_ALARM_WAKEUP_MASK) {
-		memset(&alarm, 0, sizeof(alarm));
-		alarm.enabled = 0;
-		rtc_alarm_irq_enable(alarm_rtc_dev, 0);
-		rtc_set_alarm(alarm_rtc_dev, &alarm);
+		rtc_read_alarm(alarm_rtc_dev, &rtc_alarm);
+		rtc_alarm.enabled = 0;
+		rtc_set_alarm(alarm_rtc_dev, &rtc_alarm);
 		alarm_start_hrtimer(ANDROID_ALARM_RTC_WAKEUP);
 		alarm_start_hrtimer(ANDROID_ALARM_ELAPSED_REALTIME_WAKEUP);
 	}

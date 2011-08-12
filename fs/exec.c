@@ -1350,7 +1350,7 @@ int do_execve(char * filename,
 	ltt_lite_ev_process(LTT_LITE_EV_PROCESS_EXEC, current);
 #endif
 
-	/* execve succeeded */
+ 	/* execve succeeded */
 	current->fs->in_exec = 0;
 	mutex_unlock(&current->cred_exec_mutex);
 	acct_update_integrals(current);
