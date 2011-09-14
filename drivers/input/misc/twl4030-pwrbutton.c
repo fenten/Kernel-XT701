@@ -71,9 +71,14 @@ static int __devinit twl4030_pwrbutton_probe(struct platform_device *pdev)
 	pwr = input_allocate_device();
 	if (!pwr) {
 		dev_dbg(&pdev->dev, "Can't allocate power button\n");
-		err = -ENOMEM;
-		goto out;
+		return -ENOMEM;
 	}
+
+	pwr->evbit[0] = BIT_MASK(EV_KEY);
+	pwr->keybit[BIT_WORD(KEY_POWER)] = BIT_MASK(KEY_POWER);
+	pwr->name = "twl4030_pwrbutton";
+	pwr->phys = "twl4030_pwrbutton/input0";
+	pwr->dev.parent = &pdev->dev;
 
 	err = request_irq(irq, powerbutton_irq,
 			IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING,
@@ -83,26 +88,20 @@ static int __devinit twl4030_pwrbutton_probe(struct platform_device *pdev)
 		goto free_input_dev;
 	}
 
-	pwr->evbit[0] = BIT_MASK(EV_KEY);
-	pwr->keybit[BIT_WORD(KEY_POWER)] = BIT_MASK(KEY_POWER);
-	pwr->name = "twl4030_pwrbutton";
-	pwr->phys = "twl4030_pwrbutton/input0";
-	pwr->dev.parent = &pdev->dev;
-	platform_set_drvdata(pdev, pwr);
-
 	err = input_register_device(pwr);
 	if (err) {
 		dev_dbg(&pdev->dev, "Can't register power button: %d\n", err);
-		goto free_irq_and_out;
+		goto free_irq;
 	}
+
+	platform_set_drvdata(pdev, pwr);
 
 	return 0;
 
-free_irq_and_out:
+free_irq:
 	free_irq(irq, NULL);
 free_input_dev:
 	input_free_device(pwr);
-out:
 	return err;
 }
 

@@ -22,8 +22,8 @@ config ATMEL_PWM
 	depends on AVR32 || ARCH_AT91SAM9263 || ARCH_AT91SAM9RL || ARCH_AT91CAP9
 	help
 	  This option enables device driver support for the PWM channels
-	  on certain Atmel prcoessors.  Pulse Width Modulation is used for
-	  purposes including software controlled power-efficent backlights
+	  on certain Atmel processors.  Pulse Width Modulation is used for
+	  purposes including software controlled power-efficient backlights
 	  on LCD displays, motor control, and waveform generation.
 
 config ATMEL_TCLIB
@@ -146,7 +146,7 @@ config ATMEL_SSC
 	tristate "Device driver for Atmel SSC peripheral"
 	depends on AVR32 || ARCH_AT91
 	---help---
-	  This option enables device driver support for Atmel Syncronized
+	  This option enables device driver support for Atmel Synchronized
 	  Serial Communication peripheral (SSC).
 
 	  The SSC peripheral supports a wide variety of serial frame based
@@ -196,10 +196,10 @@ config KERNEL_DEBUGGER_CORE
 config SGI_XP
 	tristate "Support communication between SGI SSIs"
 	depends on NET
-	depends on (IA64_GENERIC || IA64_SGI_SN2 || IA64_SGI_UV || X86_64) && SMP
+	depends on (IA64_GENERIC || IA64_SGI_SN2 || IA64_SGI_UV || X86_UV) && SMP
 	select IA64_UNCACHED_ALLOCATOR if IA64_GENERIC || IA64_SGI_SN2
 	select GENERIC_ALLOCATOR if IA64_GENERIC || IA64_SGI_SN2
-	select SGI_GRU if (IA64_GENERIC || IA64_SGI_UV || X86_64) && SMP
+	select SGI_GRU if X86_64 && SMP
 	---help---
 	  An SGI machine can be divided into multiple Single System
 	  Images which act independently of each other and have
@@ -223,7 +223,7 @@ config HP_ILO
 
 config SGI_GRU
 	tristate "SGI GRU driver"
-	depends on (X86_64 || IA64_SGI_UV || IA64_GENERIC) && SMP
+	depends on X86_UV && SMP
 	default n
 	select MMU_NOTIFIER
 	---help---
@@ -257,13 +257,15 @@ config DELL_LAPTOP
 	This driver adds support for rfkill and backlight control to Dell
 	laptops.
 
-config UID_STAT
-	bool "UID based statistics tracking exported to /proc/uid_stat"
-	default n
+config ISL29003
+	tristate "Intersil ISL29003 ambient light sensor"
+	depends on I2C && SYSFS
+	help
+	  If you say yes here you get support for the Intersil ISL29003
+	  ambient light sensor.
 
-config VIB_OMAP_PWM
-	bool "OMAP PWM Vibrator"
-	default n
+	  This driver can also be built as a module.  If so, the module
+	  will be called isl29003.
 
 config VIB_GPIO
 	bool "GPIO Vibrator"
@@ -291,13 +293,20 @@ config SENSORS_LIS331DLH
 	 Say yes here if you wish to include the STI Micro
 	 LIS331DLH accelerometer driver.
 
-config UMTS_SYSPANIC
-        tristate "Motorola UMTS phone syspanic driver"
+config SENSORS_KXTF9
+	tristate "KXTF9 Accelerometer"
 	default n
-        help 
-         This option enables support to detect BP panic from AP, with the syspanic IRQ.
-         Only available on SAM-OMAP platform.
-         say y if your BP support this feature (needed for panic daemon)
+	depends on I2C
+	help
+	 Say yes here if you wish to include the Kionix
+	 KXTF9 accelerometer driver.
+
+config SENSORS_AIRC
+       tristate "Motorola AIRC"
+       default n
+       depends on I2C
+       help
+        Support for the AIRC driver
 
 config WL127X_RFKILL
 	tristate "Bluetooth power control driver for TI wl127x"
@@ -307,12 +316,30 @@ config WL127X_RFKILL
 	 Creates an rfkill entry in sysfs for power control of Bluetooth
 	 TI wl127x chips.
 
-config WL127X_TEST
-	tristate "TI wl127x Bluetooth GPIO test driver for board-sholes"
-	depends on (MACH_SHOLES || MACH_MAPPHONE) && WL127X_RFKILL && BT
+config EP93XX_PWM
+	tristate "EP93xx PWM support"
+	depends on ARCH_EP93XX
+	help
+	  This option enables device driver support for the PWM channels
+	  on the Cirrus EP93xx processors.  The EP9307 chip only has one
+	  PWM channel all the others have two, the second channel is an
+	  alternate function of the EGPIO14 pin.  A sysfs interface is
+	  provided to control the PWM channels.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called ep93xx_pwm.
+
+config UID_STAT
+	bool "UID based statistics tracking exported to /proc/uid_stat"
+	default n
+
+config WL127X_RFKILL
+	tristate "Bluetooth power control driver for TI wl127x"
+	depends on RFKILL
 	default n
 	---help---
-	 Creates sysfs GPIO entries for testing TI wl127x BT on board-sholes.
+	 Creates an rfkill entry in sysfs for power control of Bluetooth
+	 TI wl127x chips.
 
 config APANIC
 	bool "Android kernel panic diagnostics driver"
@@ -321,19 +348,55 @@ config APANIC
 	 Driver which handles kernel panics and attempts to write
 	 critical debugging data to flash.
 
+config APANIC_MMC
+	bool "Android kernel panic diagnostics driver on mmc"
+	default n
+	---help---
+	 Driver which handles kernel panics and attempts to write
+	 critical debugging data through mmc.
+
+config APANIC_MMC_MEMDUMP
+	bool "Android memory dump driver on mmc"
+	depends on APANIC_MMC
+	default n
+	---help---
+	 Driver which handles kernel panics and attempts to write
+	 full memeory dump through mmc.
+
 config APANIC_PLABEL
 	string "Android panic dump flash partition label"
+	depends on APANIC
 	default "kpanic"
 	---help---
 	 If your platform uses a different flash partition label for storing
  	 crashdumps, enter it here.
 
+config VIB_OMAP_PWM
+	bool "OMAP PWM Vibrator"
+	default n
+
+config VIB_PWM
+        bool "PWM Vibrator"
+        default n
+
+config WL127X_TEST
+	tristate "TI wl127x Bluetooth GPIO test driver for board-sholes"
+	depends on (MACH_SHOLES || MACH_MAPPHONE) && WL127X_RFKILL && BT
+	default n
+	---help---
+	 Creates sysfs GPIO entries for testing TI wl127x BT on board-sholes.
+
+config SYSPANIC
+	tristate "SYSPANIC driver used to detect BP panics"
+	default n
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
+source "drivers/misc/cb710/Kconfig"
 source "drivers/misc/ts27010mux/Kconfig"
+source "drivers/misc/modem_pm_driver/Kconfig
+source "drivers/misc/sec/Kconfig"
 source "drivers/misc/netmux/Kconfig"
 source "drivers/misc/netmux_linkdriver/Kconfig"
-source "drivers/misc/modem_pm_driver/Kconfig"
-source "drivers/misc/sec/Kconfig"
 
 endif # MISC_DEVICES

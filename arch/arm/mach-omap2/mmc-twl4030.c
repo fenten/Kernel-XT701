@@ -20,13 +20,9 @@
 #include <linux/regulator/consumer.h>
 
 #include <mach/hardware.h>
-#include <mach/control.h>
-#include <mach/mmc.h>
-#include <mach/board.h>
-#ifdef CONFIG_MMC_EMBEDDED_SDIO
-#include <asm/mach/mmc.h>
-#include <linux/mmc/sdio_ids.h>
-#endif
+#include <plat/control.h>
+#include <plat/mmc.h>
+#include <plat/board.h>
 
 #include "mmc-twl4030.h"
 
@@ -51,40 +47,6 @@ static struct twl_mmc_controller {
 	struct regulator		*vcc_aux;
 	char				name[HSMMC_NAME_LEN + 1];
 } hsmmc[OMAP34XX_NR_MMC];
-
-#ifdef CONFIG_MMC_EMBEDDED_SDIO
-int omap_wifi_status_register(void (*callback)(int card_present,
-                                                void *dev_id), void *dev_id);
-
-static struct sdio_embedded_func wifi_func_array[] = {
-	{
-		.f_class        = SDIO_CLASS_NONE,
-		.f_maxblksize   = 0,
-	},
-	{
-		.f_class        = SDIO_CLASS_WLAN,
-		.f_maxblksize   = 512,
-	},
-};
-
-static struct embedded_sdio_data omap_wifi_emb_data = {
-	.cis    = {
-		.vendor         = 0x104c,
-		.device         = 0x9066,
-		.blksize        = 512,
-		.max_dtr        = 24000000,
-	},
-	.cccr   = {
-		.multi_block    = 1,
-		.low_speed      = 0,
-		.wide_bus       = 1,
-		.high_power     = 0,
-		.high_speed     = 0,
-	},
-	.funcs  = wifi_func_array,
-	.num_funcs = 2,
-};
-#endif
 
 static int twl_mmc_card_detect(int irq)
 {
@@ -157,6 +119,7 @@ static int twl_mmc_late_init(struct device *dev)
 				if (i != 0)
 					break;
 				ret = PTR_ERR(reg);
+				hsmmc[i].vcc = NULL;
 				goto err;
 			}
 			hsmmc[i].vcc = reg;
@@ -169,19 +132,16 @@ static int twl_mmc_late_init(struct device *dev)
 			/* UGLY HACK:  workaround regulator framework bugs.
 			 * When the bootloader leaves a supply active, it's
 			 * initialized with zero usecount ... and we can't
-			 * disable it without first disabling it.  Until the
+			 * disable it without first enabling it.  Until the
 			 * framework is fixed, we need a workaround like this
 			 * (which is safe for MMC, but not in general).
 			 */
 			if (regulator_is_enabled(hsmmc[i].vcc) > 0) {
-				dev_warn(dev, "APPLY REGULATOR HACK for vmmc\n");
 				regulator_enable(hsmmc[i].vcc);
 				regulator_disable(hsmmc[i].vcc);
 			}
 			if (hsmmc[i].vcc_aux) {
 				if (regulator_is_enabled(reg) > 0) {
-					dev_warn(dev, "APPLY REGULATOR HACK "
-						"for vmmc_aux\n");
 					regulator_enable(reg);
 					regulator_disable(reg);
 				}
@@ -206,8 +166,13 @@ done:
 static void twl_mmc_cleanup(struct device *dev)
 {
 	struct omap_mmc_platform_data *mmc = dev->platform_data;
+	int i;
 
 	gpio_free(mmc->slots[0].switch_pin);
+	for(i = 0; i < ARRAY_SIZE(hsmmc); i++) {
+		regulator_put(hsmmc[i].vcc);
+		regulator_put(hsmmc[i].vcc_aux);
+	}
 }
 
 #ifdef CONFIG_PM
@@ -233,10 +198,22 @@ static int twl_mmc_resume(struct device *dev, int slot)
 #define twl_mmc_resume	NULL
 #endif
 
+#if defined(CONFIG_ARCH_OMAP3) && defined(CONFIG_PM)
+
+static int twl4030_mmc_get_context_loss(struct device *dev)
+{
+	/* FIXME: PM DPS not implemented yet */
+	return 0;
+}
+
+#else
+#define twl4030_mmc_get_context_loss NULL
+#endif
+
 static int twl_mmc1_set_power(struct device *dev, int slot, int power_on,
 				int vdd)
 {
-	u32 reg;
+	u32 reg, prog_io;
 	int ret = 0;
 	struct twl_mmc_controller *c = &hsmmc[0];
 	struct omap_mmc_platform_data *mmc = dev->platform_data;
@@ -268,7 +245,14 @@ static int twl_mmc1_set_power(struct device *dev, int slot, int power_on,
 		}
 
 		reg = omap_ctrl_readl(control_pbias_offset);
-		reg |= OMAP2_PBIASSPEEDCTRL0;
+		if (cpu_is_omap3630()) {
+			/* Set MMC I/O to 52Mhz */
+			prog_io = omap_ctrl_readl(OMAP343X_CONTROL_PROG_IO1);
+			prog_io |= OMAP3630_PRG_SDMMC1_SPEEDCTRL;
+			omap_ctrl_writel(prog_io, OMAP343X_CONTROL_PROG_IO1);
+		} else {
+			reg |= OMAP2_PBIASSPEEDCTRL0;
+		}
 		reg &= ~OMAP2_PBIASLITEPWRDNZ0;
 		omap_ctrl_writel(reg, control_pbias_offset);
 
@@ -304,8 +288,19 @@ static int twl_mmc1_set_power(struct device *dev, int slot, int power_on,
 static int twl_mmc23_set_power(struct device *dev, int slot, int power_on, int vdd)
 {
 	int ret = 0;
-	struct twl_mmc_controller *c = &hsmmc[1];
+	struct twl_mmc_controller *c = NULL;
 	struct omap_mmc_platform_data *mmc = dev->platform_data;
+	int i;
+
+	for (i = 1; i < ARRAY_SIZE(hsmmc); i++) {
+		if (mmc == hsmmc[i].mmc) {
+			c = &hsmmc[i];
+			break;
+		}
+	}
+
+	if (c == NULL)
+		return -ENODEV;
 
 	/* If we don't see a Vcc regulator, assume it's a fixed
 	 * voltage always-on regulator.
@@ -352,14 +347,67 @@ static int twl_mmc23_set_power(struct device *dev, int slot, int power_on, int v
 	return ret;
 }
 
+static int twl_mmc1_set_sleep(struct device *dev, int slot, int sleep, int vdd,
+			      int cardsleep)
+{
+	struct twl_mmc_controller *c = &hsmmc[0];
+	int mode = sleep ? REGULATOR_MODE_STANDBY : REGULATOR_MODE_NORMAL;
+
+	return regulator_set_mode(c->vcc, mode);
+}
+
+static int twl_mmc23_set_sleep(struct device *dev, int slot, int sleep, int vdd,
+			       int cardsleep)
+{
+	struct twl_mmc_controller *c = NULL;
+	struct omap_mmc_platform_data *mmc = dev->platform_data;
+	int i, err, mode;
+
+	for (i = 1; i < ARRAY_SIZE(hsmmc); i++) {
+		if (mmc == hsmmc[i].mmc) {
+			c = &hsmmc[i];
+			break;
+		}
+	}
+
+	if (c == NULL)
+		return -ENODEV;
+
+	/*
+	 * If we don't see a Vcc regulator, assume it's a fixed
+	 * voltage always-on regulator.
+	 */
+	if (!c->vcc)
+		return 0;
+
+	mode = sleep ? REGULATOR_MODE_STANDBY : REGULATOR_MODE_NORMAL;
+
+	if (!c->vcc_aux)
+		return regulator_set_mode(c->vcc, mode);
+
+	if (cardsleep) {
+		/* VCC can be turned off if card is asleep */
+		struct regulator *vcc_aux = c->vcc_aux;
+
+		c->vcc_aux = NULL;
+		if (sleep)
+			err = twl_mmc23_set_power(dev, slot, 0, 0);
+		else
+			err = twl_mmc23_set_power(dev, slot, 1, vdd);
+		c->vcc_aux = vcc_aux;
+	} else
+		err = regulator_set_mode(c->vcc, mode);
+	if (err)
+		return err;
+	return regulator_set_mode(c->vcc_aux, mode);
+}
+
 static struct omap_mmc_platform_data *hsmmc_data[OMAP34XX_NR_MMC] __initdata;
 
 void __init twl4030_mmc_init(struct twl4030_hsmmc_info *controllers)
 {
 	struct twl4030_hsmmc_info *c;
 	int nr_hsmmc = ARRAY_SIZE(hsmmc_data);
-
-	printk("%s:%d\n", __func__, __LINE__);
 
 	if (cpu_is_omap2430()) {
 		control_pbias_offset = OMAP243X_CONTROL_PBIAS_LITE;
@@ -374,7 +422,6 @@ void __init twl4030_mmc_init(struct twl4030_hsmmc_info *controllers)
 		struct twl_mmc_controller *twl = hsmmc + c->mmc - 1;
 		struct omap_mmc_platform_data *mmc = hsmmc_data[c->mmc - 1];
 
-		printk("%s:%d\n", __func__, __LINE__);
 		if (!c->mmc || c->mmc > nr_hsmmc) {
 			pr_debug("MMC%d: no such controller\n", c->mmc);
 			continue;
@@ -393,19 +440,8 @@ void __init twl4030_mmc_init(struct twl4030_hsmmc_info *controllers)
 		if (c->name)
 			strncpy(twl->name, c->name, HSMMC_NAME_LEN);
 		else
-			sprintf(twl->name, "mmc%islot%i", c->mmc, 1);
-
-#ifdef CONFIG_MMC_EMBEDDED_SDIO
-		if (c->mmc == CONFIG_TIWLAN_MMC_CONTROLLER) {
-			mmc->slots[0].embedded_sdio = &omap_wifi_emb_data;
-			mmc->slots[0].register_status_notify = &omap_wifi_status_register;
-		}
-#else
-#ifdef CONFIG_TIWLAN_SDIO
-		if (c->mmc == CONFIG_TIWLAN_MMC_CONTROLLER)
-			mmc->name = "TIWLAN_SDIO";
-#endif
-#endif
+			snprintf(twl->name, ARRAY_SIZE(twl->name),
+				"mmc%islot%i", c->mmc, 1);
 		mmc->slots[0].name = twl->name;
 		mmc->nr_slots = 1;
 		mmc->slots[0].wires = c->wires;
@@ -428,6 +464,9 @@ void __init twl4030_mmc_init(struct twl4030_hsmmc_info *controllers)
 		} else
 			mmc->slots[0].switch_pin = -EINVAL;
 
+		mmc->get_context_loss_count =
+				twl4030_mmc_get_context_loss;
+
 		/* write protect normally uses an OMAP gpio */
 		if (gpio_is_valid(c->gpio_wp)) {
 			gpio_request(c->gpio_wp, "mmc_wp");
@@ -437,6 +476,12 @@ void __init twl4030_mmc_init(struct twl4030_hsmmc_info *controllers)
 			mmc->slots[0].get_ro = twl_mmc_get_ro;
 		} else
 			mmc->slots[0].gpio_wp = -EINVAL;
+
+		if (c->nonremovable)
+			mmc->slots[0].nonremovable = 1;
+
+		if (c->power_saving)
+			mmc->slots[0].power_saving = 1;
 
 		/* NOTE:  MMC slots should have a Vcc regulator set up.
 		 * This may be from a TWL4030-family chip, another
@@ -450,6 +495,13 @@ void __init twl4030_mmc_init(struct twl4030_hsmmc_info *controllers)
 		case 1:
 			/* on-chip level shifting via PBIAS0/PBIAS1 */
 			mmc->slots[0].set_power = twl_mmc1_set_power;
+			mmc->slots[0].set_sleep = twl_mmc1_set_sleep;
+
+			/* Omap3630 HSMMC1 supports only 4-bit */
+			if (cpu_is_omap3630() && c->wires > 4) {
+				c->wires = 4;
+				mmc->slots[0].wires = c->wires;
+			}
 			break;
 		case 2:
 			if (c->ext_clock)
@@ -460,6 +512,7 @@ void __init twl4030_mmc_init(struct twl4030_hsmmc_info *controllers)
 		case 3:
 			/* off-chip level shifting, or none */
 			mmc->slots[0].set_power = twl_mmc23_set_power;
+			mmc->slots[0].set_sleep = twl_mmc23_set_sleep;
 			break;
 		default:
 			pr_err("MMC%d configuration not supported!\n", c->mmc);

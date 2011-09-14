@@ -1,7 +1,7 @@
 /******************************************************************************
  * NetMUX register.h                                                          *
  *                                                                            *
- * Copyright (C) 2006-2008 Motorola, Inc.                                     *
+ * Copyright (C) 2006-2010 Motorola, Inc.                                     *
  *                                                                            *
  * Redistribution and use in source and binary forms, with or without         *
  * modification, are permitted provided that the following conditions are     *
@@ -38,6 +38,7 @@
  *                           code is identical between AP and BP.             *
  *   2008/04/10  Motorola    Add proc_fs for AP Log re-work                   *
  *   2008/07/16  Motorola    Add NetmuxLogInit declaration for AP config log  *
+ *   2010/04/28  Motorola    Format cleanup                                   *
  ******************************************************************************/
 
 /* register.h defines data types used by register.c. The types may very based */
@@ -72,14 +73,16 @@
 #define REGISTER_CONNECTIVITY_MINCH 1
 #define REGISTER_CONNECTIVITY_MAXCH 47
 /*
- * The definitions define where to retrieve the NetMUX channel configuration info
+ * The definitions define where to retrieve the NetMUX
+ * channel configuration info
  */
 #define REGISTER_CONFIGDATA_COUNT netmux_configdata_count
 #define REGISTER_CONFIGDATA       netmux_configdata
 
 
 /*
- * INTERFACELIST holds a list of link drivers that are associated with MUX objects
+ * INTERFACELIST holds a list of link drivers that
+ * are associated with MUX objects
  * A brief description follows below.
  *
  * muxinterface defines the interface to the MUX
@@ -92,27 +95,26 @@
  * connectivity points to a connectivity interface for this connection
  * next points to the next defined interface
  */
-typedef struct INTERFACELIST
-{
-    INTERFACEMUX  muxinterface;
-    INTERFACELINK linkinterface;
-    MUX*          mux;
+typedef struct INTERFACELIST {
+	INTERFACEMUX muxinterface;
+	INTERFACELINK linkinterface;
+	MUX *mux;
 
-    CONFIGINTERFACE*  config;
+	CONFIGINTERFACE *config;
 
-    void* direct;
-    void* network;
-    void* tty;
-    void* connectivity;
+	void *direct;
+	void *network;
+	void *tty;
+	void *connectivity;
 
-    struct INTERFACELIST* next;
-}INTERFACELIST;
+	struct INTERFACELIST *next;
+} INTERFACELIST;
 
 
 /*
  * Define variables that must be defined in channelconfig.c
  */
-extern int32      netmux_configdata_count;
+extern int32 netmux_configdata_count;
 extern CONFIGDATA netmux_configdata[];
 
 
@@ -120,10 +122,10 @@ extern CONFIGDATA netmux_configdata[];
  * Define various functions defined in register.c
  */
 
-int32 RegisterMUXLink   (INTERFACELINK*, INTERFACEMUX*);
-int32 UnregisterMUXLink (void*);
-int32 ActivateMUX       (MUX*, INTERFACELIST*);
-void  DeactivateMUX     (INTERFACELIST*);
-void  NetmuxLogInit	(void);
+int32 RegisterMUXLink(INTERFACELINK *, INTERFACEMUX *);
+int32 UnregisterMUXLink(void *);
+int32 ActivateMUX(MUX *, INTERFACELIST *);
+void DeactivateMUX(INTERFACELIST *);
+void NetmuxLogInit(void);
 
 #endif

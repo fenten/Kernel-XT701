@@ -50,13 +50,7 @@ static inline void vmalloc_init(void)
 }
 #endif
 
-/* CONFIG_MEMLEAK_BLD is only for built-in code */
-#if !defined(CONFIG_MEMLEAK_BLD) || defined(MODULE)
 extern void *vmalloc(unsigned long size);
-#else
-extern void *memleak_vmalloc(unsigned long size);
-#define vmalloc(size) memleak_vmalloc(size)
-#endif
 extern void *vmalloc_user(unsigned long size);
 extern void *vmalloc_node(unsigned long size, int node);
 extern void *vmalloc_exec(unsigned long size);
@@ -65,13 +59,7 @@ extern void *vmalloc_32_user(unsigned long size);
 extern void *__vmalloc(unsigned long size, gfp_t gfp_mask, pgprot_t prot);
 extern void *__vmalloc_area(struct vm_struct *area, gfp_t gfp_mask,
 				pgprot_t prot);
-/* CONFIG_MEMLEAK_BLD is only for built-in code */
-#if !defined(CONFIG_MEMLEAK_BLD) || defined(MODULE)
 extern void vfree(const void *addr);
-#else
-extern void memleak_vfree(void *addr);
-#define vfree(addr) memleak_vfree(addr)
-#endif
 
 extern void *vmap(struct page **pages, unsigned int count,
 			unsigned long flags, pgprot_t prot);
@@ -107,6 +95,9 @@ extern struct vm_struct *remove_vm_area(const void *addr);
 
 extern int map_vm_area(struct vm_struct *area, pgprot_t prot,
 			struct page ***pages);
+extern int map_kernel_range_noflush(unsigned long start, unsigned long size,
+				    pgprot_t prot, struct page **pages);
+extern void unmap_kernel_range_noflush(unsigned long addr, unsigned long size);
 extern void unmap_kernel_range(unsigned long addr, unsigned long size);
 
 /* Allocate/destroy a 'vmalloc' VM area. */
@@ -122,5 +113,14 @@ extern long vwrite(char *buf, char *addr, unsigned long count);
  */
 extern rwlock_t vmlist_lock;
 extern struct vm_struct *vmlist;
+extern __init void vm_area_register_early(struct vm_struct *vm, size_t align);
+
+#ifndef CONFIG_HAVE_LEGACY_PER_CPU_AREA
+struct vm_struct **pcpu_get_vm_areas(const unsigned long *offsets,
+				     const size_t *sizes, int nr_vms,
+				     size_t align, gfp_t gfp_mask);
+#endif
+
+void pcpu_free_vm_areas(struct vm_struct **vms, int nr_vms);
 
 #endif /* _LINUX_VMALLOC_H */

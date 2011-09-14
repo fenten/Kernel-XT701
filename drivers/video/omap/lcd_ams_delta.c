@@ -1,6 +1,4 @@
 /*
- * File: drivers/video/omap/lcd_ams_delta.c
- *
  * Based on drivers/video/omap/lcd_inn1510.c
  *
  * LCD panel support for the Amstrad E3 (Delta) videophone.
@@ -24,13 +22,13 @@
 
 #include <linux/module.h>
 #include <linux/platform_device.h>
-#include <linux/omapfb.h>
+#include <linux/io.h>
+#include <linux/delay.h>
 
-#include <asm/delay.h>
-#include <asm/io.h>
-
-#include <mach/board-ams-delta.h>
+#include <plat/board-ams-delta.h>
 #include <mach/hardware.h>
+
+#include "omapfb.h"
 
 #define AMS_DELTA_DEFAULT_CONTRAST	112
 

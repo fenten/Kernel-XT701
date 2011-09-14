@@ -85,4 +85,3 @@ static void(*error)(char *m);
 #endif /* STATIC */
 
 #endif /* DECOMPR_MM_H */
-

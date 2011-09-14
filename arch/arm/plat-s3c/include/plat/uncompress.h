@@ -90,7 +90,10 @@ static inline void flush(void)
 {
 }
 
-#define __raw_writel(d,ad) do { *((volatile unsigned int *)(ad)) = (d); } while(0)
+#define __raw_writel(d, ad)			\
+	do {							\
+		*((volatile unsigned int __force *)(ad)) = (d); \
+	} while (0)
 
 /* CONFIG_S3C_BOOT_WATCHDOG
  *
@@ -137,7 +140,7 @@ static void arch_decomp_error(const char *x)
 #define arch_error arch_decomp_error
 #endif
 
-//static void error(char *err);
+static void error(char *err);
 
 #ifdef CONFIG_S3C_BOOT_UART_FORCE_FIFO
 static inline void arch_enable_uart_fifo(void)

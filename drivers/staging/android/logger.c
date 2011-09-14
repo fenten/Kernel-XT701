@@ -17,22 +17,22 @@
  * GNU General Public License for more details.
  */
 
+#include <linux/sched.h>
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/miscdevice.h>
 #include <linux/uaccess.h>
 #include <linux/poll.h>
 #include <linux/time.h>
-#ifdef CONFIG_LTT_LITE
-#include <linux/lttlite-events.h>
-#endif
 #include "logger.h"
 
 #include <asm/ioctls.h>
+/* IKMSIFROYO-52 : vktx63 : Enable kernel log */
 #define KERNEL_LOG
 #ifdef KERNEL_LOG
 #include <linux/console.h>
 #endif
+/* IKMSIFROYO-52 : vktx63 : Enable kernel log */
 /*
  * struct logger_log - represents a specific log, such as 'main' or 'radio'
  *
@@ -41,7 +41,7 @@
  * mutex 'mutex'.
  */
 struct logger_log {
-	unsigned char *		buffer;	/* the ring buffer itself */
+	unsigned char 		*buffer;/* the ring buffer itself */
 	struct miscdevice	misc;	/* misc device representing the log */
 	wait_queue_head_t	wq;	/* wait queue for readers */
 	struct list_head	readers; /* this log's readers */
@@ -58,11 +58,12 @@ struct logger_log {
  * reference counting. The structure is protected by log->mutex.
  */
 struct logger_reader {
-	struct logger_log *	log;	/* associated log */
+	struct logger_log	*log;	/* associated log */
 	struct list_head	list;	/* entry in logger_log's list */
 	size_t			r_off;	/* current read head offset */
 };
 
+/* IKMSIFROYO-52 : vktx63 : Enable kernel log */
 #ifdef KERNEL_LOG
 static void logger_kernel_write(struct console *co, const char *s, unsigned count);
 static struct console loggercons = {
@@ -72,7 +73,7 @@ static struct console loggercons = {
     index:	-1,
 };
 #endif
-int Filter_Mot_Log_Enable = 1;
+/* IKMSIFROYO-52 : vktx63 : Enable kernel log */
 
 /* logger_offset - returns index 'n' into the log via (optimized) modulus */
 #define logger_offset(n)	((n) & (log->size - 1))
@@ -91,7 +92,7 @@ int Filter_Mot_Log_Enable = 1;
  * file->logger_log. Thus what file->private_data points at depends on whether
  * or not the file was opened for reading. This function hides that dirtiness.
  */
-static inline struct logger_log * file_get_log(struct file *file)
+static inline struct logger_log *file_get_log(struct file *file)
 {
 	if (file->f_mode & FMODE_READ) {
 		struct logger_reader *reader = file->private_data;
@@ -302,7 +303,7 @@ static void do_write_log(struct logger_log *log, const void *buf, size_t count)
 		memcpy(log->buffer, buf + len, count - len);
 
 	log->w_off = logger_offset(log->w_off + count);
-	
+
 }
 
 /*
@@ -345,20 +346,6 @@ ssize_t logger_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	struct timespec now;
 	ssize_t ret = 0;
 
-#ifdef CONFIG_LTT_LITE
-#ifdef CONFIG_LTT_LITE_ANDROID_LOG
-	/*
-	 * If LTT-lite logging for Android messages is enabled, the LTT Lite
-	 * driver will aggregate the Android log message with LTT-lite kernel
-	 * trace data.
-	 * The 5th character of the log name is an indicator of a specific
-	 * Android log, stream, each of which has a different payload format
-	 * and must be differentiated.
-	 */
-	if (ltt_lite_log_android(iov, nr_segs, log->misc.name[4]))
-		return 0;
-#endif
-#endif
 	now = current_kernel_time();
 
 	header.pid = current->tgid;
@@ -401,18 +388,7 @@ ssize_t logger_aio_write(struct kiocb *iocb, const struct iovec *iov,
 		iov++;
 		ret += nr;
 	}
-	if (Filter_Mot_Log_Enable) {
-		size_t len = 0;
-		len = sizeof(struct logger_entry) + 1;
-		if ((*(log->buffer+logger_offset(orig+len)) == 'M')
-		&& (*(log->buffer+logger_offset(orig+len+1)) == 'O')
-		&& (*(log->buffer+logger_offset(orig+len+2)) == 'T')
-		&& (*(log->buffer+logger_offset(orig+len+3)) == '_')) {
-			log->w_off = orig;
-			mutex_unlock(&log->mutex);
-			return ret;
-		}
-	}
+
 	mutex_unlock(&log->mutex);
 
 	/* wake up any blocked readers */
@@ -421,7 +397,7 @@ ssize_t logger_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	return ret;
 }
 
-static struct logger_log * get_log_from_minor(int);
+static struct logger_log *get_log_from_minor(int);
 
 /*
  * logger_open - the log's open() file operation
@@ -506,7 +482,7 @@ static unsigned int logger_poll(struct file *file, poll_table *wait)
 	if (log->w_off != reader->r_off)
 		ret |= POLLIN | POLLRDNORM;
 	mutex_unlock(&log->mutex);
-	
+
 	return ret;
 }
 
@@ -554,15 +530,6 @@ static long logger_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		log->head = log->w_off;
 		ret = 0;
 		break;
-	case LOGGER_FILTER_MOT_LOG_ENABLE:
-		Filter_Mot_Log_Enable = 1;
-		ret = 0;
-		break;
-	case LOGGER_FILTER_MOT_LOG_DISABLE:
-		Filter_Mot_Log_Enable = 0;
-		ret = 0;
-		break;
-
 	}
 
 	mutex_unlock(&log->mutex);
@@ -570,7 +537,7 @@ static long logger_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	return ret;
 }
 
-static struct file_operations logger_fops = {
+static const struct file_operations logger_fops = {
 	.owner = THIS_MODULE,
 	.read = logger_read,
 	.aio_write = logger_aio_write,
@@ -609,6 +576,7 @@ DEFINE_LOGGER_DEVICE(log_events, LOGGER_LOG_EVENTS, 256*1024)
 DEFINE_LOGGER_DEVICE(log_radio, LOGGER_LOG_RADIO, 64*1024)
 DEFINE_LOGGER_DEVICE(log_system, LOGGER_LOG_SYSTEM, 64*1024)
 
+/* IKMSIFROYO-52 : vktx63 : Enable kernel log */
 #ifdef KERNEL_LOG
 static struct file_operations kernel_logger_fops = {
         .owner = THIS_MODULE,
@@ -664,7 +632,7 @@ static void logger_kernel_write(struct console *co, const char *s, unsigned coun
 		case '5': prio=4;break;
 		case '6': prio=4;break;
 		case '7': prio=3;break;
-		default:  prio=3;	
+		default:  prio=3;
 	}*/
         vec[0].iov_base = (unsigned char *) &prio;
         vec[0].iov_len  = 1;
@@ -712,8 +680,9 @@ static void logger_kernel_write(struct console *co, const char *s, unsigned coun
 
 
 #endif
+/* IKMSIFROYO-52 : vktx63 : Enable kernel log */
 
-static struct logger_log * get_log_from_minor(int minor)
+static struct logger_log *get_log_from_minor(int minor)
 {
 	if (log_main.misc.minor == minor)
 		return &log_main;
@@ -723,10 +692,12 @@ static struct logger_log * get_log_from_minor(int minor)
 		return &log_radio;
 	if (log_system.misc.minor == minor)
 		return &log_system;
+/* IKMSIFROYO-52 : vktx63 : Enable kernel log */
 #ifdef KERNEL_LOG
 	if (log_kernel.misc.minor == minor)
 		return &log_kernel;
 #endif
+/* IKMSIFROYO-52 : vktx63 : Enable kernel log */
 	return NULL;
 }
 
@@ -762,18 +733,20 @@ static int __init logger_init(void)
 	ret = init_log(&log_radio);
 	if (unlikely(ret))
 		goto out;
+
 	ret = init_log(&log_system);
 	if (unlikely(ret))
 		goto out;
+/* IKMSIFROYO-52 : vktx63 : Enable kernel log */
 #ifdef KERNEL_LOG
 	ret = init_log(&log_kernel);
         if (unlikely(ret))
                 goto out;
 	register_console(&loggercons);
 #endif
+/* IKMSIFROYO-52 : vktx63 : Enable kernel log */
+
 out:
 	return ret;
 }
 device_initcall(logger_init);
-
-

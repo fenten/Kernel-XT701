@@ -25,12 +25,24 @@
 #include <linux/io.h>
 
 #include <asm/mach/flash.h>
-#include <mach/onenand.h>
-#include <mach/board.h>
-#include <mach/gpmc.h>
-#include <mach/nand.h>
+#include <plat/board.h>
+#include <plat/gpmc.h>
+#include <plat/nand.h>
+
+#include <linux/of.h>
+#include <mach/dt_path.h>
 
 #define NAND_GPMC_CS		0
+#define GPMC_CS0_BASE  0x60
+#define GPMC_CS_SIZE   0x30
+
+////////////////////////////////////////////////////////////////////
+// Adding by no change device tree
+
+/* Feature Node */
+#define DT_HIGH_LEVEL_FEATURE	"/System@0/Feature@0"
+#define DT_HIGH_LEVEL_FEATURE_NO_NAND "feature_no_nand"
+////////////////////////////////////////////////////////////////////
 
 static struct mtd_partition sdp_nand_partitions[] = {
 	/* All the partition sizes are listed in terms of NAND block size */
@@ -108,6 +120,18 @@ static int omap_nand_dev_ready(struct omap_nand_platform_data *data)
  */
 void __init mapphone_flash_init(void)
 {
+	struct device_node *feature_node;
+	const void *nand_prop;
+
+	/* If this phone doesn't have a NAND, don't waste time probing it */
+	feature_node = of_find_node_by_path(DT_HIGH_LEVEL_FEATURE);
+	if (feature_node != NULL) {
+		nand_prop = of_get_property(feature_node,
+			DT_HIGH_LEVEL_FEATURE_NO_NAND, NULL);
+		if (nand_prop != NULL && *(u8 *)nand_prop == 1)
+			return;
+	}
+
 	/* We know the RDY/BSY line is connected now */
 	sdp_nand_data.dev_ready = omap_nand_dev_ready;
 

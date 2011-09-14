@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Motorola, Inc.
+ * Copyright (C) 2009-2010 Motorola, Inc.
  *
  * This program is free dispware; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -41,7 +41,6 @@ static void af_led_set(struct led_classdev *led_cdev,
 			 af_led_class_dev);
 
 	if (value > 0) {
-		/*Set max bright level.*/
 		/* need to add dynamic control */
 		brightness = LD_MSG_IND_CPCAP_MASK >> 2;
 
@@ -51,37 +50,23 @@ static void af_led_set(struct led_classdev *led_cdev,
 			af_led_data->regulator_state = 1;
 		}
 
-		/*cpcap_uc_stop(af_led_data->cpcap, CPCAP_MACRO_6);*/
-
 		cpcap_status = cpcap_regacc_write(af_led_data->cpcap,
-			CPCAP_REG_REDC, brightness, LD_MSG_IND_CPCAP_MASK);
+			  CPCAP_REG_REDC, brightness, LD_MSG_IND_CPCAP_MASK);
 		if (cpcap_status < 0)
 			pr_err("%s: Writing to the register failed for %i\n",
 			       __func__, cpcap_status);
+
 	} else {
+		brightness = 0;
+
 		if ((af_led_data->regulator) &&
 		    (af_led_data->regulator_state == 1)) {
 			regulator_disable(af_led_data->regulator);
 			af_led_data->regulator_state = 0;
 		}
 
-		/* Due to a HW issue turn off the current then
-		turn off the duty cycle */
-		brightness = 1;
-
-		/*cpcap_uc_start(af_led_data->cpcap, CPCAP_MACRO_6);*/
-		/*cpcap_uc_start(af_led_data->cpcap, CPCAP_MACRO_4);*/
-
 		cpcap_status = cpcap_regacc_write(af_led_data->cpcap,
-			CPCAP_REG_REDC, brightness, LD_MSG_IND_CPCAP_MASK);
-		if (cpcap_status < 0)
-			pr_err("%s: Writing to the register failed for %i\n",
-			       __func__, cpcap_status);
-
-		brightness = 0;
-
-		cpcap_status = cpcap_regacc_write(af_led_data->cpcap,
-			CPCAP_REG_REDC, brightness, LD_MSG_IND_CPCAP_MASK);
+			  CPCAP_REG_REDC, brightness, LD_MSG_IND_CPCAP_MASK);
 		if (cpcap_status < 0)
 			pr_err("%s: Writing to the register failed for %i\n",
 			       __func__, cpcap_status);
@@ -109,7 +94,7 @@ static int af_probe(struct platform_device *pdev)
 	info->cpcap = pdev->dev.platform_data;
 	platform_set_drvdata(pdev, info);
 
-	info->regulator = regulator_get(&pdev->dev, LD_SUPPLY);
+	info->regulator = regulator_get(NULL, LD_SUPPLY);
 	if (IS_ERR(info->regulator)) {
 		pr_err("%s: Cannot get %s regulator\n", __func__, LD_SUPPLY);
 		ret = PTR_ERR(info->regulator);
@@ -158,7 +143,7 @@ static struct platform_driver ld_af_driver = {
 
 static int __init led_af_init(void)
 {
-	return platform_driver_register(&ld_af_driver);
+	return cpcap_driver_register(&ld_af_driver);
 }
 
 static void __exit led_af_exit(void)

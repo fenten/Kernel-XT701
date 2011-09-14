@@ -28,8 +28,9 @@
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/seq_file.h>
+#include <linux/clk.h>
 
-#include <mach/display.h>
+#include <plat/display.h>
 #include "dss.h"
 
 #define DSS_BASE			0x48050000
@@ -59,6 +60,13 @@ struct dss_reg {
 
 static struct {
 	void __iomem    *base;
+
+	struct clk	*dpll4_m4_ck;
+
+	unsigned long	cache_req_pck;
+	unsigned long	cache_prate;
+	struct dss_clock_info cache_dss_cinfo;
+	struct dispc_clock_info cache_dispc_cinfo;
 
 	u32		ctx[DSS_SZ_REGS / sizeof(u32)];
 } dss;
@@ -130,8 +138,10 @@ void dss_sdi_init(u8 datapairs)
 	dss_write_reg(DSS_PLL_CONTROL, l);
 }
 
-void dss_sdi_enable(void)
+int dss_sdi_enable(void)
 {
+	unsigned long timeout;
+
 	dispc_pck_free_enable(1);
 
 	/* Reset SDI PLL */
@@ -142,21 +152,48 @@ void dss_sdi_enable(void)
 	REG_FLD_MOD(DSS_PLL_CONTROL, 1, 28, 28); /* SDI_PLL_GOBIT */
 
 	/* Waiting for PLL lock request to complete */
-	while (dss_read_reg(DSS_SDI_STATUS) & (1 << 6))
-		;
+	timeout = jiffies + msecs_to_jiffies(500);
+	while (dss_read_reg(DSS_SDI_STATUS) & (1 << 6)) {
+		if (time_after_eq(jiffies, timeout)) {
+			DSSERR("PLL lock request timed out\n");
+			goto err1;
+		}
+	}
 
 	/* Clearing PLL_GO bit */
 	REG_FLD_MOD(DSS_PLL_CONTROL, 0, 28, 28);
 
 	/* Waiting for PLL to lock */
-	while (!(dss_read_reg(DSS_SDI_STATUS) & (1 << 5)))
-		;
+	timeout = jiffies + msecs_to_jiffies(500);
+	while (!(dss_read_reg(DSS_SDI_STATUS) & (1 << 5))) {
+		if (time_after_eq(jiffies, timeout)) {
+			DSSERR("PLL lock timed out\n");
+			goto err1;
+		}
+	}
 
 	dispc_lcd_enable_signal(1);
 
 	/* Waiting for SDI reset to complete */
-	while (!(dss_read_reg(DSS_SDI_STATUS) & (1 << 2)))
-		;
+	timeout = jiffies + msecs_to_jiffies(500);
+	while (!(dss_read_reg(DSS_SDI_STATUS) & (1 << 2))) {
+		if (time_after_eq(jiffies, timeout)) {
+			DSSERR("SDI reset timed out\n");
+			goto err2;
+		}
+	}
+
+	return 0;
+
+ err2:
+	dispc_lcd_enable_signal(0);
+ err1:
+	/* Reset SDI PLL */
+	REG_FLD_MOD(DSS_PLL_CONTROL, 0, 18, 18); /* SDI_PLL_SYSRESET */
+
+	dispc_pck_free_enable(0);
+
+	return -ETIMEDOUT;
 }
 
 void dss_sdi_disable(void)
@@ -167,6 +204,28 @@ void dss_sdi_disable(void)
 
 	/* Reset SDI PLL */
 	REG_FLD_MOD(DSS_PLL_CONTROL, 0, 18, 18); /* SDI_PLL_SYSRESET */
+}
+
+void dss_dump_clocks(struct seq_file *s)
+{
+	unsigned long dpll4_ck_rate;
+	unsigned long dpll4_m4_ck_rate;
+
+	dss_clk_enable(DSS_CLK_ICK | DSS_CLK_FCK1);
+
+	dpll4_ck_rate = clk_get_rate(clk_get_parent(dss.dpll4_m4_ck));
+	dpll4_m4_ck_rate = clk_get_rate(dss.dpll4_m4_ck);
+
+	seq_printf(s, "- DSS -\n");
+
+	seq_printf(s, "dpll4_ck %lu\n", dpll4_ck_rate);
+
+	seq_printf(s, "dss1_alwon_fclk = %lu / %lu * 2 = %lu\n",
+			dpll4_ck_rate,
+			dpll4_ck_rate / dpll4_m4_ck_rate,
+			dss_clk_get_rate(DSS_CLK_FCK1));
+
+	dss_clk_disable(DSS_CLK_ICK | DSS_CLK_FCK1);
 }
 
 void dss_dump_regs(struct seq_file *s)
@@ -206,6 +265,182 @@ int dss_get_dispc_clk_source(void)
 {
 	return FLD_GET(dss_read_reg(DSS_CONTROL), 0, 0);
 }
+
+/* calculate clock rates using dividers in cinfo */
+int dss_calc_clock_rates(struct dss_clock_info *cinfo)
+{
+	unsigned long prate;
+
+	if (cinfo->fck_div > 16 || cinfo->fck_div == 0)
+		return -EINVAL;
+
+	prate = clk_get_rate(clk_get_parent(dss.dpll4_m4_ck));
+
+	cinfo->fck = prate / cinfo->fck_div;
+
+	return 0;
+}
+
+int dss_set_clock_div(struct dss_clock_info *cinfo)
+{
+	unsigned long prate;
+	int r;
+
+	if (cpu_is_omap34xx()) {
+		prate = clk_get_rate(clk_get_parent(dss.dpll4_m4_ck));
+		DSSDBG("dpll4_m4 = %ld\n", prate);
+
+		r = clk_set_rate(dss.dpll4_m4_ck, prate / cinfo->fck_div);
+		if (r)
+			return r;
+	}
+
+	DSSDBG("fck = %ld (%d)\n", cinfo->fck, cinfo->fck_div);
+
+	return 0;
+}
+
+int dss_get_clock_div(struct dss_clock_info *cinfo)
+{
+	cinfo->fck = dss_clk_get_rate(DSS_CLK_FCK1);
+
+	if (cpu_is_omap34xx()) {
+		unsigned long prate;
+		prate = clk_get_rate(clk_get_parent(dss.dpll4_m4_ck));
+		cinfo->fck_div = prate / (cinfo->fck / 2);
+	} else {
+		cinfo->fck_div = 0;
+	}
+
+	return 0;
+}
+
+unsigned long dss_get_dpll4_rate(void)
+{
+	if (cpu_is_omap34xx())
+		return clk_get_rate(clk_get_parent(dss.dpll4_m4_ck));
+	else
+		return 0;
+}
+
+int dss_calc_clock_div(bool is_tft, unsigned long req_pck,
+		struct dss_clock_info *dss_cinfo,
+		struct dispc_clock_info *dispc_cinfo)
+{
+	unsigned long prate;
+	struct dss_clock_info best_dss;
+	struct dispc_clock_info best_dispc;
+
+	unsigned long fck;
+
+	u16 fck_div;
+
+	int match = 0;
+	int min_fck_per_pck;
+
+	prate = dss_get_dpll4_rate();
+
+	fck = dss_clk_get_rate(DSS_CLK_FCK1);
+	if (req_pck == dss.cache_req_pck &&
+			((cpu_is_omap34xx() && prate == dss.cache_prate) ||
+			 dss.cache_dss_cinfo.fck == fck)) {
+		DSSDBG("dispc clock info found from cache.\n");
+		*dss_cinfo = dss.cache_dss_cinfo;
+		*dispc_cinfo = dss.cache_dispc_cinfo;
+		return 0;
+	}
+
+	min_fck_per_pck = CONFIG_OMAP2_DSS_MIN_FCK_PER_PCK;
+
+	if (min_fck_per_pck &&
+		req_pck * min_fck_per_pck > DISPC_MAX_FCK) {
+		DSSERR("Requested pixel clock not possible with the current "
+				"OMAP2_DSS_MIN_FCK_PER_PCK setting. Turning "
+				"the constraint off.\n");
+		min_fck_per_pck = 0;
+	}
+
+retry:
+	memset(&best_dss, 0, sizeof(best_dss));
+	memset(&best_dispc, 0, sizeof(best_dispc));
+
+	if (cpu_is_omap24xx()) {
+		struct dispc_clock_info cur_dispc;
+		/* XXX can we change the clock on omap2? */
+		fck = dss_clk_get_rate(DSS_CLK_FCK1);
+		fck_div = 1;
+
+		dispc_find_clk_divs(is_tft, req_pck, fck, &cur_dispc);
+		match = 1;
+
+		best_dss.fck = fck;
+		best_dss.fck_div = fck_div;
+
+		best_dispc = cur_dispc;
+
+		goto found;
+	} else if (cpu_is_omap34xx()) {
+		for (fck_div = 16; fck_div > 0; --fck_div) {
+			struct dispc_clock_info cur_dispc;
+
+			fck = prate / fck_div * 2;
+
+			if (fck > DISPC_MAX_FCK)
+				continue;
+
+			if (min_fck_per_pck &&
+					fck < req_pck * min_fck_per_pck)
+				continue;
+
+			match = 1;
+
+			dispc_find_clk_divs(is_tft, req_pck, fck, &cur_dispc);
+
+			if (abs(cur_dispc.pck - req_pck) <
+					abs(best_dispc.pck - req_pck)) {
+
+				best_dss.fck = fck;
+				best_dss.fck_div = fck_div;
+
+				best_dispc = cur_dispc;
+
+				if (cur_dispc.pck == req_pck)
+					goto found;
+			}
+		}
+	} else {
+		BUG();
+	}
+
+found:
+	if (!match) {
+		if (min_fck_per_pck) {
+			DSSERR("Could not find suitable clock settings.\n"
+					"Turning FCK/PCK constraint off and"
+					"trying again.\n");
+			min_fck_per_pck = 0;
+			goto retry;
+		}
+
+		DSSERR("Could not find suitable clock settings.\n");
+
+		return -EINVAL;
+	}
+
+	if (dss_cinfo)
+		*dss_cinfo = best_dss;
+	if (dispc_cinfo)
+		*dispc_cinfo = best_dispc;
+
+	dss.cache_req_pck = req_pck;
+	dss.cache_prate = prate;
+	dss.cache_dss_cinfo = best_dss;
+	dss.cache_dispc_cinfo = best_dispc;
+
+	return 0;
+}
+
+
 
 static irqreturn_t dss_irq_handler_omap2(int irq, void *arg)
 {
@@ -319,6 +554,7 @@ int dss_init(bool skip_init)
 	 * issue if skip_init is true, as resetting the dss block would clear
 	 * these interupts anyway */
 	omap_writel(0, 0x4804FC1C);
+	omap_writel(0, 0x4805041C);
 #endif
 
 	r = request_irq(INT_24XX_DSS_IRQ,
@@ -332,6 +568,15 @@ int dss_init(bool skip_init)
 		goto fail1;
 	}
 
+	if (cpu_is_omap34xx()) {
+		dss.dpll4_m4_ck = clk_get(NULL, "dpll4_m4_ck");
+		if (IS_ERR(dss.dpll4_m4_ck)) {
+			DSSERR("Failed to get dpll4_m4_ck\n");
+			r = PTR_ERR(dss.dpll4_m4_ck);
+			goto fail2;
+		}
+	}
+
 	dss_save_context();
 
 	rev = dss_read_reg(DSS_REVISION);
@@ -340,6 +585,8 @@ int dss_init(bool skip_init)
 
 	return 0;
 
+fail2:
+	free_irq(INT_24XX_DSS_IRQ, NULL);
 fail1:
 	iounmap(dss.base);
 fail0:
@@ -348,6 +595,9 @@ fail0:
 
 void dss_exit(void)
 {
+	if (cpu_is_omap34xx())
+		clk_put(dss.dpll4_m4_ck);
+
 	free_irq(INT_24XX_DSS_IRQ, NULL);
 
 	iounmap(dss.base);

@@ -28,8 +28,8 @@
 #include <linux/spinlock.h>
 #include <linux/jiffies.h>
 
-#include <mach/display.h>
-#include <mach/cpu.h>
+#include <plat/display.h>
+#include <plat/cpu.h>
 
 #include "dss.h"
 
@@ -284,13 +284,8 @@ struct manager_attribute {
 	__ATTR(_name, _mode, _show, _store)
 
 static MANAGER_ATTR(name, S_IRUGO, manager_name_show, NULL);
-#ifdef CONFIG_PANEL_HDTV /* charlotte change permission S_IRUGO->S_IRWXUGO */
-static MANAGER_ATTR(display, S_IRWXUGO|S_IWUSR,
-		manager_display_show, manager_display_store);
-#else
 static MANAGER_ATTR(display, S_IRUGO|S_IWUSR,
 		manager_display_show, manager_display_store);
-#endif
 static MANAGER_ATTR(default_color, S_IRUGO|S_IWUSR,
 		manager_default_color_show, manager_default_color_store);
 static MANAGER_ATTR(trans_key_type, S_IRUGO|S_IWUSR,
@@ -447,7 +442,7 @@ struct manager_cache_data {
 };
 
 static struct {
-	spinlock_t lock;
+	spinlock_t lock;  /* need comment */
 	struct overlay_cache_data overlay_cache[3];
 	struct manager_cache_data manager_cache[2];
 
@@ -706,8 +701,6 @@ static int configure_overlay(enum omap_plane plane)
 	struct manager_cache_data *mc;
 	u16 outw, outh;
 	u16 x, y, w, h;
-	u32 dw = 0;
-	u32 dh = 0;
 	u32 paddr;
 	int r;
 
@@ -763,9 +756,9 @@ static int configure_overlay(enum omap_plane plane)
 		}
 
 		if (dispc_is_overlay_scaled(c)) {
-			/* If the overlay is scaled, the update area has already been
-			 * enlarged to cover the whole overlay. We only need to adjust
-			 * x/y here */
+			/* If the overlay is scaled, the update area has
+			 * already been enlarged to cover the whole overlay.
+			 * We only need to adjust x/y here */
 			x = c->pos_x - mc->x;
 			y = c->pos_y - mc->y;
 		} else {
@@ -1322,8 +1315,8 @@ static int omap_dss_mgr_apply(struct omap_overlay_manager *mgr)
 
 static int dss_check_manager(struct omap_overlay_manager *mgr)
 {
-	/* OMAP does not support destination color keying and alpha blending
-	 * simultaneously. */
+	/* OMAP supports only graphics source transparency color key and alpha
+	 * blending simultaneously. See TRM 15.4.2.4.2.2 Alpha Mode */
 
 	if (mgr->info.alpha_enabled && mgr->info.trans_enabled &&
 			mgr->info.trans_key_type != OMAP_DSS_COLOR_KEY_GFX_DST)
@@ -1364,12 +1357,6 @@ static void omap_dss_add_overlay_manager(struct omap_overlay_manager *manager)
 	list_add_tail(&manager->list, &manager_list);
 }
 
-static void omap_dss_mgr_enable_alpha_blending(struct omap_overlay_manager *mgr,
-		bool enable)
-{
-	dispc_enable_alpha_blending(mgr->id, enable);
-}
-
 int dss_init_overlay_managers(struct platform_device *pdev)
 {
 	int i, r;
@@ -1407,8 +1394,6 @@ int dss_init_overlay_managers(struct platform_device *pdev)
 		mgr->set_manager_info = &omap_dss_mgr_set_info;
 		mgr->get_manager_info = &omap_dss_mgr_get_info;
 		mgr->wait_for_go = &dss_mgr_wait_for_go;
-		mgr->enable_alpha_blending =
-			&omap_dss_mgr_enable_alpha_blending,
 
 		mgr->caps = OMAP_DSS_OVL_MGR_CAP_DISPC;
 

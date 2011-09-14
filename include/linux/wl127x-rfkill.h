@@ -28,6 +28,7 @@
 
 enum wl127x_devices {
 	WL127X_BLUETOOTH = 0,
+	WL127X_PWR_CTL,
 	WL127X_FM,
 	WL127X_MAX_DEV,
 };
@@ -36,6 +37,7 @@ enum wl127x_devices {
  * rfkill driver */
 struct wl127x_rfkill_platform_data {
 	int bt_nshutdown_gpio;
+	int pwr_ctl;
 	int fm_enable_gpio;
 	int (*bt_hw_init)(void);
 	int (*bt_hw_release)(void);

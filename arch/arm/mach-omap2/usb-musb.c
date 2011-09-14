@@ -25,17 +25,28 @@
 #include <linux/io.h>
 
 #include <linux/usb/musb.h>
-#include <linux/usb/android.h>
 
 #include <asm/sizes.h>
 
 #include <mach/hardware.h>
 #include <mach/irqs.h>
-#include <mach/mux.h>
-#include <mach/usb.h>
+#include <plat/mux.h>
+#include <plat/usb.h>
 
 #define OTG_SYSCONFIG	   0x404
 #define OTG_SYSC_SOFTRESET BIT(1)
+#define OTG_SYSSTATUS     0x408
+#define OTG_SYSS_RESETDONE BIT(0)
+
+static struct platform_device dummy_pdev = {
+	.dev = {
+		.bus = &platform_bus_type,
+	},
+};
+
+static void __iomem *otg_base;
+static struct clk *otg_clk;
+
 #define  MIDLEMODE       12      /* bit position */
 #define  FORCESTDBY      (0 << MIDLEMODE)
 #define  NOSTDBY         (1 << MIDLEMODE)
@@ -48,7 +59,7 @@
 
 static void __init usb_musb_pm_init(void)
 {
-	void __iomem *otg_base;
+	struct device *dev = &dummy_pdev.dev;
 
 	if (!cpu_is_omap34xx())
 		return;
@@ -57,11 +68,30 @@ static void __init usb_musb_pm_init(void)
 	if (WARN_ON(!otg_base))
 		return;
 
-	/* Reset OTG controller.  After reset, it will be in
-	 * force-idle, force-standby mode. */
-	__raw_writel(OTG_SYSC_SOFTRESET, otg_base + OTG_SYSCONFIG);
+	dev_set_name(dev, "musb_hdrc");
+	otg_clk = clk_get(dev, "ick");
 
-	iounmap(otg_base);
+	if (otg_clk && clk_enable(otg_clk)) {
+		printk(KERN_WARNING
+			"%s: Unable to enable clocks for MUSB, "
+			"cannot reset.\n",  __func__);
+	} else {
+		/* Reset OTG controller. After reset, it will be in
+		 * force-idle, force-standby mode. */
+		__raw_writel(OTG_SYSC_SOFTRESET, otg_base + OTG_SYSCONFIG);
+
+		while (!(OTG_SYSS_RESETDONE &
+					__raw_readl(otg_base + OTG_SYSSTATUS)))
+			cpu_relax();
+	}
+
+	if (otg_clk)
+		clk_disable(otg_clk);
+}
+
+void usb_musb_disable_autoidle(void)
+{
+	__raw_writel(0, otg_base + OTG_SYSCONFIG);
 }
 
 
@@ -88,6 +118,7 @@ void musb_disable_idle(int on)
 }
 
 #ifdef CONFIG_USB_MUSB_SOC
+
 static struct resource musb_resources[] = {
 	[0] = { /* start and end set dynamically */
 		.flags	= IORESOURCE_MEM,
@@ -187,53 +218,33 @@ static struct musb_hdrc_platform_data musb_plat = {
 	.power		= 50,			/* up to 100 mA */
 };
 
-static u64 musb_dmamask = DMA_32BIT_MASK;
+static u64 musb_dmamask = DMA_BIT_MASK(32);
 
 static struct platform_device musb_device = {
 	.name		= "musb_hdrc",
 	.id		= -1,
 	.dev = {
 		.dma_mask		= &musb_dmamask,
-		.coherent_dma_mask	= DMA_32BIT_MASK,
+		.coherent_dma_mask	= DMA_BIT_MASK(32),
 		.platform_data		= &musb_plat,
 	},
 	.num_resources	= ARRAY_SIZE(musb_resources),
 	.resource	= musb_resources,
 };
 
-#ifdef CONFIG_NOP_USB_XCEIV
-static u64 nop_xceiv_dmamask = DMA_32BIT_MASK;
-
-static struct platform_device nop_xceiv_device = {
-	.name		= "nop_usb_xceiv",
-	.id		= -1,
-	.dev = {
-		.dma_mask		= &nop_xceiv_dmamask,
-		.coherent_dma_mask	= DMA_32BIT_MASK,
-		.platform_data		= NULL,
-	},
-};
-#endif
-
 void __init usb_musb_init(void)
 {
-	if (cpu_is_omap243x()) {
+	if (cpu_is_omap243x())
 		musb_resources[0].start = OMAP243X_HS_BASE;
-		musb_plat.clock = "usbhs_ick";
-	} else {
+	else
 		musb_resources[0].start = OMAP34XX_HSUSB_OTG_BASE;
-		musb_plat.clock = "hsotgusb_ick";
-	}
-
 	musb_resources[0].end = musb_resources[0].start + SZ_8K - 1;
 
-
-#ifdef CONFIG_NOP_USB_XCEIV
-	if (platform_device_register(&nop_xceiv_device) < 0) {
-		printk(KERN_ERR "Unable to register NOP-XCEIV device\n");
-		return;
-	}
-#endif
+	/*
+	 * REVISIT: This line can be removed once all the platforms using
+	 * musb_core.c have been converted to use use clkdev.
+	 */
+	musb_plat.clock = "ick";
 
 	if (platform_device_register(&musb_device) < 0) {
 		printk(KERN_ERR "Unable to register HS-USB (MUSB) device\n");

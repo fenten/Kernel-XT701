@@ -28,8 +28,10 @@
 #include <linux/sysfs.h>
 #include <linux/kobject.h>
 #include <linux/platform_device.h>
+#include <linux/delay.h>
 
-#include <mach/display.h>
+#include <plat/display.h>
+#include <plat/cpu.h>
 
 #include "dss.h"
 
@@ -263,30 +265,16 @@ struct overlay_attribute {
 	__ATTR(_name, _mode, _show, _store)
 
 static OVERLAY_ATTR(name, S_IRUGO, overlay_name_show, NULL);
-#ifdef CONFIG_PANEL_HDTV /* charlotte change permission S_IRUGO->S_IRWXUGO */
-static OVERLAY_ATTR(manager, S_IRWXUGO|S_IWUSR,
-		overlay_manager_show, overlay_manager_store);
-#else
 static OVERLAY_ATTR(manager, S_IRUGO|S_IWUSR,
 		overlay_manager_show, overlay_manager_store);
-#endif
 static OVERLAY_ATTR(input_size, S_IRUGO, overlay_input_size_show, NULL);
 static OVERLAY_ATTR(screen_width, S_IRUGO, overlay_screen_width_show, NULL);
-#ifdef CONFIG_PANEL_HDTV /* charlotte change permission S_IRUGO->S_IRWXUGO */
-static OVERLAY_ATTR(position, S_IRWXUGO|S_IWUSR,
-		overlay_position_show, overlay_position_store);
-static OVERLAY_ATTR(output_size, S_IRWXUGO|S_IWUSR,
-		overlay_output_size_show, overlay_output_size_store);
-static OVERLAY_ATTR(enabled, S_IRWXUGO|S_IWUSR,
-		overlay_enabled_show, overlay_enabled_store);
-#else
 static OVERLAY_ATTR(position, S_IRUGO|S_IWUSR,
 		overlay_position_show, overlay_position_store);
 static OVERLAY_ATTR(output_size, S_IRUGO|S_IWUSR,
 		overlay_output_size_show, overlay_output_size_store);
 static OVERLAY_ATTR(enabled, S_IRUGO|S_IWUSR,
 		overlay_enabled_show, overlay_enabled_store);
-#endif
 static OVERLAY_ATTR(global_alpha, S_IRUGO|S_IWUSR,
 		overlay_global_alpha_show, overlay_global_alpha_store);
 
@@ -386,28 +374,6 @@ int dss_check_overlay(struct omap_overlay *ovl, struct omap_dss_device *dssdev)
 			outh = info->out_height;
 	}
 
-#ifdef CONFIG_PANEL_HDTV /* BANG Hacked start */
-	if (info->out_width > dw || info->out_height > dh || info->width > dw || info->height > dh) {
-		printk(" The panel is changed from prev_dw,prev_dh=%d,%d to dw,dh\ = %d, %d \n",
-			info->out_width, info->out_height, dw, dh);
-		/* we start to switch panel */
-		if (dw < info->out_width) {
-			printk(" Overwrite overlay info for width \n");
-			info->out_width = dw;
-			info->width = dw;
-			outw = dw;
-		} 
-
-
-		if (dh < info->out_height) {
-			printk(" Overwrite overlay info for height \n");
-                        info->out_height = dh;
-			info->height = dh;
-                        outh = dh;				
-		}
-	}
-#endif /* BANG Hacked end */
-
 	if (dw < info->pos_x + outw) {
 		DSSDBG("check_overlay failed 1: %d < %d + %d\n",
 				dw, info->pos_x, outw);
@@ -464,8 +430,6 @@ static int dss_ovl_wait_for_go(struct omap_overlay *ovl)
 static int omap_dss_set_manager(struct omap_overlay *ovl,
 		struct omap_overlay_manager *mgr)
 {
-	int r;
-
 	if (!mgr)
 		return -EINVAL;
 
@@ -475,10 +439,6 @@ static int omap_dss_set_manager(struct omap_overlay *ovl,
 		return -EINVAL;
 	}
 
-	r = ovl->wait_for_go(ovl);
-	if (r)
-		return r;
-
 	if (ovl->info.enabled) {
 		DSSERR("overlay has to be disabled to change the manager\n");
 		return -EINVAL;
@@ -487,6 +447,13 @@ static int omap_dss_set_manager(struct omap_overlay *ovl,
 	ovl->manager = mgr;
 
 	dss_clk_enable(DSS_CLK_ICK | DSS_CLK_FCK1);
+	/* XXX: on manual update display, in auto update mode, a bug happens
+	 * here. When an overlay is first enabled on LCD, then it's disabled,
+	 * and the manager is changed to TV, we sometimes get SYNC_LOST_DIGIT
+	 * errors. Waiting before changing the channel_out fixes it. I'm
+	 * guessing that the overlay is still somehow being used for the LCD,
+	 * but I don't understand how or why. */
+	msleep(40);
 	dispc_set_channel_out(ovl->id, mgr->id);
 	dss_clk_disable(DSS_CLK_ICK | DSS_CLK_FCK1);
 
@@ -495,13 +462,23 @@ static int omap_dss_set_manager(struct omap_overlay *ovl,
 
 static int omap_dss_unset_manager(struct omap_overlay *ovl)
 {
+	int r;
+
 	if (!ovl->manager) {
 		DSSERR("failed to detach overlay: manager not set\n");
 		return -EINVAL;
 	}
 
+	if (ovl->info.enabled) {
+		DSSERR("overlay has to be disabled to unset the manager\n");
+		return -EINVAL;
+	}
+
+	r = ovl->wait_for_go(ovl);
+	if (r)
+		return r;
+
 	ovl->manager = NULL;
-	/* XXX disable overlay? */
 
 	return 0;
 }
@@ -567,14 +544,18 @@ void dss_init_overlays(struct platform_device *pdev)
 		case 0:
 			ovl->name = "gfx";
 			ovl->id = OMAP_DSS_GFX;
-			ovl->supported_modes = OMAP_DSS_COLOR_GFX_OMAP3;
+			ovl->supported_modes = cpu_is_omap34xx() ?
+				OMAP_DSS_COLOR_GFX_OMAP3 :
+				OMAP_DSS_COLOR_GFX_OMAP2;
 			ovl->caps = OMAP_DSS_OVL_CAP_DISPC;
 			ovl->info.global_alpha = 255;
 			break;
 		case 1:
 			ovl->name = "vid1";
 			ovl->id = OMAP_DSS_VIDEO1;
-			ovl->supported_modes = OMAP_DSS_COLOR_VID_OMAP3;
+			ovl->supported_modes = cpu_is_omap34xx() ?
+				OMAP_DSS_COLOR_VID1_OMAP3 :
+				OMAP_DSS_COLOR_VID_OMAP2;
 			ovl->caps = OMAP_DSS_OVL_CAP_SCALE |
 				OMAP_DSS_OVL_CAP_DISPC;
 			ovl->info.global_alpha = 255;
@@ -582,7 +563,9 @@ void dss_init_overlays(struct platform_device *pdev)
 		case 2:
 			ovl->name = "vid2";
 			ovl->id = OMAP_DSS_VIDEO2;
-			ovl->supported_modes = OMAP_DSS_COLOR_VID_OMAP3;
+			ovl->supported_modes = cpu_is_omap34xx() ?
+				OMAP_DSS_COLOR_VID2_OMAP3 :
+				OMAP_DSS_COLOR_VID_OMAP2;
 			ovl->caps = OMAP_DSS_OVL_CAP_SCALE |
 				OMAP_DSS_OVL_CAP_DISPC;
 			ovl->info.global_alpha = 255;

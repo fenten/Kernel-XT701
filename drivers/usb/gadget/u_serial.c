@@ -371,6 +371,7 @@ __acquires(&port->port_lock)
 
 		req->length = len;
 		list_del(&req->list);
+		req->zero = (gs_buf_data_avail(&port->port_write_buf) == 0);
 
 		pr_vdebug(PREFIX "%d: tx len=%d, 0x%02x 0x%02x 0x%02x ...\n",
 				port->port_num, len, *((u8 *)req->buf),
@@ -785,7 +786,7 @@ static int gs_open(struct tty_struct *tty, struct file *file)
 	/* low_latency means ldiscs work in tasklet context, without
 	 * needing a workqueue schedule ... easier to keep up.
 	 */
-	tty->low_latency = 1;
+	tty->low_latency = 0;
 
 	/* if connected, start the I/O stream */
 	if (port->port_usb) {
@@ -1004,10 +1005,18 @@ static int gs_tiocmset(struct tty_struct *tty, struct file *file,
 	unsigned int set, unsigned int clear)
 {
 	struct gs_port  *port = tty->driver_data;
+	int             status = 0;
+	struct gserial  *gser;
 
-	printk(KERN_INFO "%s set=%x clear=%x \n", __func__, set, clear);
-	port->port_usb->tiocmset(port->port_usb, set, clear);
-	return 0;
+	pr_vdebug("gs_tiocmset: ttyGS%d, set = (%d), clear = (%d) \n",
+			port->port_num, set, clear);
+	spin_lock_irq(&port->port_lock);
+	gser = port->port_usb;
+	if (gser && gser->tiocmset)
+		status = gser->tiocmset(gser, set, clear);
+	spin_unlock_irq(&port->port_lock);
+
+	return status;
 }
 #endif
 
@@ -1015,7 +1024,6 @@ static const struct tty_operations gs_tty_ops = {
 	.open =			gs_open,
 	.close =		gs_close,
 	.write =		gs_write,
-
 #ifdef CONFIG_USB_MOT_ANDROID
 	.tiocmset =             gs_tiocmset,
 #endif
@@ -1031,11 +1039,7 @@ static const struct tty_operations gs_tty_ops = {
 
 static struct tty_driver *gs_tty_driver;
 
-#ifdef CONFIG_USB_MOT_ANDROID
 static int __init
-#else
-static int
-#endif
 gs_port_alloc(unsigned port_num, struct usb_cdc_line_coding *coding)
 {
 	struct gs_port	*port;
@@ -1081,11 +1085,7 @@ gs_port_alloc(unsigned port_num, struct usb_cdc_line_coding *coding)
  *
  * Returns negative errno or zero.
  */
-#ifdef CONFIG_USB_MOT_ANDROID
-int gserial_setup(struct usb_gadget *g, unsigned count)
-#else
 int __init gserial_setup(struct usb_gadget *g, unsigned count)
-#endif
 {
 	unsigned			i;
 	struct usb_cdc_line_coding	coding;
@@ -1117,7 +1117,7 @@ int __init gserial_setup(struct usb_gadget *g, unsigned count)
 	gs_tty_driver->init_termios.c_ispeed = 9600;
 	gs_tty_driver->init_termios.c_ospeed = 9600;
 
-	coding.dwDTERate = __constant_cpu_to_le32(9600);
+	coding.dwDTERate = cpu_to_le32(9600);
 	coding.bCharFormat = 8;
 	coding.bParityType = USB_CDC_NO_PARITY;
 	coding.bDataBits = USB_CDC_1_STOP_BITS;
@@ -1138,7 +1138,6 @@ int __init gserial_setup(struct usb_gadget *g, unsigned count)
 	/* export the driver ... */
 	status = tty_register_driver(gs_tty_driver);
 	if (status) {
-		put_tty_driver(gs_tty_driver);
 		pr_err("%s: cannot register, err %d\n",
 				__func__, status);
 		goto fail;

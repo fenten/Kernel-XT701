@@ -26,10 +26,10 @@
 #include <linux/device.h>
 
 #include <linux/usb/composite.h>
-
 #ifdef CONFIG_USB_MOT_ANDROID
 #include "f_mot_android.h"
 #endif
+
 
 /*
  * The code in this file is utility code, used to build a gadget driver
@@ -74,6 +74,33 @@ MODULE_PARM_DESC(iSerialNumber, "SerialNumber string");
 
 /*-------------------------------------------------------------------------*/
 
+static ssize_t enable_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
+{
+	struct usb_function *f = dev_get_drvdata(dev);
+	return sprintf(buf, "%d\n", !f->hidden);
+}
+
+static ssize_t enable_store(
+		struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t size)
+{
+	struct usb_function *f = dev_get_drvdata(dev);
+	struct usb_composite_driver	*driver = f->config->cdev->driver;
+	int value;
+
+	sscanf(buf, "%d", &value);
+	if (driver->enable_function)
+		driver->enable_function(f, value);
+	else
+		f->hidden = !value;
+
+	return size;
+}
+
+static DEVICE_ATTR(enable, S_IRUGO | S_IWUSR, enable_show, enable_store);
+
+
 /**
  * usb_add_function() - add a function to a configuration
  * @config: the configuration
@@ -91,14 +118,29 @@ MODULE_PARM_DESC(iSerialNumber, "SerialNumber string");
 int __init usb_add_function(struct usb_configuration *config,
 		struct usb_function *function)
 {
+	struct usb_composite_dev	*cdev = config->cdev;
 	int	value = -EINVAL;
+	int index;
 
-	DBG(config->cdev, "adding '%s'/%p to config '%s'/%p\n",
+	DBG(cdev, "adding '%s'/%p to config '%s'/%p\n",
 			function->name, function,
 			config->label, config);
 
 	if (!function->set_alt || !function->disable)
 		goto done;
+
+	index = atomic_inc_return(&cdev->driver->function_count);
+	function->dev = device_create(cdev->driver->class, NULL,
+		MKDEV(0, index), NULL, function->name);
+	if (IS_ERR(function->dev))
+		return PTR_ERR(function->dev);
+
+	value = device_create_file(function->dev, &dev_attr_enable);
+	if (value < 0) {
+		device_destroy(cdev->driver->class, MKDEV(0, index));
+		return value;
+	}
+	dev_set_drvdata(function->dev, function);
 
 	function->config = config;
 	list_add_tail(&function->list, &config->functions);
@@ -125,7 +167,7 @@ int __init usb_add_function(struct usb_configuration *config,
 
 done:
 	if (value)
-		DBG(config->cdev, "adding '%s'/%p --> %d\n",
+		DBG(cdev, "adding '%s'/%p --> %d\n",
 				function->name, function, value);
 	return value;
 }
@@ -152,16 +194,17 @@ done:
 int usb_function_deactivate(struct usb_function *function)
 {
 	struct usb_composite_dev	*cdev = function->config->cdev;
+	unsigned long			flags;
 	int				status = 0;
 
-	spin_lock(&cdev->lock);
+	spin_lock_irqsave(&cdev->lock, flags);
 
 	if (cdev->deactivations == 0)
 		status = usb_gadget_disconnect(cdev->gadget);
 	if (status == 0)
 		cdev->deactivations++;
 
-	spin_unlock(&cdev->lock);
+	spin_unlock_irqrestore(&cdev->lock, flags);
 	return status;
 }
 
@@ -234,20 +277,19 @@ static int config_buf(struct usb_configuration *config,
 		enum usb_device_speed speed, void *buf, u8 type)
 {
 	struct usb_config_descriptor	*c = buf;
+	struct usb_interface_descriptor *intf;
 	void				*next = buf + USB_DT_CONFIG_SIZE;
 	int				len = USB_BUFSIZ - USB_DT_CONFIG_SIZE;
 	struct usb_function		*f;
 	int				status;
-#ifndef CONFIG_USB_MOT_ANDROID
 	int				interfaceCount = 0;
-#endif
+	u8 *dest;
 
 	/* write the config descriptor */
 	c = buf;
 	c->bLength = USB_DT_CONFIG_SIZE;
 	c->bDescriptorType = type;
-	/* wTotalLength is written later */
-	c->bNumInterfaces = config->next_interface_id;
+	/* wTotalLength and bNumInterfaces are written later */
 	c->bConfigurationValue = config->bConfigurationValue;
 	c->iConfiguration = config->iConfiguration;
 	c->bmAttributes = USB_CONFIG_ATT_ONE | config->bmAttributes;
@@ -266,35 +308,40 @@ static int config_buf(struct usb_configuration *config,
 	/* add each function's descriptors */
 	list_for_each_entry(f, &config->functions, list) {
 		struct usb_descriptor_header **descriptors;
+		struct usb_descriptor_header *descriptor;
 
 		if (speed == USB_SPEED_HIGH)
 			descriptors = f->hs_descriptors;
 		else
 			descriptors = f->descriptors;
-		if (f->hidden || !descriptors || descriptors[0] == NULL) {
-#ifndef CONFIG_USB_MOT_ANDROID
-			for (; f != config->interface[interfaceCount];) {
-				interfaceCount++;
-				c->bNumInterfaces--;
-			}
-#endif
+		if (f->hidden || !descriptors || descriptors[0] == NULL)
 			continue;
-		}
-#ifndef CONFIG_USB_MOT_ANDROID
-		for (; f != config->interface[interfaceCount];)
-			interfaceCount++;
-#endif
-
 		status = usb_descriptor_fillbuf(next, len,
 			(const struct usb_descriptor_header **) descriptors);
 		if (status < 0)
 			return status;
+
+		/* set interface numbers dynamically */
+		dest = next;
+		while ((descriptor = *descriptors++) != NULL) {
+			intf = (struct usb_interface_descriptor *)dest;
+			if (intf->bDescriptorType == USB_DT_INTERFACE) {
+				/* don't increment bInterfaceNumber for alternate settings */
+				if (intf->bAlternateSetting == 0)
+					intf->bInterfaceNumber = interfaceCount++;
+				else
+					intf->bInterfaceNumber = interfaceCount - 1;
+			}
+			dest += intf->bLength;
+		}
+
 		len -= status;
 		next += status;
 	}
 
 	len = next - buf;
 	c->wTotalLength = cpu_to_le16(len);
+	c->bNumInterfaces = interfaceCount;
 	return len;
 }
 
@@ -438,6 +485,8 @@ static int set_config(struct usb_composite_dev *cdev,
 
 		if (!f)
 			break;
+		if (f->hidden)
+			continue;
 
 		result = f->set_alt(f, tmp, 0);
 		if (result < 0) {
@@ -619,7 +668,7 @@ static int get_string(struct usb_composite_dev *cdev,
 			}
 		}
 
-		for (len = 0; s->wData[len] && len <= 126; len++)
+		for (len = 0; len <= 126 && s->wData[len]; len++)
 			continue;
 		if (!len)
 			return -EINVAL;
@@ -694,7 +743,6 @@ static void composite_setup_complete(struct usb_ep *ep, struct usb_request *req)
  * housekeeping for the gadget function we're implementing.  Most of
  * the work is in config and function specific setup.
  */
-
 static int
 composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 {
@@ -777,11 +825,11 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 	case USB_REQ_GET_CONFIGURATION:
 		if (ctrl->bRequestType != USB_DIR_IN)
 			goto unknown;
-		if (cdev->config) {
+		if (cdev->config)
 			*(u8 *)req->buf = cdev->config->bConfigurationValue;
-			value = min(w_length, (u16) 1);
-		} else
+		else
 			*(u8 *)req->buf = 0;
+		value = min(w_length, (u16) 1);
 		break;
 
 	/* function drivers must handle get/set altsetting; if there's
@@ -829,14 +877,12 @@ unknown:
 		 * take such requests too, if that's ever needed:  to work
 		 * in config 0, etc.
 		 */
-#ifndef CONFIG_USB_MOT_ANDROID
 		if ((ctrl->bRequestType & USB_RECIP_MASK)
 				== USB_RECIP_INTERFACE) {
 			if (cdev->config == NULL)
 				return value;
 
 			f = cdev->config->interface[intf];
-
 			if (f && f->setup)
 				value = f->setup(f, ctrl);
 			else
@@ -849,7 +895,7 @@ unknown:
 			if (c && c->setup)
 				value = c->setup(c, ctrl);
 		}
-#else
+
 		/* If the vendor request is not processed (value < 0),
 		 * call all device registered configure setup callbacks
 		 * to process it.
@@ -868,7 +914,6 @@ unknown:
 				value = cfg->setup(cfg, ctrl);
 			}
 		}
-#endif
 
 		goto done;
 	}
@@ -1004,7 +1049,8 @@ static int __init composite_bind(struct usb_gadget *gadget)
 	cdev->bufsiz = USB_BUFSIZ;
 	cdev->driver = composite;
 
-	usb_gadget_set_selfpowered(gadget);
+	/* Do not report Self Powered as WHQL tests fail on Win7 */
+	/*usb_gadget_set_selfpowered(gadget);*/
 
 	/* interface and string IDs start at zero via kzalloc.
 	 * we force endpoints to start unassigned; few controller
@@ -1060,7 +1106,7 @@ composite_suspend(struct usb_gadget *gadget)
 	struct usb_composite_dev	*cdev = get_gadget_data(gadget);
 	struct usb_function		*f;
 
-	/* REVISIT:  should we have config and device level
+	/* REVISIT:  should we have config level
 	 * suspend/resume callbacks?
 	 */
 	DBG(cdev, "suspend\n");
@@ -1070,6 +1116,8 @@ composite_suspend(struct usb_gadget *gadget)
 				f->suspend(f);
 		}
 	}
+	if (composite->suspend)
+		composite->suspend(cdev);
 }
 
 static void
@@ -1078,10 +1126,12 @@ composite_resume(struct usb_gadget *gadget)
 	struct usb_composite_dev	*cdev = get_gadget_data(gadget);
 	struct usb_function		*f;
 
-	/* REVISIT:  should we have config and device level
+	/* REVISIT:  should we have config level
 	 * suspend/resume callbacks?
 	 */
 	DBG(cdev, "resume\n");
+	if (composite->resume)
+		composite->resume(cdev);
 	if (cdev->config) {
 		list_for_each_entry(f, &cdev->config->functions, list) {
 			if (f->resume)
@@ -1134,6 +1184,10 @@ int __init usb_composite_register(struct usb_composite_driver *driver)
 	composite_driver.function =  (char *) driver->name;
 	composite_driver.driver.name = driver->name;
 	composite = driver;
+
+	driver->class = class_create(THIS_MODULE, "usb_composite");
+	if (IS_ERR(driver->class))
+		return PTR_ERR(driver->class);
 
 	return usb_gadget_register_driver(&composite_driver);
 }

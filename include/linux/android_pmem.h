@@ -21,7 +21,6 @@
 #define PMEM_MAP		_IOW(PMEM_IOCTL_MAGIC, 2, unsigned int)
 #define PMEM_GET_SIZE		_IOW(PMEM_IOCTL_MAGIC, 3, unsigned int)
 #define PMEM_UNMAP		_IOW(PMEM_IOCTL_MAGIC, 4, unsigned int)
-#define PMEM_CACHE_FLUSH    _IOW(PMEM_IOCTL_MAGIC, 8, unsigned int)
 /* This ioctl will allocate pmem space, backing the file, it will fail
  * if the file already has an allocation, pass it the len as the argument
  * to the ioctl */
@@ -34,6 +33,7 @@
  * struct (with offset set to 0). 
  */
 #define PMEM_GET_TOTAL_SIZE	_IOW(PMEM_IOCTL_MAGIC, 7, unsigned int)
+#define PMEM_CACHE_FLUSH	_IOW(PMEM_IOCTL_MAGIC, 8, unsigned int)
 
 struct android_pmem_platform_data
 {
@@ -63,7 +63,7 @@ int get_pmem_file(int fd, unsigned long *start, unsigned long *vstart,
 		  unsigned long *end, struct file **filp);
 int get_pmem_user_addr(struct file *file, unsigned long *start,
 		       unsigned long *end);
-void put_pmem_file(struct file *file);
+void put_pmem_file(struct file* file);
 void flush_pmem_file(struct file *file, unsigned long start, unsigned long len);
 int pmem_setup(struct android_pmem_platform_data *pdata,
 	       long (*ioctl)(struct file *, unsigned int, unsigned long),
@@ -78,7 +78,7 @@ static inline int get_pmem_file(int fd, unsigned long *start,
 				struct file **filp) { return -ENOSYS; }
 static inline int get_pmem_user_addr(struct file *file, unsigned long *start,
 				     unsigned long *end) { return -ENOSYS; }
-static inline void put_pmem_file(struct file *file) { return; }
+static inline void put_pmem_file(struct file* file) { return; }
 static inline void flush_pmem_file(struct file *file, unsigned long start,
 				   unsigned long len) { return; }
 static inline int pmem_setup(struct android_pmem_platform_data *pdata,

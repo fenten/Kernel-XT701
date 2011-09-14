@@ -15,16 +15,16 @@
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- * 
+ *
  * Changelog:
  * Date               Author           Comment
  * -----------------------------------------------------------------------------
  * 12/07/2007      Motorola        USB-IPC initial
  * 03/22/2007      Motorola        USB-IPC header support
  * 05/09/2008      Motorola        Change Copyright and Changelog
- * 
+ *
  */
- 
+
 /*!
  * @file drivers/usb/ipchost/ipc_api_test.c
  * @brief USB-IPC test Set
@@ -40,21 +40,8 @@
  * Include Files
  */
 #include <linux/module.h>
-#include <linux/interrupt.h>
-#include <linux/wait.h>
-#include <linux/init.h>
-#include <linux/fs.h>
-#include <linux/errno.h>
-#include <linux/kdev_t.h>
-#include <linux/major.h>
-#include <linux/mm.h>
 #include <linux/device.h>
 #include <linux/miscdevice.h>
-#include <linux/kthread.h>
-#include <linux/circ_buf.h>
-#include <linux/uio.h>
-#include <linux/poll.h>
-#include <linux/usb.h>
 #include <linux/usb_ipc.h>
 #include <linux/ipc_api.h>
 
@@ -64,29 +51,27 @@ MODULE_DESCRIPTION("OMAP SAM IPC Test Module");
 MODULE_AUTHOR("Motorola");
 MODULE_LICENSE("GPL");
 
+#define DEBUG(args...) /* printk(args) */
+#define ENTER_FUNC() DEBUG("Enter: %s\n", __func__)
 
-#define DEBUG(args...)  //printk(args)
-#define ENTER_FUNC()    DEBUG("Enter: %s\n", __FUNCTION__)
+#define API_DATA_CH_MINOR_NUM  240 /*  */
+#define API_SHORT_CH_MINOR_NUM 241 /*  */
 
-#define API_DATA_CH_MINOR_NUM       240  /*  */
-#define API_SHORT_CH_MINOR_NUM      241  /*  */
+#define MAX_DATA_WRITE_BUF_SIZE MAX_FRAME_SIZE
+#define MAX_DATA_READ_BUF_SIZE  MAX_FRAME_SIZE
 
-#define MAX_DATA_WRITE_BUF_SIZE     MAX_FRAME_SIZE 
-#define MAX_DATA_READ_BUF_SIZE      MAX_FRAME_SIZE 
-
-HW_CTRL_IPC_CHANNEL_T   *ipc_data_ch  = NULL;
-HW_CTRL_IPC_CHANNEL_T   *ipc_short_ch = NULL;
-HW_CTRL_IPC_OPEN_T      ipc_data_ch_desc;
-HW_CTRL_IPC_OPEN_T      ipc_short_ch_desc;
+HW_CTRL_IPC_CHANNEL_T *ipc_data_ch;
+HW_CTRL_IPC_OPEN_T ipc_data_ch_desc;
+HW_CTRL_IPC_OPEN_T ipc_short_ch_desc;
 
 IPC_CHANNEL_ACCESS_TYPE ipc_data_ch_read_type = HW_CTRL_IPC_READ_TYPE;
 IPC_CHANNEL_ACCESS_TYPE ipc_data_ch_write_type = HW_CTRL_IPC_WRITE_TYPE;
 
-IPC_CHANNEL_ACCESS_TYPE ipc_short_ch_read_type = HW_CTRL_IPC_READ_TYPE; 
+IPC_CHANNEL_ACCESS_TYPE ipc_short_ch_read_type = HW_CTRL_IPC_READ_TYPE;
 IPC_CHANNEL_ACCESS_TYPE ipc_short_ch_write_type = HW_CTRL_IPC_WRITE_TYPE;
 
-int	ipc_data_read_actual_length = 0;
-int     ipc_data_write_actual_length = 0;
+int ipc_data_read_actual_length;
+int ipc_data_write_actual_length;
 unsigned char ipc_data_read_buffer[MAX_FRAME_NUM][MAX_DATA_READ_BUF_SIZE];
 unsigned char ipc_data_write_buffer[MAX_FRAME_NUM][MAX_DATA_WRITE_BUF_SIZE];
 
@@ -98,28 +83,21 @@ static struct semaphore ipc_data_write_wait;
 #define NODE_DESCRIPTOR_DONE_BIT 0x2000
 
 /* file operation for USB DATA test */
-static int ipc_api_data_open(struct inode * inode, struct file * file)
+static int ipc_api_data_open(struct inode *inode, struct file *file)
 {
 	ENTER_FUNC();
-//	HW_CTRL_IPC_CHANNEL_T *temp_ch;
 
-	if(ipc_data_ch != NULL) {
+	if (ipc_data_ch != NULL)
 		return -EBUSY;
-	}
-	ipc_data_ch = hw_ctrl_ipc_open(&ipc_data_ch_desc);
-	if(ipc_data_ch == NULL) {
-		return -ENOMEM;
-	}
 
-//	temp_ch = hw_ctrl_ipc_open(&ipc_data_ch_desc);
-//	if(temp_ch != NULL) {
-//		ipc_data_ch = temp_ch;
-//	}
+	ipc_data_ch = hw_ctrl_ipc_open(&ipc_data_ch_desc);
+	if (ipc_data_ch == NULL)
+		return -ENOMEM;
 
 	return 0;
 }
 
-static int ipc_api_data_release(struct inode * inode, struct file * file)
+static int ipc_api_data_release(struct inode *inode, struct file *file)
 {
 	ENTER_FUNC();
 	hw_ctrl_ipc_close(ipc_data_ch);
@@ -127,167 +105,151 @@ static int ipc_api_data_release(struct inode * inode, struct file * file)
 	return 0;
 }
 
-static ssize_t ipc_api_data_read(struct file * filp, char __user * buf, size_t count, loff_t * l)
+static ssize_t ipc_api_data_read(struct file *filp, char __user * buf,
+				 size_t count, loff_t *l)
 {
 	HW_CTRL_IPC_STATUS_T status;
 	int size, ret, num;
 	HW_CTRL_IPC_DATA_NODE_DESCRIPTOR_T temp_desc[MAX_FRAME_NUM];
-#if defined(USE_IPC_FRAME_HEADER)
 	int i;
-#endif
 
 	ENTER_FUNC();
 
-	ipc_data_read_actual_length = 0;	
+	ipc_data_read_actual_length = 0;
 	size = count > MAX_DATA_READ_BUF_SIZE ? MAX_DATA_READ_BUF_SIZE : count;
 
-#if defined(USE_IPC_FRAME_HEADER)
-	for(i=0; i < MAX_FRAME_NUM; i++) {
-		temp_desc[i].comand = 0; 
-		temp_desc[i].length   = MAX_DATA_READ_BUF_SIZE;	
-		temp_desc[i].data_ptr = &(ipc_data_read_buffer[i][0]);	
+	for (i = 0; i < MAX_FRAME_NUM; i++) {
+		temp_desc[i].comand = 0;
+		temp_desc[i].length = MAX_DATA_READ_BUF_SIZE;
+		temp_desc[i].data_ptr = &(ipc_data_read_buffer[i][0]);
 	}
-	temp_desc[MAX_FRAME_NUM - 1].comand = NODE_DESCRIPTOR_END_BIT; 
-#else
-	temp_desc[0].comand   = NODE_DESCRIPTOR_END_BIT; 
-	temp_desc[0].length   = size;	
-	temp_desc[0].data_ptr = &(ipc_data_read_buffer[0]);	
-
-#endif
+	temp_desc[MAX_FRAME_NUM - 1].comand = NODE_DESCRIPTOR_END_BIT;
 	status = hw_ctrl_ipc_read_ex2(ipc_data_ch, &temp_desc[0]);
-	if(status == HW_CTRL_IPC_STATUS_OK) {
+	if (status == HW_CTRL_IPC_STATUS_OK)
 		down(&ipc_data_read_wait);
-	}
+
 	num = ipc_data_read_actual_length;
-	if(num > count) {
+	if (num > count)
 		num = count;
-	}
+
 	ret = copy_to_user(buf, ipc_data_read_buffer, num);
 	return ipc_data_read_actual_length;
 }
 
-//HW_CTRL_IPC_DATA_NODE_DESCRIPTOR_T temp_desc[4];
-static ssize_t ipc_api_data_write(struct file * filp, const char * buf, size_t count, loff_t * l)
+static ssize_t ipc_api_data_write(struct file *filp, const char *buf,
+				  size_t count, loff_t *l)
 {
-        HW_CTRL_IPC_STATUS_T status = HW_CTRL_IPC_STATUS_ERROR;
-#if defined(USE_IPC_FRAME_HEADER)
-        int i, j;
+	HW_CTRL_IPC_STATUS_T status = HW_CTRL_IPC_STATUS_ERROR;
+	int i, j;
 	unsigned short temp_buf[MAX_FRAME_NUM + 1];
-#else
-	int size;
-#endif
-        HW_CTRL_IPC_DATA_NODE_DESCRIPTOR_T temp_desc[MAX_FRAME_NUM];
-        int ret;
+	HW_CTRL_IPC_DATA_NODE_DESCRIPTOR_T temp_desc[MAX_FRAME_NUM];
+	int ret;
 
 	ENTER_FUNC();
 
 	ipc_data_write_actual_length = 0;
-#if defined(USE_IPC_FRAME_HEADER)
-	ret = copy_from_user((void *)&temp_buf[0], buf, 2 * MAX_FRAME_NUM + 2);
+	ret = copy_from_user((void *)&temp_buf[0], buf, 2*MAX_FRAME_NUM+2);
 
-	for(i=0; (i< MAX_FRAME_NUM) && (i < temp_buf[0]); i++) {
-                temp_desc[i].comand = NODE_DESCRIPTOR_LAST_BIT;
-                temp_desc[i].length   = temp_buf[i+1];
-		for(j = 0; j < temp_buf[i+1]; j++) {
+	for (i = 0; (i < MAX_FRAME_NUM) && (i < temp_buf[0]); i++) {
+		temp_desc[i].comand = NODE_DESCRIPTOR_LAST_BIT;
+		temp_desc[i].length = temp_buf[i + 1];
+		for (j = 0; j < temp_buf[i + 1]; j++)
 			ipc_data_write_buffer[i][j] = j & 0xff;
-		}
-                temp_desc[i].data_ptr = &(ipc_data_write_buffer[i][0]);
+
+		temp_desc[i].data_ptr = &(ipc_data_write_buffer[i][0]);
 	}
-	if(i > 0) {
-	        temp_desc[i-1].comand = NODE_DESCRIPTOR_END_BIT | NODE_DESCRIPTOR_LAST_BIT;
+	if (i > 0) {
+		temp_desc[i - 1].comand =
+		    NODE_DESCRIPTOR_END_BIT | NODE_DESCRIPTOR_LAST_BIT;
 	}
-#else
-        size = count > MAX_DATA_WRITE_BUF_SIZE ? MAX_DATA_WRITE_BUF_SIZE : count;
-        ret = copy_from_user(ipc_data_write_buffer, buf, size);
-        temp_desc[0].comand = NODE_DESCRIPTOR_END_BIT | NODE_DESCRIPTOR_LAST_BIT;
-        temp_desc[0].length   = size;
-        temp_desc[0].data_ptr = &(ipc_data_write_buffer[0]);
-#endif
-        status = hw_ctrl_ipc_write_ex2(ipc_data_ch, &(temp_desc[0]));
-	if(status == HW_CTRL_IPC_STATUS_OK) {
-               	down(&ipc_data_write_wait);
-	}
+	status = hw_ctrl_ipc_write_ex2(ipc_data_ch, &(temp_desc[0]));
+	if (status == HW_CTRL_IPC_STATUS_OK)
+		down(&ipc_data_write_wait);
 
 	return ipc_data_write_actual_length;
 }
 
-static int ipc_api_data_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg)
+static int ipc_api_data_ioctl(struct inode *inode, struct file *file,
+			      unsigned int cmd, unsigned long arg)
 {
-	if(arg == 0x01) {
+	if (arg == 0x01) {
 		ipc_data_ch_read_type = HW_CTRL_IPC_READ_TYPE;
-	} else if(arg == 0x02) {
+	} else if (arg == 0x02) {
 		ipc_data_ch_read_type = HW_CTRL_IPC_READ_EX2_TYPE;
-        } else if(arg == 0x11) {
-                ipc_data_ch_write_type = HW_CTRL_IPC_WRITE_TYPE;
-        } else if(arg == 0x12) {
-                ipc_data_ch_write_type = HW_CTRL_IPC_WRITE_EX_CONT_TYPE;
-        } else if(arg == 0x13) {
-                ipc_data_ch_write_type = HW_CTRL_IPC_WRITE_EX_LIST_TYPE;
-        } else if(arg == 0x14) {
-                ipc_data_ch_write_type = HW_CTRL_IPC_WRITE_EX2_TYPE;
-        } else {
-		printk("%s: Error IOCTL cmd\n", __FUNCTION__);
-                return -EIO;
+	} else if (arg == 0x11) {
+		ipc_data_ch_write_type = HW_CTRL_IPC_WRITE_TYPE;
+	} else if (arg == 0x12) {
+		ipc_data_ch_write_type = HW_CTRL_IPC_WRITE_EX_CONT_TYPE;
+	} else if (arg == 0x13) {
+		ipc_data_ch_write_type = HW_CTRL_IPC_WRITE_EX_LIST_TYPE;
+	} else if (arg == 0x14) {
+		ipc_data_ch_write_type = HW_CTRL_IPC_WRITE_EX2_TYPE;
+	} else {
+		printk(KERN_ERR "%s: Error IOCTL cmd\n", __func__);
+		return -EIO;
 	}
 
-        return 0;
+	return 0;
 }
 
 /* file operation struction for IPC API DATA channel */
-static struct file_operations ipc_api_data_fops = {
-        owner:          THIS_MODULE,
-        open:           ipc_api_data_open,
-        release:        ipc_api_data_release,
-        read:           ipc_api_data_read,
-        ioctl:          ipc_api_data_ioctl,
-        write:          ipc_api_data_write,
+static const struct file_operations ipc_api_data_fops = {
+	.owner   = THIS_MODULE,
+	.open    = ipc_api_data_open,
+	.release = ipc_api_data_release,
+	.read    = ipc_api_data_read,
+	.ioctl   = ipc_api_data_ioctl,
+	.write   = ipc_api_data_write,
 };
 static struct miscdevice ipc_api_data_device = {
-        API_DATA_CH_MINOR_NUM, "ipc_api_data", &ipc_api_data_fops
+	API_DATA_CH_MINOR_NUM, "ipc_api_data", &ipc_api_data_fops
 };
 
 /* file operation for USB DATA test */
-static int ipc_api_short_open(struct inode * inode, struct file * file)
+static int ipc_api_short_open(struct inode *inode, struct file *file)
 {
-        ENTER_FUNC();
-        return 0;
+	ENTER_FUNC();
+	return 0;
 }
 
-static int ipc_api_short_release(struct inode * inode, struct file * file)
+static int ipc_api_short_release(struct inode *inode, struct file *file)
 {
-        ENTER_FUNC();
-        return 0;
+	ENTER_FUNC();
+	return 0;
 }
 
-static ssize_t ipc_api_short_read(struct file * filp, char __user * buf, size_t count, loff_t * l)
+static ssize_t ipc_api_short_read(struct file *filp, char __user * buf,
+				  size_t count, loff_t *l)
 {
-        ENTER_FUNC();
-        return 0;
+	ENTER_FUNC();
+	return 0;
 }
 
-static ssize_t ipc_api_short_write(struct file * filp, const char * buf, size_t count, loff_t * l)
+static ssize_t ipc_api_short_write(struct file *filp, const char *buf,
+				   size_t count, loff_t *l)
 {
-        ENTER_FUNC();
-        return 0;
+	ENTER_FUNC();
+	return 0;
 }
 
-static int ipc_api_short_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg)
+static int ipc_api_short_ioctl(struct inode *inode, struct file *file,
+			       unsigned int cmd, unsigned long arg)
 {
-        ENTER_FUNC();
-        return 0;
+	ENTER_FUNC();
+	return 0;
 }
 
 /* file operation struction for IPC API SHORT channel */
-static struct file_operations ipc_api_short_fops = {
-        owner:          THIS_MODULE,
-        open:           ipc_api_short_open,
-        release:        ipc_api_short_release,
-        read:           ipc_api_short_read,
-        write:          ipc_api_short_write,
-        ioctl:          ipc_api_short_ioctl,
+static const struct file_operations ipc_api_short_fops = {
+	.owner   = THIS_MODULE,
+	.open    = ipc_api_short_open,
+	.release = ipc_api_short_release,
+	.read    = ipc_api_short_read,
+	.write   = ipc_api_short_write,
+	.ioctl   = ipc_api_short_ioctl,
 };
 static struct miscdevice ipc_api_short_device = {
-        API_SHORT_CH_MINOR_NUM, "ipc_api_short", &ipc_api_short_fops
+	API_SHORT_CH_MINOR_NUM, "ipc_api_short", &ipc_api_short_fops
 };
 
 void shortmsg_read_callback(HW_CTRL_IPC_READ_STATUS_T *status)
@@ -315,8 +277,8 @@ void data_read_callback(HW_CTRL_IPC_READ_STATUS_T *status)
 void data_write_callback(HW_CTRL_IPC_WRITE_STATUS_T *status)
 {
 	ENTER_FUNC();
-	ipc_data_write_actual_length =  status->nb_bytes;
-        up(&ipc_data_write_wait);
+	ipc_data_write_actual_length = status->nb_bytes;
+	up(&ipc_data_write_wait);
 }
 
 void data_notify_callback(HW_CTRL_IPC_NOTIFY_STATUS_T *status)
@@ -329,49 +291,49 @@ void data_notify_callback(HW_CTRL_IPC_NOTIFY_STATUS_T *status)
  */
 static int __init ipc_api_test_init(void)
 {
-        int retval;
+	int retval;
 
-        sema_init(&ipc_data_read_wait, 0);
-        sema_init(&ipc_data_write_wait, 0);
+	sema_init(&ipc_data_read_wait, 0);
+	sema_init(&ipc_data_write_wait, 0);
 
 	ENTER_FUNC();
 
-	retval  = misc_register( &ipc_api_data_device);
-        if( retval )   {
-                printk("%s: Register IPC API DATA device failed\n", __FUNCTION__);
-                return -ENODEV;
-        }
+	retval = misc_register(&ipc_api_data_device);
+	if (retval) {
+		printk(KERN_ERR "%s: Register IPC API DATA device failed\n",
+		       __func__);
+		return -ENODEV;
+	}
 
-	retval  = misc_register( &ipc_api_short_device);
-        if( retval )   {
-                printk("%s: Register IPC API Short device failed\n", __FUNCTION__);
-                return -ENODEV;
-        }
-	
-	ipc_short_ch_desc.type  = HW_CTRL_IPC_SHORT_MSG;
+	retval = misc_register(&ipc_api_short_device);
+	if (retval) {
+		printk(KERN_ERR "%s: Register IPC API Short device failed\n",
+		       __func__);
+		return -ENODEV;
+	}
+
+	ipc_short_ch_desc.type = HW_CTRL_IPC_SHORT_MSG;
 	ipc_short_ch_desc.index = 0;
-	ipc_short_ch_desc.read_callback   = &shortmsg_read_callback;
-	ipc_short_ch_desc.write_callback  = &shortmsg_write_callback;
+	ipc_short_ch_desc.read_callback = &shortmsg_read_callback;
+	ipc_short_ch_desc.write_callback = &shortmsg_write_callback;
 	ipc_short_ch_desc.notify_callback = &shortmsg_notify_callback;
 
-        ipc_data_ch_desc.type  = HW_CTRL_IPC_PACKET_DATA;
-        ipc_data_ch_desc.index = 0;
-        ipc_data_ch_desc.read_callback   = &data_read_callback;
-        ipc_data_ch_desc.write_callback  = &data_write_callback;
-        ipc_data_ch_desc.notify_callback = &data_notify_callback;
+	ipc_data_ch_desc.type = HW_CTRL_IPC_PACKET_DATA;
+	ipc_data_ch_desc.index = 0;
+	ipc_data_ch_desc.read_callback = &data_read_callback;
+	ipc_data_ch_desc.write_callback = &data_write_callback;
+	ipc_data_ch_desc.notify_callback = &data_notify_callback;
 
-        return retval;
+	return retval;
 }
 
 static void __exit ipc_api_test_exit(void)
 {
 	ENTER_FUNC();
-	misc_deregister( &ipc_api_data_device);
-	misc_deregister( &ipc_api_short_device);
+	misc_deregister(&ipc_api_data_device);
+	misc_deregister(&ipc_api_short_device);
 }
 
 /* the module entry declaration of this driver */
 module_init(ipc_api_test_init);
 module_exit(ipc_api_test_exit);
-
-

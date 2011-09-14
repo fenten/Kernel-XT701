@@ -1,7 +1,7 @@
 /******************************************************************************
  * NetMUX protocol.h                                                          *
  *                                                                            *
- * Copyright Motorola 2006-2007                                                    *
+ * Copyright (C) 2006-2010 Motorola, Inc.                                     *
  *                                                                            *
  * Redistribution and use in source and binary forms, with or without         *
  * modification, are permitted provided that the following conditions are     *
@@ -33,6 +33,7 @@
  *   ----------  ----------  -----------------------------------------------  *
  *   2006/09/28  Motorola    Initial version                                  *
  *   2007/08/16  Motorola    Add support for larger bytecredit                *
+ *   2010/04/28  Motorola    Format cleanup                                   *
  ******************************************************************************/
 
 /* protocol.h provides functions for parsing and assembly data to be          */
@@ -53,14 +54,14 @@
  * The following functions are declared in protocol.c
  */
 
-void  ApplyDataHdr           (int8, COMMBUFF**, MUX*);
-int32 TransmitCredit         (int8, int8, int32, int32, MUX*);
-int32 TransmitEnableMUX      (int8, MUX*);
-int32 TransmitDisableMUX     (int8, MUX*);
-int32 TransmitEnableChannel  (int8, int8, int8, int8, int32, int32, MUX*);
-int32 TransmitDisableChannel (int8, int8, int8, int8, MUX*);
-int32 TransmitQueryInterface (int8, int8, int8, sint8*, MUX*);
-int32 TransmitChannelSignal  (int8, int8, int32, MUX*);
+void ApplyDataHdr(int8, COMMBUFF **, MUX *);
+int32 TransmitCredit(int8, int8, int32, int32, MUX *);
+int32 TransmitEnableMUX(int8, MUX *);
+int32 TransmitDisableMUX(int8, MUX *);
+int32 TransmitEnableChannel(int8, int8, int8, int8, int32, int32, MUX *);
+int32 TransmitDisableChannel(int8, int8, int8, int8, MUX *);
+int32 TransmitQueryInterface(int8, int8, int8, sint8 *, MUX *);
+int32 TransmitChannelSignal(int8, int8, int32, MUX *);
 
 
 #endif

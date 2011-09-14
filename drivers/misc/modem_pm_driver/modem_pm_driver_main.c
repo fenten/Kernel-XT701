@@ -28,8 +28,8 @@
 #include <linux/module.h>
 #include <linux/poll.h>
 #include <linux/semaphore.h>
-#include <mach/omap34xx.h>
-#include <mach/resource.h>
+#include <plat/omap34xx.h>
+#include <plat/resource.h>
 #include "modem_pm_driver.h"
 
 static char modem_pm_driver_opened;

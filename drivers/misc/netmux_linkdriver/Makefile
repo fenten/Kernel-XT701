@@ -2,4 +2,4 @@
 # Makefile for the netmux drivers.
 #
 
-obj-m +=  usb/
+obj-$(CONFIG_NETMUX_LINKDRIVER) +=  usb/

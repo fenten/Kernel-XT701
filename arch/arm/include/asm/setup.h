@@ -2,10 +2,6 @@
  *  linux/include/asm/setup.h
  *
  *  Copyright (C) 1997-1999 Russell King
- *  Copyright (C) 2006-2009 Motorola, Inc.
- *    
- * Date         Author          Comment
- * 06/2009      Motorola        Added Motorola specific ATAGs support.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -18,15 +14,9 @@
 #ifndef __ASMARM_SETUP_H
 #define __ASMARM_SETUP_H
 
-#include <asm/types.h>
+#include <linux/types.h>
 
 #define COMMAND_LINE_SIZE 1024
-
-#if defined(CONFIG_MACH_MAPPHONE) || defined(CONFIG_MOT_FEAT_DEVICE_TREE)
-/* Magic number at the beginning of the serialized device tree. */
-#define FLATTREE_BEGIN_SERIALIZED           0xD00DFEED
-#define FLATTREE_BEGIN_SERIALIZED_OTHEREND  0xEDFE0DD0
-#endif
 
 /* The list ends with an ATAG_NONE node. */
 #define ATAG_NONE	0x00000000
@@ -146,13 +136,6 @@ struct tag_acorn {
 	__u8 adfsdrives;
 };
 
-/* TI OMAP specific information */
-#define ATAG_BOARD       0x414f4d50
-
-struct tag_omap {
-	u8 data[0];
-};
-
 /* footbridge memory clock, see arch/arm/mach-footbridge/arch.c */
 #define ATAG_MEMCLK	0x41000402
 
@@ -160,7 +143,8 @@ struct tag_memclk {
 	__u32 fmemclk;
 };
 
-#if defined(CONFIG_MACH_MAPPHONE) || defined(CONFIG_BOOTINFO)
+#ifdef CONFIG_BOOTINFO
+
 /* Powerup Reason */
 #define ATAG_POWERUP_REASON 0xf1000401
 
@@ -180,13 +164,6 @@ struct tag_mbm_loader_version {
 	u32 mbm_loader_version;
 };
 
-/* Flat dev tree address */
-#define ATAG_FLAT_DEV_TREE_ADDRESS 0xf100040A
-struct tag_flat_dev_tree_address {
-	u32 address;
-	u32 size;
-};
-
 /* Battery status at boot */
 #define ATAG_BATTERY_STATUS_AT_BOOT 0xf100040E
 struct tag_battery_status_at_boot {
@@ -199,14 +176,15 @@ struct tag_battery_status_at_boot {
 struct tag_cid_recover_boot {
 	u8 cid_recover_boot;
 };
-#else
+
+#endif
+
 /* Flat dev tree address */
 #define ATAG_FLAT_DEV_TREE_ADDRESS 0xf100040A
 struct tag_flat_dev_tree_address {
 	u32 address;
 	u32 size;
 };
-#endif /* CONFIG_BOOTINFO */
 
 struct tag {
 	struct tag_header hdr;
@@ -227,27 +205,20 @@ struct tag {
 		struct tag_acorn	acorn;
 
 		/*
-		 * OMAP specific
-                 */
-                struct tag_omap         omap;
-
-		/*
 		 * DC21285 specific
 		 */
 		struct tag_memclk	memclk;
-#if defined(CONFIG_MACH_MAPPHONE) || defined(CONFIG_BOOTINFO)
+#ifdef CONFIG_BOOTINFO
 		/*
 		 * Motorola specific ATAGs
 		 */
 		struct tag_powerup_reason powerup_reason;
 		struct tag_mbm_version mbm_version;
                 struct tag_mbm_loader_version mbm_loader_version;
+		struct tag_battery_status_at_boot battery_status_at_boot;
+		struct tag_cid_recover_boot cid_recover_boot;
+#endif
 		struct tag_flat_dev_tree_address flat_dev_tree;
-                struct tag_battery_status_at_boot battery_status_at_boot;
-				struct tag_cid_recover_boot cid_recover_boot;
-#else
-		struct tag_flat_dev_tree_address flat_dev_tree_address;
-#endif /* CONFIG_BOOTINFO */
 	} u;
 };
 
@@ -284,7 +255,8 @@ static struct tagtable __tagtable_##fn __tag = { tag, fn }
 struct membank {
 	unsigned long start;
 	unsigned long size;
-	int           node;
+	unsigned short node;
+	unsigned short highmem;
 };
 
 struct meminfo {

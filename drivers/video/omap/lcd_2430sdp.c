@@ -26,15 +26,16 @@
 #include <linux/delay.h>
 #include <linux/gpio.h>
 #include <linux/i2c/twl4030.h>
-#include <linux/omapfb.h>
 
-#include <mach/mux.h>
+#include <plat/mux.h>
 #include <asm/mach-types.h>
+
+#include "omapfb.h"
 
 #define SDP2430_LCD_PANEL_BACKLIGHT_GPIO	91
 #define SDP2430_LCD_PANEL_ENABLE_GPIO		154
-#define SDP3430_LCD_PANEL_BACKLIGHT_GPIO 	24
-#define SDP3430_LCD_PANEL_ENABLE_GPIO 		28
+#define SDP3430_LCD_PANEL_BACKLIGHT_GPIO	24
+#define SDP3430_LCD_PANEL_ENABLE_GPIO		28
 
 static unsigned backlight_gpio;
 static unsigned enable_gpio;
@@ -75,6 +76,8 @@ static int sdp2430_panel_init(struct lcd_panel *panel,
 
 static void sdp2430_panel_cleanup(struct lcd_panel *panel)
 {
+	gpio_free(backlight_gpio);
+	gpio_free(enable_gpio);
 }
 
 static int sdp2430_panel_enable(struct lcd_panel *panel)
@@ -100,7 +103,7 @@ static int sdp2430_panel_enable(struct lcd_panel *panel)
 		grp_reg = TWL4030_VAUX2_DEV_GRP;
 		grp_val = ENABLE_VAUX2_DEV_GRP;
 	}
-		
+
 	gpio_set_value(enable_gpio, 1);
 	gpio_set_value(backlight_gpio, 1);
 
@@ -119,7 +122,7 @@ static void sdp2430_panel_disable(struct lcd_panel *panel)
 	if (omap_rev() > OMAP3430_REV_ES1_0) {
 		t2_out(PM_RECEIVER, 0x0, TWL4030_VPLL2_DEDICATED);
 		t2_out(PM_RECEIVER, 0x0, TWL4030_VPLL2_DEV_GRP);
-		mdelay(4);
+		msleep(4);
 	}
 }
 
@@ -164,7 +167,8 @@ static int sdp2430_panel_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static int sdp2430_panel_suspend(struct platform_device *pdev, pm_message_t mesg)
+static int sdp2430_panel_suspend(struct platform_device *pdev,
+					pm_message_t mesg)
 {
 	return 0;
 }

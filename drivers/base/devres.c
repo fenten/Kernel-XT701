@@ -24,11 +24,7 @@ struct devres_node {
 struct devres {
 	struct devres_node		node;
 	/* -- 3 pointers */
-#ifdef CONFIG_DEBUG_MEMLEAK
-	unsigned long long		data[0];/* guarantee ull alignment */
-#else
 	unsigned long long		data[];	/* guarantee ull alignment */
-#endif
 };
 
 struct devres_group {
@@ -432,6 +428,9 @@ int devres_release_all(struct device *dev)
 {
 	unsigned long flags;
 
+	/* Looks like an uninitialized device structure */
+	if (WARN_ON(dev->devres_head.next == NULL))
+		return -ENODEV;
 	spin_lock_irqsave(&dev->devres_lock, flags);
 	return release_nodes(dev, dev->devres_head.next, &dev->devres_head,
 			     flags);

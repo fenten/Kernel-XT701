@@ -19,10 +19,10 @@
 #include <linux/gpio_event.h>
 #include <linux/keyreset.h>
 
-#include <mach/mux.h>
-#include <mach/gpio.h>
-#include <mach/keypad.h>
-#include <mach/board-sholes.h>
+#include <plat/mux.h>
+#include <plat/gpio.h>
+#include <plat/keypad.h>
+#include <plat/board-sholes.h>
 
 static unsigned int sholes_col_gpios[] = { 43, 53, 54, 55, 56, 57, 58, 63 };
 static unsigned int sholes_row_gpios[] = { 34, 35, 36, 37, 38, 39, 40, 41 };

@@ -24,10 +24,11 @@
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
 #include <linux/i2c/twl4030.h>
-#include <linux/omapfb.h>
 
-#include <mach/mux.h>
+#include <plat/mux.h>
 #include <asm/mach-types.h>
+
+#include "omapfb.h"
 
 #define LCD_PANEL_ENABLE_GPIO       153
 #define LCD_PANEL_LR                2
@@ -35,10 +36,6 @@
 #define LCD_PANEL_INI               152
 #define LCD_PANEL_QVGA              154
 #define LCD_PANEL_RESB              155
-
-#define LCD_XRES	 	480
-#define LCD_YRES 		640
-#define LCD_PIXCLOCK		26000 /* in kHz  */
 
 #define ENABLE_VDAC_DEDICATED	0x03
 #define ENABLE_VDAC_DEV_GRP	0x20
@@ -76,6 +73,11 @@ static int omap3evm_panel_init(struct lcd_panel *panel,
 
 static void omap3evm_panel_cleanup(struct lcd_panel *panel)
 {
+	gpio_free(LCD_PANEL_QVGA);
+	gpio_free(LCD_PANEL_RESB);
+	gpio_free(LCD_PANEL_INI);
+	gpio_free(LCD_PANEL_UD);
+	gpio_free(LCD_PANEL_LR);
 }
 
 static int omap3evm_panel_enable(struct lcd_panel *panel)
@@ -123,8 +125,8 @@ struct lcd_panel omap3evm_panel = {
 
 	.bpp		= 16,
 	.data_lines	= 18,
-	.x_res		= LCD_XRES,
-	.y_res		= LCD_YRES,
+	.x_res		= 480,
+	.y_res		= 640,
 	.hsw		= 3,		/* hsync_len (4) - 1 */
 	.hfp		= 3,		/* right_margin (4) - 1 */
 	.hbp		= 39,		/* left_margin (40) - 1 */
@@ -132,7 +134,7 @@ struct lcd_panel omap3evm_panel = {
 	.vfp		= 2,		/* lower_margin */
 	.vbp		= 7,		/* upper_margin (8) - 1 */
 
-	.pixel_clock	= LCD_PIXCLOCK,
+	.pixel_clock	= 26000,
 
 	.init		= omap3evm_panel_init,
 	.cleanup	= omap3evm_panel_cleanup,

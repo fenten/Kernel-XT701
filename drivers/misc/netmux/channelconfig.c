@@ -1,7 +1,7 @@
 /******************************************************************************
  * NetMUX channelconfig.c                                                     *
  *                                                                            *
- * Copyright (C) Motorola 2006                                                *
+ * Copyright (C) 2006-2010 Motorola, Inc.                                     *
  *                                                                            *
  * Redistribution and use in source and binary forms, with or without         *
  * modification, are permitted provided that the following conditions are     *
@@ -33,6 +33,7 @@
  *   ----------  ----------  -----------------------------------------------  *
  *   2006/09/28  Motorola    Initial version                                  *
  *   2006/12/19  Motorola    Changed configdata to be NULL                    *
+ *   2010/04/28  Motorola    Format cleanup                                   *
  ******************************************************************************/
 
 /* channelconfig.c initializes channel configuration structures for the       */
@@ -48,4 +49,4 @@
  */
 int32 netmux_configdata_count = 0;
 
-CONFIGDATA* netmux_configdata = NULL;
+CONFIGDATA *netmux_configdata = NULL;

@@ -24,8 +24,8 @@
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  */
 
-#include <asm/cacheflush.h>
 
+#include <asm/cacheflush.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/clk.h>
@@ -37,12 +37,19 @@
 #include "ispmmu.h"
 #include "ispreg.h"
 #include "ispccdc.h"
-#include "isph3a.h"
-#include "isphist.h"
-#include "isp_af.h"
 #include "isppreview.h"
 #include "ispresizer.h"
 #include "ispcsi2.h"
+#include "isp_mem_process.h"
+#if defined(CONFIG_VIDEO_OMAP3_HP3A)
+ #include "hp3a.h"
+#else
+ #include "isph3a.h"
+ #include "isphist.h"
+ #include "isp_af.h"
+#endif
+
+#define USE_LSC_WORKAROUND
 
 static struct isp_device *omap3isp;
 
@@ -50,9 +57,7 @@ static int isp_try_size(struct v4l2_pix_format *pix_input,
 			struct v4l2_pix_format *pix_output);
 
 static void isp_save_ctx(void);
-
 static void isp_restore_ctx(void);
-
 static void isp_buf_init(void);
 
 /* List of image formats supported via OMAP ISP */
@@ -174,8 +179,10 @@ struct isp_bufs {
 	int queue;
 	/* Buffer that is being processed. */
 	int done;
-	/* Wait for this many hs_vs before anything else. */
-	int wait_hs_vs;
+	/* Skip this many frames before starting bayer capture */
+	int wait_bayer_frame;
+	/* Skip this many frames before starting yuv capture */
+	int wait_yuv_frame;
 };
 
 /**
@@ -234,8 +241,16 @@ struct isp_module {
 	unsigned int resizer_output_height;
 };
 
-#define RAW_CAPTURE(isp)					\
-	(!((isp)->module.isp_pipeline & OMAP_ISP_PREVIEW))
+#define CCDC_CAPTURE(isp)					\
+	((isp)->module.isp_pipeline == OMAP_ISP_CCDC)
+
+#define CCDC_PREV_CAPTURE(isp)					\
+	((isp)->module.isp_pipeline == (OMAP_ISP_CCDC | OMAP_ISP_PREVIEW))
+
+#define CCDC_PREV_RESZ_CAPTURE(isp)					\
+	((isp)->module.isp_pipeline == (OMAP_ISP_CCDC | \
+					OMAP_ISP_PREVIEW | \
+					OMAP_ISP_RESIZER))
 
 /**
  * struct isp - Structure for storing ISP Control module information
@@ -254,6 +269,8 @@ static struct isp {
 	struct clk *cam_ick;
 	struct clk *cam_mclk;
 	struct clk *csi2_fck;
+	u32 mclk_hz;
+	u32 mclk_src_div;
 	struct isp_interface_config *config;
 	dma_addr_t tmp_buf;
 	size_t tmp_buf_size;
@@ -261,6 +278,8 @@ static struct isp {
 	struct isp_bufs bufs;
 	struct isp_irq irq;
 	struct isp_module module;
+	enum isp_running running;
+	int isp_lsc_workaround;
 } isp_obj;
 
 /* Structure for saving/restoring ISP module registers */
@@ -305,6 +324,23 @@ void isp_reg_writel(u32 reg_value, enum isp_mem_resources isp_mmio_range,
 		     omap3isp->mmio_base[isp_mmio_range] + reg_offset);
 }
 EXPORT_SYMBOL(isp_reg_writel);
+
+void isp_flush(void)
+{
+	isp_reg_writel(0, OMAP3_ISP_IOMEM_MAIN, ISP_REVISION);
+	isp_reg_readl(OMAP3_ISP_IOMEM_MAIN, ISP_REVISION);
+}
+
+enum isp_running isp_state(void)
+{
+	return isp_obj.running;
+}
+
+int isp_lsc_workaround_enabled(void)
+{
+	return isp_obj.isp_lsc_workaround;
+}
+EXPORT_SYMBOL(isp_lsc_workaround_enabled);
 
 /*
  *
@@ -423,21 +459,23 @@ static int ispccdc_sbl_wait_idle(int max_wait)
 	return isp_wait(ispccdc_sbl_busy, 0, max_wait);
 }
 
-static void isp_enable_interrupts(int is_raw)
+static void isp_enable_interrupts(void)
 {
-	isp_reg_writel(-1, OMAP3_ISP_IOMEM_MAIN, ISP_IRQ0STATUS);
+	isp_reg_writel(-1, OMAP3_ISP_IOMEM_MAIN,
+			ISP_IRQ0STATUS);
+
 	isp_reg_or(OMAP3_ISP_IOMEM_MAIN, ISP_IRQ0ENABLE,
-		   IRQ0ENABLE_CCDC_LSC_PREF_ERR_IRQ |
 		   IRQ0ENABLE_HS_VS_IRQ |
-		   IRQ0ENABLE_CCDC_VD0_IRQ |
-		   IRQ0ENABLE_CCDC_VD1_IRQ);
+		   IRQ0ENABLE_CCDC_VD0_IRQ);
 
-	if (is_raw)
-		return;
+	if (CCDC_PREV_CAPTURE(&isp_obj))
+		isp_reg_or(OMAP3_ISP_IOMEM_MAIN, ISP_IRQ0ENABLE,
+			   IRQ0ENABLE_PRV_DONE_IRQ);
 
-	isp_reg_or(OMAP3_ISP_IOMEM_MAIN, ISP_IRQ0ENABLE,
-		   IRQ0ENABLE_PRV_DONE_IRQ |
-		   IRQ0ENABLE_RSZ_DONE_IRQ);
+	if (CCDC_PREV_RESZ_CAPTURE(&isp_obj))
+		isp_reg_or(OMAP3_ISP_IOMEM_MAIN, ISP_IRQ0ENABLE,
+			IRQ0ENABLE_PRV_DONE_IRQ |
+			IRQ0ENABLE_RSZ_DONE_IRQ);
 
 	return;
 }
@@ -445,12 +483,18 @@ static void isp_enable_interrupts(int is_raw)
 static void isp_disable_interrupts(void)
 {
 	isp_reg_and(OMAP3_ISP_IOMEM_MAIN, ISP_IRQ0ENABLE,
-		    ~(IRQ0ENABLE_CCDC_LSC_PREF_ERR_IRQ |
-		      IRQ0ENABLE_HS_VS_IRQ |
-		      IRQ0ENABLE_CCDC_VD0_IRQ |
-		      IRQ0ENABLE_CCDC_VD1_IRQ |
-		      IRQ0ENABLE_PRV_DONE_IRQ |
-		      IRQ0ENABLE_RSZ_DONE_IRQ));
+		~(IRQ0ENABLE_HS_VS_IRQ |
+		IRQ0ENABLE_CCDC_VD0_IRQ));
+
+	if (CCDC_PREV_CAPTURE(&isp_obj))
+		isp_reg_and(OMAP3_ISP_IOMEM_MAIN, ISP_IRQ0ENABLE,
+		~IRQ0ENABLE_PRV_DONE_IRQ);
+
+	if (CCDC_PREV_RESZ_CAPTURE(&isp_obj))
+		isp_reg_and(OMAP3_ISP_IOMEM_MAIN, ISP_IRQ0ENABLE,
+		~(IRQ0ENABLE_PRV_DONE_IRQ|IRQ0ENABLE_RSZ_DONE_IRQ));
+
+	return;
 }
 
 /**
@@ -505,6 +549,12 @@ int isp_set_callback(enum isp_callback_type type, isp_callback_t callback,
 		isp_reg_or(OMAP3_ISP_IOMEM_MAIN, ISP_IRQ0ENABLE,
 			   IRQ0ENABLE_PRV_DONE_IRQ);
 		break;
+	case CBK_RESZ_DONE:
+		isp_reg_writel(IRQ0ENABLE_RSZ_DONE_IRQ,
+			       OMAP3_ISP_IOMEM_MAIN, ISP_IRQ0STATUS);
+		isp_reg_or(OMAP3_ISP_IOMEM_MAIN, ISP_IRQ0ENABLE,
+			   IRQ0ENABLE_RSZ_DONE_IRQ);
+		break;
 	default:
 		break;
 	}
@@ -556,6 +606,10 @@ int isp_unset_callback(enum isp_callback_type type)
 		isp_reg_and(OMAP3_ISP_IOMEM_MAIN, ISP_IRQ0ENABLE,
 			    ~IRQ0ENABLE_PRV_DONE_IRQ);
 		break;
+	case CBK_RESZ_DONE:
+		isp_reg_and(OMAP3_ISP_IOMEM_MAIN, ISP_IRQ0ENABLE,
+			    ~IRQ0ENABLE_RSZ_DONE_IRQ);
+		break;
 	default:
 		break;
 	}
@@ -572,7 +626,7 @@ EXPORT_SYMBOL(isp_unset_callback);
  * Configures the specified MCLK divisor in the ISP timing control register
  * (TCTRL_CTRL) to generate the desired xclk clock value.
  *
- * Divisor = CM_CAM_MCLK_HZ / xclk
+ * Divisor = isp_obj.mclk_hz / xclk
  *
  * Returns the final frequency that is actually being generated
  **/
@@ -581,14 +635,14 @@ u32 isp_set_xclk(u32 xclk, u8 xclksel)
 	u32 divisor;
 	u32 currentxclk;
 
-	if (xclk >= CM_CAM_MCLK_HZ) {
+	if (xclk >= isp_obj.mclk_hz) {
 		divisor = ISPTCTRL_CTRL_DIV_BYPASS;
-		currentxclk = CM_CAM_MCLK_HZ;
+		currentxclk = isp_obj.mclk_hz;
 	} else if (xclk >= 2) {
-		divisor = CM_CAM_MCLK_HZ / xclk;
+		divisor = isp_obj.mclk_hz / xclk;
 		if (divisor >= ISPTCTRL_CTRL_DIV_BYPASS)
 			divisor = ISPTCTRL_CTRL_DIV_BYPASS - 1;
-		currentxclk = CM_CAM_MCLK_HZ / divisor;
+		currentxclk = isp_obj.mclk_hz / divisor;
 	} else {
 		divisor = xclk;
 		currentxclk = 0;
@@ -626,7 +680,7 @@ EXPORT_SYMBOL(isp_set_xclk);
  *
  * Sets the power settings for the ISP, and SBL bus.
  **/
-static void isp_power_settings(int idle)
+void isp_power_settings(int idle)
 {
 	if (idle) {
 		isp_reg_writel(ISP_SYSCONFIG_AUTOIDLE |
@@ -673,6 +727,7 @@ static void isp_power_settings(int idle)
 			       ISP_CTRL);
 	}
 }
+EXPORT_SYMBOL(isp_power_settings);
 
 #define BIT_SET(var, shift, mask, val)		\
 	do {					\
@@ -850,13 +905,39 @@ int isp_configure_interface(struct isp_interface_config *config)
 
 	/* Set sensor specific fields in CCDC and Previewer module.*/
 	ispccdc_set_wenlog(config->wenlog);
-	ispccdc_set_crop_offset(config->raw_fmt_in);
+	ispccdc_set_dcsub(config->dcsub);
+	ispccdc_set_raw_offset(config->raw_fmt_in);
+
+	isp_obj.mclk_hz = config->cam_mclk;
+	isp_obj.mclk_src_div = config->cam_mclk_src_div;
+
+	/* MAKE THIS BETTER */
+	omap_writel(isp_obj.mclk_src_div, OMAP3_CM_CLKSEL_CAM);
 
 	return 0;
 }
 EXPORT_SYMBOL(isp_configure_interface);
 
+/**
+ * isp_configure_interface_bridge - Configure CCDC i/f bridge.
+ *
+ * Sets the bit field that controls the 8 to 16-bit bridge at
+ * the input to CCDC.
+ **/
+int isp_configure_interface_bridge(u32 par_bridge)
+{
+	u32 ispctrl_val = isp_reg_readl(OMAP3_ISP_IOMEM_MAIN, ISP_CTRL);
+
+	ispctrl_val &= ~ISPCTRL_PAR_BRIDGE_BENDIAN;
+	ispctrl_val |= (par_bridge << ISPCTRL_PAR_BRIDGE_SHIFT);
+	isp_reg_writel(ispctrl_val, OMAP3_ISP_IOMEM_MAIN, ISP_CTRL);
+
+	return 0;
+}
+EXPORT_SYMBOL(isp_configure_interface_bridge);
+
 static int isp_buf_process(struct isp_bufs *bufs);
+static void isp_buf_complete(struct isp_bufs *bufs);
 
 /**
  * omap34xx_isp_isr - Interrupt Service Routine for Camera ISP module.
@@ -872,72 +953,162 @@ static int isp_buf_process(struct isp_bufs *bufs);
  **/
 static irqreturn_t omap34xx_isp_isr(int irq, void *_isp)
 {
+	u32 irqstatus = 0;
 	struct isp *isp = _isp;
 	struct isp_irq *irqdis = &isp->irq;
 	struct isp_bufs *bufs = &isp->bufs;
-	unsigned long flags;
-	u32 irqstatus = 0;
 	unsigned long irqflags = 0;
-	int wait_hs_vs = 0;
 
+	spin_lock_irqsave(&isp_obj.lock, irqflags);
 	irqstatus = isp_reg_readl(OMAP3_ISP_IOMEM_MAIN, ISP_IRQ0STATUS);
 	isp_reg_writel(irqstatus, OMAP3_ISP_IOMEM_MAIN, ISP_IRQ0STATUS);
 
-	spin_lock_irqsave(&bufs->lock, flags);
-	wait_hs_vs = bufs->wait_hs_vs;
-	if (irqstatus & HS_VS && bufs->wait_hs_vs)
-		bufs->wait_hs_vs--;
-	spin_unlock_irqrestore(&bufs->lock, flags);
+	if (isp->running == ISP_RUNNING) {
+		if ((irqstatus & CCDC_VD0) &&
+				CCDC_CAPTURE(&isp_obj)) {
+			if (bufs->wait_bayer_frame) {
+				bufs->wait_bayer_frame--;
+				irqstatus &= ~CCDC_VD0;
+			}
+		} else if ((irqstatus & RESZ_DONE) &&
+				CCDC_PREV_RESZ_CAPTURE(&isp_obj)) {
+			if (bufs->wait_yuv_frame) {
+				bufs->wait_yuv_frame--;
+				irqstatus &= ~RESZ_DONE;
+			}
+		} else if ((irqstatus & PREV_DONE) &&
+				CCDC_PREV_CAPTURE(&isp_obj)) {
+			if (bufs->wait_yuv_frame) {
+				bufs->wait_yuv_frame--;
+				irqstatus &= ~PREV_DONE;
+			}
+		}
+	}
 
-	spin_lock_irqsave(&isp_obj.lock, irqflags);
-	/*
-	 * We need to wait for the first HS_VS interrupt from CCDC.
-	 * Otherwise our frame (and everything else) might be bad.
-	 */
-	if (wait_hs_vs)
-		goto out_ignore_buff;
+	if (irqstatus & CSIA) {
+		struct isp_buf *buf = ISP_BUF_DONE(bufs);
+		isp_csi2_isr();
+		buf->vb_state = VIDEOBUF_ERROR;
+	}
+
+	if (irqstatus & IRQ0STATUS_CSIB_IRQ) {
+		u32 ispcsi1_irqstatus;
+		ispcsi1_irqstatus = isp_reg_readl(OMAP3_ISP_IOMEM_CCP2,
+						  ISPCSI1_LC01_IRQSTATUS);
+		DPRINTK_ISPCTRL("%x\n", ispcsi1_irqstatus);
+	}
+
+	if (irqstatus & HS_VS) {
+		if (isp_obj.isp_lsc_workaround == 0 &&
+			CCDC_PREV_RESZ_CAPTURE(&isp_obj) &&
+			!ispresizer_busy() && !isppreview_busy()) {
+				if (isp_obj.module.applyCrop == 0 &&
+					isp_obj.running == ISP_RUNNING)
+					ispresizer_enable(1);
+				else {
+					ispresizer_applycrop();
+					if (!ispresizer_busy())
+						isp_obj.module.applyCrop = 0;
+				}
+			}
+#if defined(CONFIG_VIDEO_OMAP3_HP3A)
+		hp3a_ccdc_start();
+#endif
+	}
 
 	if (irqstatus & CCDC_VD0) {
-		if (RAW_CAPTURE(&isp_obj))
+#if defined(CONFIG_VIDEO_OMAP3_HP3A)
+		if (isp_obj.running == ISP_RUNNING)
+			hp3a_ccdc_done();
+		else if (isp_obj.running == ISP_STOPPING)
+			ispccdc_enable(0);
+#endif
+		if (CCDC_CAPTURE(&isp_obj))
 			isp_buf_process(bufs);
-		if (!ispccdc_busy())
-			ispccdc_config_shadow_registers();
+	}
+
+	/*
+	if (irqstatus & CCDC_VD1) {
+		if (CCDC_CAPTURE(&isp_obj))
+			ispccdc_enable(0);
+	}
+	*/
+
+	if (irqstatus & LSC_PRE_ERR) {
+		if (isp_obj.running == ISP_RUNNING) {
+			if (!CCDC_CAPTURE(&isp_obj)) {
+				struct isp_buf *buf = ISP_BUF_DONE(bufs);
+				/* Mark buffer faulty. */
+				buf->vb_state = VIDEOBUF_ERROR;
+			}
+			ispccdc_lsc_state_handler(LSC_PRE_ERR);
+			printk(KERN_ERR "isp: lsc prefetch error\n");
+		}
 	}
 
 	if (irqstatus & PREV_DONE) {
-		if (irqdis->isp_callbk[CBK_PREV_DONE])
+#ifdef CONFIG_VIDEO_OMAP3_HP3A
+		hp3a_frame_done();
+#endif
+		if (irqdis->isp_callbk[CBK_PREV_DONE]) {
 			irqdis->isp_callbk[CBK_PREV_DONE](
 				PREV_DONE,
 				irqdis->isp_callbk_arg1[CBK_PREV_DONE],
 				irqdis->isp_callbk_arg2[CBK_PREV_DONE]);
-		else if (!RAW_CAPTURE(&isp_obj) && !ispresizer_busy()) {
-			if (isp_obj.module.applyCrop) {
-				ispresizer_applycrop();
-				if (!ispresizer_busy())
-					isp_obj.module.applyCrop = 0;
-			}
-			if (!isppreview_busy()) {
-				ispresizer_enable(1);
-				if (isppreview_busy()) {
-					/* FIXME: locking! */
-					ISP_BUF_DONE(bufs)->vb_state =
-						VIDEOBUF_ERROR;
-					printk(KERN_ERR "%s: can't stop"
-					       " preview\n", __func__);
+		} else {
+			if (CCDC_PREV_RESZ_CAPTURE(&isp_obj) &&
+				isp_obj.isp_lsc_workaround == 1) {
+				if (!ispresizer_busy()) {
+					if (isp_obj.module.applyCrop) {
+						ispresizer_applycrop();
+						if (!ispresizer_busy())
+							isp_obj \
+							.module.applyCrop = 0;
+					}
+					if (!isppreview_busy()) {
+						if (isp_obj.running ==
+							ISP_RUNNING)
+							ispresizer_enable(1);
+						if (isppreview_busy()) {
+							/* FIXME: locking! */
+							ISP_BUF_DONE \
+							(bufs)->vb_state =
+								VIDEOBUF_ERROR;
+							printk(KERN_ERR \
+								"%s: can't stop"
+								" preview\n",
+								__func__);
+						}
+					}
 				}
 			}
-			if (!isppreview_busy())
-				isppreview_config_shadow_registers();
-			if (!isppreview_busy())
-				isph3a_update_wb();
+
+			if (isp_obj.running == ISP_STOPPING) {
+				isppreview_enable(0);
+			} else {
+				if (!isppreview_busy())
+					isppreview_config_shadow_registers();
+#if defined(CONFIG_VIDEO_OMAP3_HP3A)
+				hp3a_update_wb();
+#else
+				if (!isppreview_busy())
+					isph3a_update_wb();
+#endif
+				if (CCDC_PREV_CAPTURE(&isp_obj))
+					isp_buf_process(bufs);
+			}
 		}
 	}
 
 	if (irqstatus & RESZ_DONE) {
-		if (!RAW_CAPTURE(&isp_obj)) {
-			if (!ispresizer_busy())
-				ispresizer_config_shadow_registers();
+		if (irqdis->isp_callbk[CBK_RESZ_DONE])
+			irqdis->isp_callbk[CBK_RESZ_DONE](
+				RESZ_DONE,
+				irqdis->isp_callbk_arg1[CBK_RESZ_DONE],
+				irqdis->isp_callbk_arg2[CBK_RESZ_DONE]);
+		else if (CCDC_PREV_RESZ_CAPTURE(&isp_obj)) {
 			isp_buf_process(bufs);
+			ispresizer_config_shadow_registers();
 		}
 	}
 
@@ -965,30 +1136,6 @@ static irqreturn_t omap34xx_isp_isr(int irq, void *_isp)
 				irqdis->isp_callbk_arg2[CBK_H3A_AF_DONE]);
 	}
 
-
-out_ignore_buff:
-	if (irqstatus & LSC_PRE_ERR) {
-		struct isp_buf *buf = ISP_BUF_DONE(bufs);
-		/* Mark buffer faulty. */
-		buf->vb_state = VIDEOBUF_ERROR;
-		ispccdc_lsc_error_handler();
-		printk(KERN_ERR "%s: lsc prefetch error\n", __func__);
-	}
-
-	if (irqstatus & CSIA) {
-		struct isp_buf *buf = ISP_BUF_DONE(bufs);
-		isp_csi2_isr();
-		buf->vb_state = VIDEOBUF_ERROR;
-	}
-
-	if (irqstatus & IRQ0STATUS_CSIB_IRQ) {
-		u32 ispcsi1_irqstatus;
-
-		ispcsi1_irqstatus = isp_reg_readl(OMAP3_ISP_IOMEM_CCP2,
-						  ISPCSI1_LC01_IRQSTATUS);
-		DPRINTK_ISPCTRL("%x\n", ispcsi1_irqstatus);
-	}
-
 	if (irqdis->isp_callbk[CBK_CATCHALL]) {
 		irqdis->isp_callbk[CBK_CATCHALL](
 			irqstatus,
@@ -996,9 +1143,17 @@ out_ignore_buff:
 			irqdis->isp_callbk_arg2[CBK_CATCHALL]);
 	}
 
+	if (irqstatus & LSC_DONE)
+		ispccdc_lsc_state_handler(LSC_DONE);
+
 	spin_unlock_irqrestore(&isp_obj.lock, irqflags);
 
-#if 1
+	if (irqstatus & LSC_PRE_COMP)
+		ispccdc_lsc_state_handler(LSC_PRE_COMP);
+
+	isp_flush();
+
+/******************************************************************************
 	{
 		static const struct {
 			int num;
@@ -1044,7 +1199,7 @@ out_ignore_buff:
 		}
 		DPRINTK_ISPCTRL("\n");
 	}
-#endif
+******************************************************************************/
 
 	return IRQ_HANDLED;
 }
@@ -1072,7 +1227,7 @@ static void isp_tmp_buf_free(void)
 }
 
 /**
- *  isp_tmp_buf_alloc - To allocate a 10MB memory
+ *  isp_tmp_buf_alloc - To allocate LSC memory
  *
  **/
 static u32 isp_tmp_buf_alloc(size_t size)
@@ -1083,15 +1238,22 @@ static u32 isp_tmp_buf_alloc(size_t size)
 
 	isp_obj.tmp_buf = ispmmu_vmalloc(size);
 	if (IS_ERR((void *)isp_obj.tmp_buf)) {
+		isp_obj.tmp_buf = 0;
 		printk(KERN_ERR "ispmmu_vmap mapping failed ");
 		return -ENOMEM;
 	}
 	isp_obj.tmp_buf_size = size;
 
-	isppreview_set_outaddr(isp_obj.tmp_buf);
-	ispresizer_set_inaddr(isp_obj.tmp_buf);
-
 	return 0;
+}
+
+/**
+ *  isp_tmp_buf_addr - Returns ISP tmp buffer address
+ *
+ **/
+dma_addr_t isp_tmp_buf_addr(void)
+{
+	return isp_obj.tmp_buf;
 }
 
 /**
@@ -1102,46 +1264,66 @@ static u32 isp_tmp_buf_alloc(size_t size)
  **/
 void isp_start(void)
 {
-	if (isp_obj.module.isp_pipeline & OMAP_ISP_PREVIEW
-	    && is_isppreview_enabled())
+	if (isp_obj.module.isp_pipeline & OMAP_ISP_PREVIEW)
 		isppreview_enable(1);
 
+#if !defined(CONFIG_VIDEO_OMAP3_HP3A)
+	isph3a_notify(0);
+	isp_af_notify(0);
+#endif
+
+	isp_obj.running = ISP_RUNNING;
 	return;
 }
 EXPORT_SYMBOL(isp_start);
 
 #define ISP_STATISTICS_BUSY			\
 	()
-#define ISP_STOP_TIMEOUT	msecs_to_jiffies(1000)
+#define ISP_STOP_TIMEOUT	msecs_to_jiffies(256)
 static int __isp_disable_modules(int suspend)
 {
-	unsigned long timeout = jiffies + ISP_STOP_TIMEOUT;
+	unsigned long timeout;
 	int reset = 0;
 
 	/*
-	 * We need to stop all the modules after CCDC first or they'll
+	 * We need to stop all the modules after CCDC or they'll
 	 * never stop since they may not get a full frame from CCDC.
 	 */
 	if (suspend) {
+#if !defined(CONFIG_VIDEO_OMAP3_HP3A)
 		isp_af_suspend();
 		isph3a_aewb_suspend();
 		isp_hist_suspend();
-		isppreview_suspend();
-		ispresizer_suspend();
+#endif
+		if (isp_obj.module.isp_pipeline & OMAP_ISP_PREVIEW)
+			isppreview_suspend();
+		if (isp_obj.module.isp_pipeline & OMAP_ISP_RESIZER)
+			ispresizer_suspend();
 	} else {
+#if !defined(CONFIG_VIDEO_OMAP3_HP3A)
 		isp_af_enable(0);
 		isph3a_aewb_enable(0);
 		isp_hist_enable(0);
-		isppreview_enable(0);
-		ispresizer_enable(0);
+#endif
+		if (isp_obj.module.isp_pipeline & OMAP_ISP_PREVIEW)
+			isppreview_enable(0);
+		if (isp_obj.module.isp_pipeline & OMAP_ISP_RESIZER)
+			ispresizer_enable(0);
 	}
 
 	timeout = jiffies + ISP_STOP_TIMEOUT;
+#if defined(CONFIG_VIDEO_OMAP3_HP3A)
+	while (hp3a_af_busy()
+	       || hp3a_hist_busy()
+	       || isppreview_busy()
+	       || ispresizer_busy()) {
+#else
 	while (isp_af_busy()
 	       || isph3a_aewb_busy()
 	       || isp_hist_busy()
 	       || isppreview_busy()
 	       || ispresizer_busy()) {
+#endif
 		if (time_after(jiffies, timeout)) {
 			printk(KERN_ERR "%s: can't stop non-ccdc modules\n",
 			       __func__);
@@ -1153,12 +1335,8 @@ static int __isp_disable_modules(int suspend)
 
 	/* Let's stop CCDC now. */
 	if (suspend)
-		/* This function supends lsc too */
-		ispccdc_suspend();
-	else {
-		ispccdc_enable_lsc(0);
-		ispccdc_enable(0);
-	}
+		ispccdc_suspend();/* This function supends lsc too */
+
 
 	timeout = jiffies + ISP_STOP_TIMEOUT;
 	while (ispccdc_busy()) {
@@ -1170,6 +1348,21 @@ static int __isp_disable_modules(int suspend)
 		msleep(1);
 	}
 
+	/* Trigger isp reset if lsc is still busy */
+	if (ispccdc_lsc_busy())
+		reset = 1;
+
+	/* disable lsc now */
+	ispccdc_enable_lsc(0);
+
+	if (!suspend) {
+		isp_csi2_irq_complexio1_set(0);
+		isp_csi2_ctrl_phy_if_enable(0);
+	}
+
+	if (!reset)
+		DPRINTK_ISPCTRL(KERN_INFO
+			"(%s) isp_complete_reset \n", __func__);
 	return reset;
 }
 
@@ -1185,11 +1378,15 @@ static int isp_suspend_modules(void)
 
 static void isp_resume_modules(void)
 {
-	ispresizer_resume();
-	isppreview_resume();
+	if (isp_obj.module.isp_pipeline & OMAP_ISP_RESIZER)
+		ispresizer_resume();
+	if (isp_obj.module.isp_pipeline & OMAP_ISP_PREVIEW)
+		isppreview_resume();
+#if !defined(CONFIG_VIDEO_OMAP3_HP3A)
 	isp_hist_resume();
 	isph3a_aewb_resume();
 	isp_af_resume();
+#endif
 	ispccdc_resume();
 }
 
@@ -1201,11 +1398,11 @@ static void isp_reset(void)
 		       | ISP_SYSCONFIG_SOFTRESET,
 		       OMAP3_ISP_IOMEM_MAIN, ISP_SYSCONFIG);
 	while (!(isp_reg_readl(OMAP3_ISP_IOMEM_MAIN, ISP_SYSSTATUS) & 0x1)) {
-		if (timeout++ > 10000) {
+		if (timeout++ > 1000) {
 			printk(KERN_ALERT "%s: cannot reset ISP\n", __func__);
 			break;
 		}
-		udelay(1);
+		udelay(10);
 	}
 }
 
@@ -1214,10 +1411,22 @@ static void isp_reset(void)
  **/
 void isp_stop()
 {
+	unsigned long irqflags = 0;
 	int reset;
 
-	isp_disable_interrupts();
+	spin_lock_irqsave(&isp_obj.lock, irqflags);
+	isp_obj.running = ISP_STOPPING;
+	ispccdc_request_lsc_enable(0);
+	ispccdc_enable(0);
+	spin_unlock_irqrestore(&isp_obj.lock, irqflags);
+#if !defined(CONFIG_VIDEO_OMAP3_HP3A)
+	isph3a_notify(1);
+	isp_af_notify(1);
+#endif
 	reset = isp_stop_modules();
+	isp_disable_interrupts();
+	isp_obj.running = ISP_STOPPED;
+	isp_buf_complete(&isp_obj.bufs);
 	isp_buf_init();
 	if (!reset)
 		return;
@@ -1230,12 +1439,12 @@ EXPORT_SYMBOL(isp_stop);
 
 static void isp_set_buf(struct isp_buf *buf)
 {
-	if (isp_obj.module.isp_pipeline & OMAP_ISP_RESIZER
-	    && is_ispresizer_enabled())
+	if (CCDC_PREV_RESZ_CAPTURE(&isp_obj))
 		ispresizer_set_outaddr(buf->isp_addr);
-	else if (isp_obj.module.isp_pipeline & OMAP_ISP_CCDC)
+	else if (CCDC_PREV_CAPTURE(&isp_obj))
+		isppreview_set_outaddr(buf->isp_addr);
+	else if (CCDC_CAPTURE(&isp_obj))
 		ispccdc_set_outaddr(buf->isp_addr);
-
 }
 
 /**
@@ -1250,20 +1459,40 @@ static u32 isp_calc_pipeline(struct v4l2_pix_format *pix_input,
 	if ((pix_input->pixelformat == V4L2_PIX_FMT_SGRBG10
 	     || pix_input->pixelformat == V4L2_PIX_FMT_SGRBG10DPCM8)
 	    && pix_output->pixelformat != V4L2_PIX_FMT_SGRBG10) {
-		isp_obj.module.isp_pipeline =
-			OMAP_ISP_CCDC | OMAP_ISP_PREVIEW | OMAP_ISP_RESIZER;
+
+		isp_obj.module.isp_pipeline = OMAP_ISP_PREVIEW |
+						      OMAP_ISP_RESIZER |
+						      OMAP_ISP_CCDC;
+
 		ispccdc_request();
 		isppreview_request();
-		ispresizer_request();
 		ispccdc_config_datapath(CCDC_RAW, CCDC_OTHERS_VP);
-		isppreview_config_datapath(PRV_RAW_CCDC, PREVIEW_MEM);
-		ispresizer_config_datapath(RSZ_MEM_YUV);
+
+		if (isp_obj.isp_lsc_workaround == 1) {
+			isppreview_config_datapath(PRV_RAW_CCDC, PREVIEW_MEM);
+			if (isp_obj.module.isp_pipeline & OMAP_ISP_RESIZER) {
+				ispresizer_request();
+				ispresizer_config_datapath(RSZ_MEM_YUV, 1);
+			}
+		} else {
+			/* ispccdc_enable_lsc(0); */
+			if (isp_obj.module.isp_pipeline & OMAP_ISP_RESIZER) {
+				isppreview_config_datapath(PRV_RAW_CCDC,
+					PREVIEW_RSZ);
+				ispresizer_request();
+				ispresizer_config_datapath(RSZ_OTFLY_YUV, 1);
+			} else {
+				isppreview_config_datapath(PRV_RAW_CCDC,
+					PREVIEW_MEM);
+			}
+		}
 	} else {
 		isp_obj.module.isp_pipeline = OMAP_ISP_CCDC;
 		ispccdc_request();
 		if (pix_input->pixelformat == V4L2_PIX_FMT_SGRBG10
 		    || pix_input->pixelformat == V4L2_PIX_FMT_SGRBG10DPCM8)
-			ispccdc_config_datapath(CCDC_RAW, CCDC_OTHERS_VP_MEM);
+			ispccdc_config_datapath(CCDC_RAW,
+				CCDC_OTHERS_VP_MEM_LSC /*CCDC_OTHERS_VP_MEM*/);
 		else
 			ispccdc_config_datapath(CCDC_YUV_SYNC,
 						CCDC_OTHERS_MEM);
@@ -1301,18 +1530,32 @@ static void isp_config_pipeline(struct v4l2_pix_format *pix_input,
 				       isp_obj.module.resizer_output_height);
 	}
 
-	if (pix_output->pixelformat == V4L2_PIX_FMT_UYVY) {
-		isppreview_config_ycpos(YCPOS_YCrYCb);
-		if (is_ispresizer_enabled())
+	if (CCDC_PREV_RESZ_CAPTURE(&isp_obj)) {
+		if (pix_output->pixelformat == V4L2_PIX_FMT_UYVY) {
+			isppreview_config_ycpos(YCPOS_YCrYCb);
 			ispresizer_config_ycpos(0);
-	} else {
-		isppreview_config_ycpos(YCPOS_CrYCbY);
-		if (is_ispresizer_enabled())
+		} else {
+			isppreview_config_ycpos(YCPOS_CrYCbY);
 			ispresizer_config_ycpos(1);
+		}
+	} else if (CCDC_PREV_CAPTURE(&isp_obj)) {
+		if (pix_output->pixelformat == V4L2_PIX_FMT_UYVY)
+			isppreview_config_ycpos(YCPOS_YCrYCb);
+		else
+			isppreview_config_ycpos(YCPOS_CrYCbY);
 	}
 
 	return;
 }
+
+void isp_set_wait_yuv(int wait_yuv)
+{
+	struct isp_bufs *bufs = &isp_obj.bufs;
+
+	bufs->wait_yuv_frame = wait_yuv;
+	return;
+}
+EXPORT_SYMBOL(isp_set_wait_yuv);
 
 static void isp_buf_init(void)
 {
@@ -1321,7 +1564,8 @@ static void isp_buf_init(void)
 
 	bufs->queue = 0;
 	bufs->done = 0;
-	bufs->wait_hs_vs = isp_obj.config->wait_hs_vs;
+	bufs->wait_bayer_frame = isp_obj.config->wait_bayer_frame;
+	bufs->wait_yuv_frame = isp_obj.config->wait_yuv_frame;
 	for (sg = 0; sg < NUM_BUFS; sg++) {
 		bufs->buf[sg].complete = NULL;
 		bufs->buf[sg].vb = NULL;
@@ -1335,9 +1579,27 @@ static void isp_buf_init(void)
  **/
 static int isp_vbq_sync(struct videobuf_buffer *vb, int when)
 {
-	flush_cache_all();
+	if (when == DMA_TO_DEVICE)
+		flush_cache_all();
 
 	return 0;
+}
+
+static void isp_buf_complete(struct isp_bufs *bufs)
+{
+	struct isp_buf *buf = NULL;
+
+	if (!ISP_BUFS_IS_EMPTY(bufs)) {
+		buf = ISP_BUF_DONE(bufs);
+		if (buf != NULL) {
+			ISP_BUF_MARK_DONE(bufs);
+			/*
+			 * Mark a buffer done to be qequeued
+			 */
+			buf->vb->state = VIDEOBUF_DONE;
+			buf->complete(buf->vb, buf->priv);
+		}
+	}
 }
 
 static int isp_buf_process(struct isp_bufs *bufs)
@@ -1351,10 +1613,13 @@ static int isp_buf_process(struct isp_bufs *bufs)
 	if (ISP_BUFS_IS_EMPTY(bufs))
 		goto out;
 
-	if (RAW_CAPTURE(&isp_obj) && ispccdc_sbl_wait_idle(1000)) {
-		printk(KERN_ERR "ccdc %d won't become idle!\n",
-		       RAW_CAPTURE(&isp_obj));
-		goto out;
+	if (CCDC_CAPTURE(&isp_obj)) {
+		if (ispccdc_sbl_wait_idle(1000)) {
+			ispccdc_enable(1);
+			printk(KERN_ERR "ccdc %d won't become idle!\n",
+			       CCDC_CAPTURE(&isp_obj));
+			goto out;
+		}
 	}
 
 	/* We had at least one buffer in queue. */
@@ -1367,19 +1632,26 @@ static int isp_buf_process(struct isp_bufs *bufs)
 	} else {
 		/* Tell ISP not to write any of our buffers. */
 		isp_disable_interrupts();
-		if (RAW_CAPTURE(&isp_obj))
-			ispccdc_enable(0);
-		else
-			ispresizer_enable(0);
 		/*
-		 * We must wait for the HS_VS since before that the
+		 * We must wait for one HS_VS since before that the
 		 * CCDC may trigger interrupts even if it's not
 		 * receiving a frame.
 		 */
-		bufs->wait_hs_vs = isp_obj.config->wait_hs_vs;
+		if (CCDC_CAPTURE(&isp_obj)) {
+			/*
+			 * Disabling CCDC out to memory to avoid frame data
+			 * being over written.
+			 */
+			ispccdc_enable(0);
+			ispccdc_set_outaddr(isp_tmp_buf_addr());
+		} else if (CCDC_PREV_CAPTURE(&isp_obj))
+			isppreview_enable(0);
+		else if (CCDC_PREV_RESZ_CAPTURE(&isp_obj))
+			ispresizer_enable(0);
 	}
-	if ((RAW_CAPTURE(&isp_obj) && ispccdc_busy())
-	    || (!RAW_CAPTURE(&isp_obj) && ispresizer_busy())) {
+	if ((CCDC_CAPTURE(&isp_obj) && ispccdc_busy()) ||
+		(CCDC_PREV_RESZ_CAPTURE(&isp_obj) && ispresizer_busy()) ||
+		(CCDC_PREV_CAPTURE(&isp_obj) && isppreview_busy())) {
 		/*
 		 * Next buffer available: for the transfer to succeed, the
 		 * CCDC (RAW capture) or resizer (YUV capture) must be idle
@@ -1417,7 +1689,6 @@ out:
 		 * We want to dequeue a buffer from the video buffer
 		 * queue. Let's do it!
 		 */
-		isp_vbq_sync(buf->vb, DMA_FROM_DEVICE);
 		buf->vb->state = buf->vb_state;
 		buf->complete(buf->vb, buf->priv);
 	}
@@ -1452,8 +1723,10 @@ int isp_buf_queue(struct videobuf_buffer *vb,
 	buf->priv = priv;
 	buf->vb_state = VIDEOBUF_DONE;
 
-	if (ISP_BUFS_IS_EMPTY(bufs)) {
-		isp_enable_interrupts(RAW_CAPTURE(&isp_obj));
+	/* If ISP is in the process of stopping then don't re-enable ISP */
+	if (ISP_BUFS_IS_EMPTY(bufs) &&
+		isp_obj.running != ISP_STOPPING) {
+		isp_enable_interrupts();
 		isp_set_buf(buf);
 		ispccdc_enable(1);
 		isp_start();
@@ -1479,9 +1752,16 @@ int isp_vbq_setup(struct videobuf_queue *vbq, unsigned int *cnt,
 				     * isp_obj.module.preview_output_height
 				     * ISP_BYTES_PER_PIXEL);
 
-	if (isp_obj.module.isp_pipeline & OMAP_ISP_PREVIEW
-	    && isp_obj.tmp_buf_size < tmp_size)
-		rval = isp_tmp_buf_alloc(tmp_size);
+	if (CCDC_PREV_RESZ_CAPTURE(&isp_obj)) {
+		if (isp_obj.isp_lsc_workaround == 1) {
+			if (isp_obj.tmp_buf_size < tmp_size)
+				rval = isp_tmp_buf_alloc(tmp_size);
+			if (!rval) {
+				isppreview_set_outaddr(isp_obj.tmp_buf);
+				ispresizer_set_inaddr(isp_obj.tmp_buf);
+			}
+		}
+	}
 
 	return rval;
 }
@@ -1527,8 +1807,10 @@ void isp_vbq_release(struct videobuf_queue *vbq, struct videobuf_buffer *vb)
 {
 	struct isp_bufs *bufs = &isp_obj.bufs;
 
-	ispmmu_vunmap(bufs->isp_addr_capture[vb->i]);
-	bufs->isp_addr_capture[vb->i] = (dma_addr_t)NULL;
+	if (bufs->isp_addr_capture[vb->i]) {
+		ispmmu_vunmap(bufs->isp_addr_capture[vb->i]);
+		bufs->isp_addr_capture[vb->i] = (dma_addr_t)NULL;
+	}
 	return;
 }
 EXPORT_SYMBOL(isp_vbq_release);
@@ -1669,60 +1951,156 @@ EXPORT_SYMBOL(isp_s_ctrl);
  * Function simply routes the input ioctl cmd id to the appropriate handler in
  * the isp module.
  **/
-int isp_handle_private(int cmd, void *arg)
+int isp_handle_private(struct mutex *vdev_mutex, int cmd, void *arg)
 {
 	int rval = 0;
 
-	if (!isp_obj.ref_count)
+	if (!isp_obj.ref_count ||
+		 (isp_obj.running == ISP_STOPPING))
 		return -EINVAL;
 
 	switch (cmd) {
 	case VIDIOC_PRIVATE_ISP_CCDC_CFG:
+		mutex_lock(vdev_mutex);
 		rval = omap34xx_isp_ccdc_config(arg);
+		mutex_unlock(vdev_mutex);
 		break;
 	case VIDIOC_PRIVATE_ISP_PRV_CFG:
+		mutex_lock(vdev_mutex);
 		rval = omap34xx_isp_preview_config(arg);
+		mutex_unlock(vdev_mutex);
 		break;
-	case VIDIOC_PRIVATE_ISP_AEWB_CFG: {
+#if !defined(CONFIG_VIDEO_OMAP3_HP3A)
+	case VIDIOC_PRIVATE_ISP_AEWB_CFG:
+	{
 		struct isph3a_aewb_config *params;
 		params = (struct isph3a_aewb_config *)arg;
+		mutex_lock(vdev_mutex);
 		rval = isph3a_aewb_configure(params);
+		mutex_unlock(vdev_mutex);
 	}
-		break;
-	case VIDIOC_PRIVATE_ISP_AEWB_REQ: {
+	break;
+	case VIDIOC_PRIVATE_ISP_AEWB_REQ:
+	{
 		struct isph3a_aewb_data *data;
 		data = (struct isph3a_aewb_data *)arg;
 		rval = isph3a_aewb_request_statistics(data);
 	}
-		break;
-	case VIDIOC_PRIVATE_ISP_HIST_CFG: {
+	break;
+	case VIDIOC_PRIVATE_ISP_HIST_CFG:
+	{
 		struct isp_hist_config *params;
 		params = (struct isp_hist_config *)arg;
+		mutex_lock(vdev_mutex);
 		rval = isp_hist_configure(params);
+		mutex_unlock(vdev_mutex);
 	}
-		break;
-	case VIDIOC_PRIVATE_ISP_HIST_REQ: {
+	break;
+	case VIDIOC_PRIVATE_ISP_HIST_REQ:
+	{
 		struct isp_hist_data *data;
 		data = (struct isp_hist_data *)arg;
+		mutex_lock(vdev_mutex);
 		rval = isp_hist_request_statistics(data);
+		mutex_unlock(vdev_mutex);
 	}
-		break;
-	case VIDIOC_PRIVATE_ISP_AF_CFG: {
+	break;
+	case VIDIOC_PRIVATE_ISP_AF_CFG:
+	{
 		struct af_configuration *params;
 		params = (struct af_configuration *)arg;
+		mutex_lock(vdev_mutex);
 		rval = isp_af_configure(params);
+		mutex_unlock(vdev_mutex);
 	}
-		break;
-	case VIDIOC_PRIVATE_ISP_AF_REQ: {
+	break;
+	case VIDIOC_PRIVATE_ISP_AF_REQ:
+	{
 		struct isp_af_data *data;
 		data = (struct isp_af_data *)arg;
 		rval = isp_af_request_statistics(data);
 	}
-		break;
+	break;
+#endif
+	case VIDIOC_PRIVATE_ISP_RESIZE_DATA:
+	{
+		enum isp_running isp_state;
+		mutex_lock(vdev_mutex);
+		isp_state = isp_obj.running;
+		if (isp_state == ISP_STOPPED) {
+			isp_obj.running = ISP_FREERUNNING;
+			rval = isp_resize_mem_data(arg);
+			isp_obj.running = isp_state;
+		} else {
+			rval = -EFAULT;
+			DPRINTK_ISPCTRL("isp state = %d\n", isp_state);
+		}
+		mutex_unlock(vdev_mutex);
+	}
+	break;
+	case VIDIOC_PRIVATE_ISP_PROCESS_DATA:
+	{
+		enum isp_running isp_state;
+		mutex_lock(vdev_mutex);
+		isp_state = isp_obj.running;
+		if (isp_state == ISP_STOPPED) {
+			isp_obj.running = ISP_FREERUNNING;
+			rval = isp_process_mem_data(arg);
+			isp_obj.running = isp_state;
+		} else {
+			rval = -EFAULT;
+			DPRINTK_ISPCTRL("isp state = %d\n", isp_state);
+		}
+		mutex_unlock(vdev_mutex);
+	}
+	break;
+	case VIDIOC_PRIVATE_ISP_RSZ_REQ:
+	{
+		struct isprsz_coef *resizer_coef;
+		resizer_coef = (struct isprsz_coef *) arg;
+		mutex_lock(vdev_mutex);
+		ispresizer_get_filter_coef(resizer_coef);
+		mutex_unlock(vdev_mutex);
+	}
+	break;
+	case VIDIOC_PRIVATE_ISP_RSZ_CFG:
+	{
+		struct isprsz_coef *resizer_coef;
+		resizer_coef = (struct isprsz_coef *) arg;
+		mutex_lock(vdev_mutex);
+		ispresizer_config_filter_coef(resizer_coef);
+		mutex_unlock(vdev_mutex);
+	}
+	break;
+	case VIDIOC_PRIVATE_ISP_CCDC_BAYER_CFG:
+	{
+		enum ispccdc_raw_fmt raw_fmt;
+		raw_fmt = (enum ispccdc_raw_fmt)(
+			(struct ispccdc_color_offset *)arg)->offsetcode;
+		mutex_lock(vdev_mutex);
+		ispccdc_set_raw_offset(raw_fmt);
+		mutex_unlock(vdev_mutex);
+	}
+	break;
+	case VIDIOC_PRIVATE_ISP_LSC_WORKAROUND_CFG:
+	{
+		mutex_lock(vdev_mutex);
+#ifdef USE_LSC_WORKAROUND
+		if (isp_obj.running != ISP_RUNNING)
+#else
+		if (isp_obj.running != ISP_RUNNING && !cpu_is_omap3630())
+#endif
+			isp_obj.isp_lsc_workaround = (*(int *)arg ? 1 : 0);
+		else
+			rval = -EFAULT;
+		mutex_unlock(vdev_mutex);
+	}
+	break;
 	default:
 		rval = -EINVAL;
 		break;
 	}
+
 	return rval;
 }
 EXPORT_SYMBOL(isp_handle_private);
@@ -1816,7 +2194,6 @@ int isp_s_fmt_cap(struct v4l2_pix_format *pix_input,
 	}
 
 	isp_config_pipeline(pix_input, pix_output);
-
 	if (isp_obj.module.isp_pipeline & OMAP_ISP_RESIZER
 	    && (crop_scaling_h || crop_scaling_w))
 		isp_config_crop(pix_output);
@@ -1832,21 +2209,18 @@ EXPORT_SYMBOL(isp_s_fmt_cap);
  **/
 void isp_config_crop(struct v4l2_pix_format *croppix)
 {
-	u8 crop_scaling_w;
-	u8 crop_scaling_h;
 	unsigned long org_left, num_pix, new_top;
 
 	struct v4l2_pix_format *pix = croppix;
 
-	crop_scaling_w = (isp_obj.module.preview_output_width * 10) /
-		pix->width;
-	crop_scaling_h = (isp_obj.module.preview_output_height * 10) /
-		pix->height;
-
-	cur_rect.left = (ispcroprect.left * crop_scaling_w) / 10;
-	cur_rect.top = (ispcroprect.top * crop_scaling_h) / 10;
-	cur_rect.width = (ispcroprect.width * crop_scaling_w) / 10;
-	cur_rect.height = (ispcroprect.height * crop_scaling_h) / 10;
+	cur_rect.left =  (u32)(ispcroprect.left *
+		isp_obj.module.preview_output_width)   / (u32)pix->width;
+	cur_rect.top =  (u32)(ispcroprect.top *
+		isp_obj.module.preview_output_height) / (u32)pix->height;
+	cur_rect.width =  (u32)(ispcroprect.width *
+		isp_obj.module.preview_output_width) / (u32)pix->width;
+	cur_rect.height =  (u32)(ispcroprect.height *
+		isp_obj.module.preview_output_height) / (u32)pix->height;
 
 	org_left = cur_rect.left;
 	while (((int)cur_rect.left & 0xFFFFFFF0) != (int)cur_rect.left)
@@ -1854,6 +2228,8 @@ void isp_config_crop(struct v4l2_pix_format *croppix)
 
 	num_pix = org_left - cur_rect.left;
 	new_top = (int)(num_pix * 3) / 4;
+	if (new_top > cur_rect.top)
+		new_top = cur_rect.top;
 	cur_rect.top = cur_rect.top - new_top;
 	cur_rect.height = (2 * new_top) + cur_rect.height;
 
@@ -1873,6 +2249,17 @@ void isp_config_crop(struct v4l2_pix_format *croppix)
 	return;
 }
 EXPORT_SYMBOL(isp_config_crop);
+
+/**
+ * isp_get_buf_offset - Gets offset of start of crop.
+ *
+ * Returns the offset (in bytes) of the start of the crop rectangle.
+ **/
+unsigned long isp_get_buf_offset()
+{
+	return isp_obj.tmp_buf_offset;
+}
+EXPORT_SYMBOL(isp_get_buf_offset);
 
 /**
  * isp_g_crop - Gets crop rectangle size and position.
@@ -1984,17 +2371,74 @@ static int isp_try_size(struct v4l2_pix_format *pix_input,
 	if (pix_output->width <= ISPRSZ_MIN_OUTPUT
 	    || pix_output->height <= ISPRSZ_MIN_OUTPUT)
 		return -EINVAL;
-
 	if (pix_output->width >= ISPRSZ_MAX_OUTPUT
 	    || pix_output->height > ISPRSZ_MAX_OUTPUT)
 		return -EINVAL;
 
 	isp_obj.module.ccdc_input_width = pix_input->width;
 	isp_obj.module.ccdc_input_height = pix_input->height;
-	isp_obj.module.resizer_output_width = pix_output->width;
-	isp_obj.module.resizer_output_height = pix_output->height;
+
+	if (isp_obj.module.isp_pipeline & OMAP_ISP_RESIZER) {
+		isp_obj.module.resizer_output_width = pix_output->width;
+		isp_obj.module.resizer_output_height = pix_output->height;
+	}
+
+	if (isp_obj.module.isp_pipeline & OMAP_ISP_PREVIEW) {
+		isp_obj.module.preview_output_width = pix_output->width;
+		isp_obj.module.preview_output_height = pix_output->height;
+	}
 
 	if (isp_obj.module.isp_pipeline & OMAP_ISP_CCDC) {
+		u32 in_aspect_ratio = 0;
+		u32 out_aspect_ratio = 0;
+		u32 adjusted_height = 0;
+		u32 adjusted_width = 0;
+
+		if (pix_output->width > pix_output->height) {
+			in_aspect_ratio = (pix_input->width * 256)/
+				pix_input->height;
+			out_aspect_ratio = (pix_output->width * 256)/
+				(pix_output->height);
+
+			if ((out_aspect_ratio - in_aspect_ratio) > 25 &&
+				(out_aspect_ratio - in_aspect_ratio) < 180) {
+				/* Adjusted for output aspect ratio. */
+				adjusted_height = ALIGN_TO( \
+					((pix_input->width*256)/
+						out_aspect_ratio), 2);
+
+				ispccdc_config_crop(0,
+					(pix_input->height-adjusted_height)/2,
+					adjusted_height +
+					(pix_input->height-adjusted_height)/2,
+					pix_input->width);
+			} else {
+				ispccdc_config_crop(0, 0, 0, 0);
+			}
+		} else {
+			/* height > width */
+			in_aspect_ratio = (pix_input->height * 256)/
+				pix_input->width;
+			out_aspect_ratio = (pix_output->height * 256)/
+				(pix_output->width);
+
+			if ((out_aspect_ratio - in_aspect_ratio) > 50) {
+				/* Adjusted for output aspect ratio. */
+				adjusted_width = ALIGN_TO( \
+					((pix_input->height*256)/
+						out_aspect_ratio), 2);
+
+				ispccdc_config_crop(
+					(pix_input->width-adjusted_width)/2,
+					0,
+					pix_input->height,
+					adjusted_width +
+					(pix_input->width-adjusted_width)/2);
+			} else {
+				ispccdc_config_crop(0, 0, 0, 0);
+			}
+		}
+
 		rval = ispccdc_try_size(isp_obj.module.ccdc_input_width,
 					isp_obj.module.ccdc_input_height,
 					&isp_obj.module.ccdc_output_width,
@@ -2109,10 +2553,13 @@ static void isp_save_ctx(void)
 	isp_save_context(isp_reg_list);
 	ispccdc_save_context();
 	ispmmu_save_context();
+#if !defined(CONFIG_VIDEO_OMAP3_HP3A)
 	isphist_save_context();
 	isph3a_save_context();
+#endif
 	isppreview_save_context();
 	ispresizer_save_context();
+	ispcsi2_save_context();
 }
 
 /**
@@ -2126,10 +2573,13 @@ static void isp_restore_ctx(void)
 	isp_restore_context(isp_reg_list);
 	ispccdc_restore_context();
 	ispmmu_restore_context();
+#if !defined(CONFIG_VIDEO_OMAP3_HP3A)
 	isphist_restore_context();
 	isph3a_restore_context();
+#endif
 	isppreview_restore_context();
 	ispresizer_restore_context();
+	ispcsi2_restore_context();
 }
 
 static int isp_enable_clocks(void)
@@ -2193,9 +2643,10 @@ int isp_get(void)
 			isp_restore_ctx();
 		else
 			has_context = 1;
-	} else {
-		mutex_unlock(&isp_obj.isp_mutex);
-		return -EBUSY;
+		enable_irq(omap3isp->irq);
+#if defined(CONFIG_VIDEO_OMAP3_HP3A)
+			hp3a_hw_enabled(1);
+#endif
 	}
 	isp_obj.ref_count++;
 	mutex_unlock(&(isp_obj.isp_mutex));
@@ -2223,8 +2674,11 @@ int isp_put(void)
 	mutex_lock(&(isp_obj.isp_mutex));
 	if (isp_obj.ref_count) {
 		if (--isp_obj.ref_count == 0) {
+#if defined(CONFIG_VIDEO_OMAP3_HP3A)
+			hp3a_hw_enabled(0);
+#endif
+			disable_irq_nosync(omap3isp->irq);
 			isp_save_ctx();
-			isp_tmp_buf_free();
 			isp_release_resources();
 			isp_obj.module.isp_pipeline = 0;
 			isp_disable_clocks();
@@ -2271,6 +2725,15 @@ static int isp_remove(struct platform_device *pdev)
 	struct isp_device *isp = platform_get_drvdata(pdev);
 	int i;
 
+	isp_tmp_buf_free();
+
+#ifdef CONFIG_VIDEO_OMAP3_HP3A
+	isp_csi2_cleanup();
+	isp_resizer_cleanup();
+	isp_preview_cleanup();
+	ispmmu_cleanup();
+	isp_ccdc_cleanup();
+#else
 	isp_csi2_cleanup();
 	isp_af_exit();
 	isp_resizer_cleanup();
@@ -2279,6 +2742,7 @@ static int isp_remove(struct platform_device *pdev)
 	isph3a_aewb_cleanup();
 	isp_hist_cleanup();
 	isp_ccdc_cleanup();
+#endif
 
 	if (!isp)
 		return 0;
@@ -2343,15 +2807,16 @@ static int isp_resume(struct platform_device *pdev)
 	if (omap3isp == NULL)
 		goto out;
 
-	if (isp_obj.ref_count >= 0) {
-		ret_err = isp_enable_clocks();
-		if (ret_err)
-			goto out;
-		isp_restore_ctx();
-		isp_resume_modules();
-		isp_enable_interrupts(RAW_CAPTURE(&isp_obj));
-		isp_start();
-	}
+	if (isp_obj.ref_count == 0)
+		goto out;
+
+	ret_err = isp_enable_clocks();
+	if (ret_err)
+		goto out;
+	isp_restore_ctx();
+	isp_resume_modules();
+	isp_enable_interrupts();
+	isp_start();
 
 out:
 	DPRINTK_ISPCTRL("isp_resume: done \n");
@@ -2418,6 +2883,9 @@ static int isp_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
+	isp_obj.mclk_hz = CM_CAM_MCLK_HZ;
+	isp_obj.mclk_src_div = 2;
+
 	isp_obj.cam_ick = clk_get(&camera_dev, "cam_ick");
 	if (IS_ERR(isp_obj.cam_ick)) {
 		DPRINTK_ISPCTRL("ISP_ERR: clk_get for "
@@ -2446,7 +2914,20 @@ static int isp_probe(struct platform_device *pdev)
 		goto out_request_irq;
 	}
 
+	disable_irq(isp->irq);
+
 	isp_obj.ref_count = 0;
+	isp_obj.tmp_buf = 0;
+	isp_obj.tmp_buf_size = 0;
+	isp_obj.running = ISP_STOPPED;
+#ifdef USE_LSC_WORKAROUND
+	isp_obj.isp_lsc_workaround = 1;
+#else
+	if (cpu_is_omap3630())
+		isp_obj.isp_lsc_workaround = 0;
+	else
+		isp_obj.isp_lsc_workaround = 1;
+#endif
 
 	mutex_init(&(isp_obj.isp_mutex));
 	spin_lock_init(&isp_obj.lock);
@@ -2458,6 +2939,20 @@ static int isp_probe(struct platform_device *pdev)
 	if (ret_err)
 		goto out_ispmmu_init;
 
+	ret_err = isp_tmp_buf_alloc(ISP_LSC_MEMORY);
+	if (ret_err) {
+		dev_err(isp->dev, "Couldn't allocate lsc"
+				  " workaround memory\n");
+		goto out_tmp_buf_alloc;
+	}
+
+#if defined(CONFIG_VIDEO_OMAP3_HP3A)
+	isp_ccdc_init();
+	isp_preview_init();
+	isp_resizer_init();
+	isp_csi2_init();
+	isp_mem_process_init();
+#else
 	isp_ccdc_init();
 	isp_hist_init();
 	isph3a_aewb_init();
@@ -2465,16 +2960,24 @@ static int isp_probe(struct platform_device *pdev)
 	isp_resizer_init();
 	isp_af_init();
 	isp_csi2_init();
+#endif
 
 	isp_get();
+	/* Get ISP revision */
+	isp->revision = isp_reg_readl(OMAP3_ISP_IOMEM_MAIN, ISP_REVISION);
+	dev_info(isp->dev, "Revision %d.%d found\n",
+		 (isp->revision & 0xF0) >> 4, isp->revision & 0xF);
 	isp_power_settings(1);
 	isp_put();
 
+#if !defined(CONFIG_VIDEO_OMAP3_HP3A)
 	isph3a_notify(1);
 	isp_af_notify(1);
-
+#endif
 	return 0;
 
+out_tmp_buf_alloc:
+	ispmmu_cleanup();
 out_ispmmu_init:
 	omap3isp = NULL;
 	free_irq(isp->irq, &isp_obj);

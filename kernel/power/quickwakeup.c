@@ -51,6 +51,7 @@ int quickwakeup_execute(void)
 	list_for_each_entry(index, &qw_head, list) {
 		if (index->checked) {
 			ret = index->qw_callback();
+			index->checked = 0;
 			if (ret != 0)
 				return ret;
 			count++;

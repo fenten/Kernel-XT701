@@ -91,8 +91,8 @@ extern unsigned int dss_debug;
 
 /* OMAP TRM gives bitfields as start:end, where start is the higher bit
    number. For example 7:0 */
-#define FLD_MASK(start, end)	(((1 << (start - end + 1)) - 1) << (end))
-#define FLD_VAL(val, start, end) (((val) << end) & FLD_MASK(start, end))
+#define FLD_MASK(start, end)	(((1 << ((start) - (end) + 1)) - 1) << (end))
+#define FLD_VAL(val, start, end) (((val) << (end)) & FLD_MASK(start, end))
 #define FLD_GET(val, start, end) (((val) & FLD_MASK(start, end)) >> (end))
 #define FLD_MOD(orig, val, start, end) \
 	(((orig) & ~FLD_MASK(start, end)) | FLD_VAL(val, start, end))
@@ -119,14 +119,20 @@ enum dss_clock {
 	DSS_CLK_96M	= 1 << 4,
 };
 
-struct dispc_clock_info {
+struct dss_clock_info {
 	/* rates that we get with dividers below */
 	unsigned long fck;
+
+	/* dividers */
+	u16 fck_div;
+};
+
+struct dispc_clock_info {
+	/* rates that we get with dividers below */
 	unsigned long lck;
 	unsigned long pck;
 
 	/* dividers */
-	u16 fck_div;
 	u16 lck_div;
 	u16 pck_div;
 };
@@ -134,12 +140,12 @@ struct dispc_clock_info {
 struct dsi_clock_info {
 	/* rates that we get with dividers below */
 	unsigned long fint;
-	unsigned long dsiphy;
+	unsigned long clkin4ddr;
 	unsigned long clkin;
 	unsigned long dsi1_pll_fclk;
 	unsigned long dsi2_pll_fclk;
-	unsigned long lck;
-	unsigned long pck;
+
+	unsigned long lp_clk;
 
 	/* dividers */
 	u16 regn;
@@ -147,8 +153,7 @@ struct dsi_clock_info {
 	u16 regm3;
 	u16 regm4;
 
-	u16 lck_div;
-	u16 pck_div;
+	u16 lp_clk_div;
 
 	u8 highfreq;
 	bool use_dss2_fck;
@@ -168,6 +173,7 @@ struct bus_type *dss_get_bus(void);
 /* display */
 int dss_suspend_all_devices(void);
 int dss_resume_all_devices(void);
+void dss_disable_all_devices(void);
 
 void dss_init_device(struct platform_device *pdev,
 		struct omap_dss_device *dssdev);
@@ -207,7 +213,7 @@ void dss_restore_context(void);
 void dss_dump_regs(struct seq_file *s);
 
 void dss_sdi_init(u8 datapairs);
-void dss_sdi_enable(void);
+int dss_sdi_enable(void);
 void dss_sdi_disable(void);
 
 void dss_select_clk_source(bool dsi, bool dispc);
@@ -215,6 +221,14 @@ int dss_get_dsi_clk_source(void);
 int dss_get_dispc_clk_source(void);
 void dss_set_venc_output(enum omap_dss_venc_type type);
 void dss_set_dac_pwrdn_bgz(bool enable);
+
+unsigned long dss_get_dpll4_rate(void);
+int dss_calc_clock_rates(struct dss_clock_info *cinfo);
+int dss_set_clock_div(struct dss_clock_info *cinfo);
+int dss_get_clock_div(struct dss_clock_info *cinfo);
+int dss_calc_clock_div(bool is_tft, unsigned long req_pck,
+		struct dss_clock_info *dss_cinfo,
+		struct dispc_clock_info *dispc_cinfo);
 
 /* SDI */
 int sdi_init(bool skip_init);
@@ -234,11 +248,12 @@ void dsi_restore_context(void);
 int dsi_init_display(struct omap_dss_device *display);
 void dsi_irq_handler(void);
 unsigned long dsi_get_dsi1_pll_rate(void);
-unsigned long dsi_get_dsi2_pll_rate(void);
-int dsi_pll_calc_pck(bool is_tft, unsigned long req_pck,
-		struct dsi_clock_info *cinfo);
-int dsi_pll_program(struct dsi_clock_info *cinfo);
-int dsi_pll_init(bool enable_hsclk, bool enable_hsdiv);
+int dsi_pll_set_clock_div(struct dsi_clock_info *cinfo);
+int dsi_pll_calc_clock_div_pck(bool is_tft, unsigned long req_pck,
+		struct dsi_clock_info *cinfo,
+		struct dispc_clock_info *dispc_cinfo);
+int dsi_pll_init(struct omap_dss_device *dssdev, bool enable_hsclk,
+		bool enable_hsdiv);
 void dsi_pll_uninit(void);
 void dsi_get_overlay_fifo_thresholds(enum omap_plane plane,
 		u32 fifo_size, enum omap_burst_size *burst_size,
@@ -325,13 +340,12 @@ unsigned long dispc_fclk_rate(void);
 unsigned long dispc_lclk_rate(void);
 unsigned long dispc_pclk_rate(void);
 void dispc_set_pol_freq(enum omap_panel_config config, u8 acbi, u8 acb);
-void find_lck_pck_divs(bool is_tft, unsigned long req_pck, unsigned long fck,
-		u16 *lck_div, u16 *pck_div);
-int dispc_calc_clock_div(bool is_tft, unsigned long req_pck,
+void dispc_find_clk_divs(bool is_tft, unsigned long req_pck, unsigned long fck,
+		struct dispc_clock_info *cinfo);
+int dispc_calc_clock_rates(unsigned long dispc_fclk_rate,
 		struct dispc_clock_info *cinfo);
 int dispc_set_clock_div(struct dispc_clock_info *cinfo);
 int dispc_get_clock_div(struct dispc_clock_info *cinfo);
-void dispc_set_lcd_divisor(u16 lck_div, u16 pck_div);
 
 
 /* VENC */

@@ -91,4 +91,5 @@ config ANDROID_LOW_MEMORY_KILLER
 	  Register processes to be killed when memory is low
 
 endif # if ANDROID
+
 endmenu

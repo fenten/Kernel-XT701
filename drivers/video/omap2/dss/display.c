@@ -28,7 +28,7 @@
 #include <linux/list.h>
 #include <linux/platform_device.h>
 
-#include <mach/display.h>
+#include <plat/display.h>
 #include "dss.h"
 
 static LIST_HEAD(display_list);
@@ -277,26 +277,16 @@ static ssize_t display_wss_store(struct device *dev,
 	return size;
 }
 
-#ifdef CONFIG_PANEL_HDTV /* charlotte change permission S_IRUGO->S_IRWXUGO */
-static DEVICE_ATTR(enabled, S_IRWXUGO|S_IWUSR,
-		display_enabled_show, display_enabled_store);
-#else
 static DEVICE_ATTR(enabled, S_IRUGO|S_IWUSR,
 		display_enabled_show, display_enabled_store);
-#endif
 static DEVICE_ATTR(update_mode, S_IRUGO|S_IWUSR,
 		display_upd_mode_show, display_upd_mode_store);
 static DEVICE_ATTR(tear_elim, S_IRUGO|S_IWUSR,
 		display_tear_show, display_tear_store);
 static DEVICE_ATTR(timings, S_IRUGO|S_IWUSR,
 		display_timings_show, display_timings_store);
-#ifdef CONFIG_PANEL_HDTV /* charlotte change permission S_IRUGO->S_IRWXUGO */
-static DEVICE_ATTR(rotate, S_IRWXUGO|S_IWUSR,
-		display_rotate_show, display_rotate_store);
-#else
 static DEVICE_ATTR(rotate, S_IRUGO|S_IWUSR,
 		display_rotate_show, display_rotate_store);
-#endif
 static DEVICE_ATTR(mirror, S_IRUGO|S_IWUSR,
 		display_mirror_show, display_mirror_store);
 static DEVICE_ATTR(wss, S_IRUGO|S_IWUSR,
@@ -570,6 +560,19 @@ int dss_resume_all_devices(void)
 	struct bus_type *bus = dss_get_bus();
 
 	return bus_for_each_dev(bus, NULL, NULL, dss_resume_device);
+}
+
+static int dss_disable_device(struct device *dev, void *data)
+{
+	struct omap_dss_device *dssdev = to_dss_device(dev);
+	dssdev->disable(dssdev);
+	return 0;
+}
+
+void dss_disable_all_devices(void)
+{
+	struct bus_type *bus = dss_get_bus();
+	bus_for_each_dev(bus, NULL, NULL, dss_disable_device);
 }
 
 

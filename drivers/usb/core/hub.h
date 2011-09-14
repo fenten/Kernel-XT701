@@ -47,7 +47,10 @@
 #define USB_PORT_FEAT_L1		5	/* L1 suspend */
 #define USB_PORT_FEAT_POWER		8
 #define USB_PORT_FEAT_LOWSPEED		9
+/* This value was never in Table 11-17 */
 #define USB_PORT_FEAT_HIGHSPEED		10
+/* This value is also fake */
+#define USB_PORT_FEAT_SUPERSPEED	11
 #define USB_PORT_FEAT_C_CONNECTION	16
 #define USB_PORT_FEAT_C_ENABLE		17
 #define USB_PORT_FEAT_C_SUSPEND		18
@@ -185,16 +188,45 @@ struct usb_tt {
 	/* for control/bulk error recovery (CLEAR_TT_BUFFER) */
 	spinlock_t		lock;
 	struct list_head	clear_list;	/* of usb_tt_clear */
-	struct work_struct			kevent;
+	struct work_struct	clear_work;
 };
 
 struct usb_tt_clear {
 	struct list_head	clear_list;
 	unsigned		tt;
 	u16			devinfo;
+	struct usb_hcd		*hcd;
+	struct usb_host_endpoint	*ep;
 };
 
-extern void usb_hub_tt_clear_buffer(struct usb_device *dev, int pipe);
+#ifdef CONFIG_IPC_USBHOST_DBG
+/* The values used in this debug array were arranged as following
+ * 0x0  - 0xF  to log different stages of hub_thread processing hub events
+ * 0x10 - 0x1F to log port reset for 809C9 Bp panic issue
+ * 0x20 - 0x2F to log hub_activate
+ * 0x30 - 0x3F to log different stages of bus resume including remote wakeup
+ * 0x40 - 0x4F to log different stages of bus suspend
+ * 0x50 - 0x5F to log hub_irq for port connection change
+ * 0x80 - 0x8F to log ehci_irq
+ * jiffies is also logged when bus suspend, resume or remote wakeup occurs
+ */
+#define USBHOST_DBG_ARRAY_SIZE 64
+struct USBHOST_DBG_INFO {
+	int iUsbHostDbg;
+	u32 aUsbHostDbg[USBHOST_DBG_ARRAY_SIZE];
+};
+extern struct USBHOST_DBG_INFO sUsbHostDbg;
+#define LOG_USBHOST_ACTIVITY(array, index, event) \
+	do { \
+		sUsbHostDbg.array[sUsbHostDbg.index++] = event; \
+		if (sUsbHostDbg.index >= USBHOST_DBG_ARRAY_SIZE) \
+			sUsbHostDbg.index = 0; \
+	} while (0)
+#else
+#define LOG_USBHOST_ACTIVITY(array, index, event)
+#endif /* CONFIG_IPC_USBHOST_DBG */
+
+extern int usb_hub_clear_tt_buffer(struct urb *urb);
 extern void usb_ep0_reinit(struct usb_device *);
 
 #endif /* __LINUX_HUB_H */

@@ -4,7 +4,6 @@
  * OMAP2 serial support.
  *
  * Copyright (C) 2005-2008 Nokia Corporation
- * Copyright (C) 2009 Motorola, Inc.
  * Author: Paul Mundt <paul.mundt@nokia.com>
  *
  * Major rework for PM support by Kevin Hilman
@@ -26,12 +25,12 @@
 #include <linux/delay.h>
 #include <linux/debugfs.h>
 
-#include <mach/common.h>
-#include <mach/board.h>
-#include <mach/clock.h>
-#include <mach/control.h>
+#include <plat/common.h>
+#include <plat/board.h>
+#include <plat/clock.h>
+#include <plat/control.h>
 #include <mach/gpio.h>
-#include <mach/omap-serial.h>
+#include <plat/omap-serial.h>
 
 #include <asm/mach/serial_omap.h>
 
@@ -60,7 +59,7 @@ struct omap_uart_state {
 	struct clk *fck;
 	int clocked;
 
-	struct plat_serialomap_port *p;
+        struct plat_serialomap_port *p;
 	struct list_head node;
 
 #if defined(CONFIG_ARCH_OMAP3) && defined(CONFIG_PM)
@@ -78,34 +77,34 @@ struct omap_uart_state {
 
 static struct omap_uart_state omap_uart[OMAP_MAX_NR_PORTS];
 static LIST_HEAD(uart_list);
-static unsigned int fifo_idleblks;
+static unsigned int fifo_idleblks = 0;
 
 #ifdef CONFIG_SERIAL_OMAP
 static struct plat_serialomap_port serial_platform_data[] = {
 	{
-		.membase	= IO_ADDRESS(OMAP_UART1_BASE),
+		.membase	= OMAP2_L4_IO_ADDRESS(OMAP_UART1_BASE),
 		.irq		= 72,
 		.regshift	= 2,
 #ifdef CONFIG_SERIAL_OMAP3430_HW_FLOW_CONTROL
-		.rtscts		= SERIALOMAP_AUTO_RTS,
+		.ctsrts		= UART_EFR_RTS,
 #endif
 		.flags		= UPF_BOOT_AUTOCONF,
 	},
 	{
-		.membase	= IO_ADDRESS(OMAP_UART2_BASE),
+		.membase	= OMAP2_L4_IO_ADDRESS(OMAP_UART2_BASE),
 		.irq		= 73,
 		.regshift	= 2,
 #ifdef CONFIG_SERIAL_OMAP3430_HW_FLOW_CONTROL
-		.rtscts		= SERIALOMAP_AUTO_RTS | SERIALOMAP_AUTO_CTS,
+		.ctsrts		= UART_EFR_CTS | UART_EFR_RTS,
 #endif
 		.flags		= UPF_BOOT_AUTOCONF,
 	},
 	{
-		.membase	= IO_ADDRESS(OMAP_UART3_BASE),
+		.membase	= OMAP2_L4_IO_ADDRESS(OMAP_UART3_BASE),
 		.irq		= 74,
 		.regshift	= 2,
 #ifdef CONFIG_SERIAL_OMAP3430_HW_FLOW_CONTROL
-		.rtscts		= SERIALOMAP_AUTO_RTS,
+		.ctsrts		= UART_EFR_RTS,
 #endif
 		.flags		= UPF_BOOT_AUTOCONF,
 	},
@@ -247,9 +246,14 @@ static void omap_uart_save_context(struct omap_uart_state *uart)
 	u16 lcr = 0;
 	struct plat_serialomap_port *p = uart->p;
 
-	/* Due to TI errata for OFF mode, we don't allow
-	*  CORE and PER to enter OFF mode */
-	if ((!enable_off_mode) || (omap_rev() <= OMAP3430_REV_ES3_1))
+	if (!enable_off_mode)
+		return;
+
+	/* FIXME
+	 * For omap3430 CORE/PERR OFF isn't temporarily supported,
+	 * so no need to save&restore the context of serial.
+	 */
+	if (cpu_is_omap34xx())
 		return;
 
 	lcr = serial_read_reg(p, UART_LCR);
@@ -270,12 +274,17 @@ static void omap_uart_restore_context(struct omap_uart_state *uart)
 	u16 efr = 0;
 	struct plat_serialomap_port *p = uart->p;
 
-	/* Due to TI errata for OFF mode, we don't allow
-	*  CORE and PER to enter OFF mode */
-	if ((!enable_off_mode) || (omap_rev() <= OMAP3430_REV_ES3_1))
+	if (!enable_off_mode)
 		return;
 
 	if (!uart->context_valid)
+		return;
+
+	/* FIXME
+	 * For omap3430 CORE/PERR OFF isn't temporarily supported,
+	 * so no need to save&restore the context of serial.
+	 */
+	if (cpu_is_omap34xx())
 		return;
 
 	uart->context_valid = 0;
@@ -517,7 +526,7 @@ static void omap_uart_rtspad_init(struct omap_uart_state *uart)
 {
 	if (!cpu_is_omap34xx())
 		return;
-	switch (uart->num) {
+	switch(uart->num) {
 	case 0:
 		uart->rts_padconf = 0x17e;
 		break;
@@ -688,6 +697,19 @@ static int fifo_idleblk_set(void *data, u64 val)
 }
 
 DEFINE_SIMPLE_ATTRIBUTE(fifo_idleblk_fops, fifo_idleblk_get, fifo_idleblk_set, "%llu\n");
+void __init omap_serial_early_init(void)
+{
+}
+
+void __init omap_serial_ctsrts_init(unsigned char ctsrts[])
+{
+#if defined(CONFIG_SERIAL_OMAP) && \
+	defined(CONFIG_SERIAL_OMAP3430_HW_FLOW_CONTROL)
+	serial_platform_data[0].ctsrts = 0x40;//ctsrts[0]; need to check by Steve (w21521)
+	serial_platform_data[1].ctsrts = 0xC0; //ctsrts[1];
+	serial_platform_data[2].ctsrts = 0x40; //ctsrts[2];
+#endif
+}
 
 void __init omap_serial_init(int wake_gpio_strobe,
 			     unsigned int wake_strobe_enable_mask)

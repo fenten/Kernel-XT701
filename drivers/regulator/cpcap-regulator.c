@@ -509,11 +509,13 @@ static int __devinit cpcap_regulator_probe(struct platform_device *pdev)
 	struct regulator_dev *rdev;
 	struct cpcap_device *cpcap;
 	struct cpcap_platform_data *data;
+	struct regulator_init_data *init;
 	int i;
 
 	/* Already set by core driver */
 	cpcap = platform_get_drvdata(pdev);
 	data = cpcap->spi->controller_data;
+	init = pdev->dev.platform_data;
 
 	for (i = 0; i < CPCAP_NUM_REGULATORS; i++) {
 		cpcap_regltr_data[i].mode_val = data->regulator_mode_values[i];
@@ -521,7 +523,8 @@ static int __devinit cpcap_regulator_probe(struct platform_device *pdev)
 			data->regulator_off_mode_values[i];
 	}
 
-	rdev = regulator_register(&regulators[pdev->id], &pdev->dev, cpcap);
+	rdev = regulator_register(&regulators[pdev->id], &pdev->dev,
+				init, cpcap);
 	if (IS_ERR(rdev))
 		return PTR_ERR(rdev);
 	/* this is ok since the cpcap is still reachable from the rdev */

@@ -30,7 +30,6 @@
 #include <linux/qtouch_obp_ts.h>
 #include <linux/led-cpcap-lm3554.h>
 #include <linux/led-lm3530.h>
-#include <linux/usb/omap.h>
 #include <linux/wl127x-rfkill.h>
 #include <linux/wl127x-test.h>
 #include <linux/omap_mdm_ctrl.h>
@@ -40,19 +39,19 @@
 #include <asm/mach/map.h>
 #include <asm/setup.h>
 
-#include <mach/board-sholes.h>
+#include <plat/board-sholes.h>
 #include <mach/hardware.h>
 #include <mach/gpio.h>
-#include <mach/mux.h>
-#include <mach/board.h>
-#include <mach/common.h>
-#include <mach/gpmc.h>
-#include <mach/usb.h>
+#include <plat/mux.h>
+#include <plat/board.h>
+#include <plat/common.h>
+#include <plat/gpmc.h>
+#include <plat/usb.h>
+#include <plat/hdq.h>
 #include <linux/delay.h>
-#include <mach/control.h>
-#include <mach/hdq.h>
+#include <plat/control.h>
 #include <mach/system.h>
-#include <linux/usb/android.h>
+#include <linux/usb/android_composite.h>
 #include <linux/wakelock.h>
 
 #include "cm-regbits-34xx.h"
@@ -64,7 +63,7 @@
 #include "prcm-common.h"
 #include "cm.h"
 
-#ifdef CONFIG_VIDEO_OLDOMAP3
+#if defined(CONFIG_VIDEO_OMAP3) || defined(CONFIG_VIDEO_OLDOMAP3)
 #include <media/v4l2-int-device.h>
 #if defined(CONFIG_VIDEO_MT9P012) || defined(CONFIG_VIDEO_MT9P012_MODULE)
 #include <media/mt9p012.h>
@@ -100,6 +99,16 @@
 #define SHOLES_VENDOR_ID		0x22B8
 #define SHOLES_PRODUCT_ID		0x41D9
 #define SHOLES_ADB_PRODUCT_ID		0x41DB
+#define SHOLES_RNDIS_PRODUCT_ID		0x41E4
+#define SHOLES_RNDIS_ADB_PRODUCT_ID		0x41E5
+
+#ifdef CONFIG_USB_MOT_ANDROID
+#define SHOLES_PHONE_PORTAL_PRODUCT_ID               0x41D8
+#define SHOLES_PHONE_PORTAL_ADB_PRODUCT_ID           0x41DA
+#define SHOLES_MTP_PRODUCT_ID                        0x41D6
+#define SHOLES_MTP_ADB_PRODUCT_ID                    0x41DC
+#endif
+
 #define FACTORY_PRODUCT_ID		0x41D4
 #define FACTORY_ADB_PRODUCT_ID		0x41D4
 
@@ -150,8 +159,9 @@ static struct omap_opp sholes_dsp_rate_table[] = {
 
 static void __init sholes_init_irq(void)
 {
-	omap2_init_common_hw(JEDEC_JESD209A_sdrc_params, sholes_mpu_rate_table,
-			sholes_dsp_rate_table, sholes_l3_rate_table);
+	omap2_init_common_hw(JEDEC_JESD209A_sdrc_params, NULL, 
+			     sholes_mpu_rate_table,
+			     sholes_dsp_rate_table, sholes_l3_rate_table);
 	omap_init_irq();
 #ifdef CONFIG_OMAP3_PM
 	scm_clk_init();
@@ -172,12 +182,155 @@ int __init board_boot_mode_init(char *s)
 }
 __setup("androidboot.mode=", board_boot_mode_init);
 
+static char *usb_functions_ums[] = {
+	"usb_mass_storage",
+};
 
+static char *usb_functions_ums_adb[] = {
+	"usb_mass_storage",
+	"adb",
+};
 
+static char *usb_functions_rndis[] = {
+	"rndis",
+};
+
+static char *usb_functions_rndis_adb[] = {
+	"rndis",
+	"adb",
+};
+
+static char *usb_functions_all[] = {
+#ifdef CONFIG_USB_ANDROID_RNDIS
+	"rndis",
+#endif
+	"usb_mass_storage",
+	"adb",
+#ifdef CONFIG_USB_ANDROID_ACM
+	"acm",
+#endif
+#ifdef CONFIG_USB_MOT_ANDROID
+	"usbnet",
+	"mtp",
+#endif
+};
+
+#ifdef CONFIG_USB_MOT_ANDROID
+static char *usb_functions_phone_portal[] = {
+	"usbnet",
+	"mtp",
+	"acm",
+};
+
+static char *usb_functions_phone_portal_adb[] = {
+	"usbnet",
+	"mtp",
+	"acm",
+	"adb",
+};
+
+static char *usb_functions_mtp[] = {
+	"mtp",
+};
+
+static char *usb_functions_mtp_adb[] = {
+	"mtp",
+	"adb",
+};
+#endif
+
+static struct android_usb_product usb_products[] = {
+	{
+		.product_id	= SHOLES_PRODUCT_ID,
+		.num_functions	= ARRAY_SIZE(usb_functions_ums),
+		.functions	= usb_functions_ums,
+	},
+	{
+		.product_id	= SHOLES_ADB_PRODUCT_ID,
+		.num_functions	= ARRAY_SIZE(usb_functions_ums_adb),
+		.functions	= usb_functions_ums_adb,
+	},
+	{
+		.product_id	= SHOLES_RNDIS_PRODUCT_ID,
+		.num_functions	= ARRAY_SIZE(usb_functions_rndis),
+		.functions	= usb_functions_rndis,
+	},
+	{
+		.product_id	= SHOLES_RNDIS_ADB_PRODUCT_ID,
+		.num_functions	= ARRAY_SIZE(usb_functions_rndis_adb),
+		.functions	= usb_functions_rndis_adb,
+	},
+#ifdef CONFIG_USB_MOT_ANDROID
+	{
+		.product_id     = SHOLES_PHONE_PORTAL_PRODUCT_ID,
+		.num_functions  = ARRAY_SIZE(usb_functions_phone_portal),
+		.functions      = usb_functions_phone_portal,
+	},
+	{
+		.product_id     = SHOLES_PHONE_PORTAL_ADB_PRODUCT_ID,
+		.num_functions  = ARRAY_SIZE(usb_functions_phone_portal_adb),
+		.functions      = usb_functions_phone_portal_adb,
+	},
+	{
+		.product_id     = SHOLES_MTP_PRODUCT_ID,
+		.num_functions  = ARRAY_SIZE(usb_functions_mtp),
+		.functions      = usb_functions_mtp,
+	},
+	{
+		.product_id     = SHOLES_PHONE_PORTAL_ADB_PRODUCT_ID,
+		.num_functions  = ARRAY_SIZE(usb_functions_mtp_adb),
+		.functions      = usb_functions_mtp_adb,
+	},
+#endif
+
+};
+
+static char *factory_usb_functions[] = {
+	"usbnet"
+};
+
+static char *factory_usb_functions_adb[] = {
+	"usbnet",
+	"adb"
+};
+
+static struct android_usb_product factory_usb_products[] = {
+	{
+		.product_id	= FACTORY_PRODUCT_ID,
+		.num_functions	= ARRAY_SIZE(factory_usb_functions),
+		.functions	= factory_usb_functions,
+	},
+	{
+		.product_id	= FACTORY_ADB_PRODUCT_ID,
+		.num_functions	= ARRAY_SIZE(factory_usb_functions_adb),
+		.functions	= factory_usb_functions_adb,
+	},
+};
+
+/* standard android USB platform data */
 static struct android_usb_platform_data andusb_plat = {
+	.vendor_id			= SHOLES_VENDOR_ID,
+	.product_id			= SHOLES_PRODUCT_ID,
 	.manufacturer_name	= "Motorola",
 	.product_name		= "Motorola A855",
 	.serial_number		= device_serial,
+	.num_products = ARRAY_SIZE(usb_products),
+	.products = usb_products,
+	.num_functions = ARRAY_SIZE(usb_functions_all),
+	.functions = usb_functions_all,
+};
+
+/* android USB platform data for factory test mode*/
+static struct android_usb_platform_data andusb_plat_factory = {
+	.vendor_id			= SHOLES_VENDOR_ID,
+	.product_id			= FACTORY_PRODUCT_ID,
+	.manufacturer_name	= "Motorola",
+	.product_name		= "Motorola A855",
+	.serial_number		= device_serial,
+	.num_products = ARRAY_SIZE(factory_usb_products),
+	.products = factory_usb_products,
+	.num_functions = ARRAY_SIZE(factory_usb_functions_adb),
+	.functions = factory_usb_functions_adb,
 };
 
 static struct platform_device androidusb_device = {
@@ -201,6 +354,24 @@ static struct platform_device usb_mass_storage_device = {
 		.platform_data = &usbms_plat,
 	},
 };
+
+#ifdef CONFIG_USB_ANDROID_RNDIS
+static struct usb_ether_platform_data rndis_pdata = {
+	/* ethaddr is filled by board_serialno_setup */
+	.vendorID	= SHOLES_VENDOR_ID,
+	.vendorDescr	= "Motorola",
+};
+
+static struct platform_device rndis_device = {
+	.name	= "rndis",
+	.id	= -1,
+	.dev	= {
+		.platform_data = &rndis_pdata,
+	},
+};
+#endif
+
+extern void musb_disable_idle(int on);
 
 static int cpcap_usb_connected_probe(struct platform_device *pdev)
 {
@@ -231,30 +402,37 @@ static void sholes_gadget_init(void)
 {
 	unsigned int val[2];
 	unsigned int reg;
+#ifdef CONFIG_USB_ANDROID_RNDIS
+	int i;
+	char *src;
+#endif
 
 	reg = DIE_ID_REG_BASE + DIE_ID_REG_OFFSET;
 	val[0] = omap_readl(reg);
 	val[1] = omap_readl(reg + 4);
 
 	snprintf(device_serial, MAX_USB_SERIAL_NUM, "%08X%08X", val[1], val[0]);
-
-	if (!strcmp(boot_mode, "factorycable"))
-		andusb_plat.factory_enabled = 1;
-	else
-		andusb_plat.factory_enabled = 0;
-
-	andusb_plat.vendor_id = SHOLES_VENDOR_ID;
-
-	/* check powerup reason - To be added once kernel support is available*/
-	if (andusb_plat.factory_enabled) {
-		andusb_plat.product_id = FACTORY_PRODUCT_ID;
-		andusb_plat.adb_product_id = FACTORY_ADB_PRODUCT_ID;
-	} else {
-		andusb_plat.product_id = SHOLES_PRODUCT_ID;
-		andusb_plat.adb_product_id = SHOLES_ADB_PRODUCT_ID;
+#ifdef CONFIG_USB_ANDROID_RNDIS
+	/* create a fake MAC address from our serial number.
+	 * first byte is 0x02 to signify locally administered.
+	 */
+	rndis_pdata.ethaddr[0] = 0x02;
+	src = device_serial;
+	for (i = 0; *src; i++) {
+		/* XOR the USB serial across the remaining bytes */
+		rndis_pdata.ethaddr[i % (ETH_ALEN - 1) + 1] ^= *src++;
 	}
-	platform_device_register(&androidusb_device);
+#endif
+
+	/* use different USB configuration when in factory test mode */
+	if (!strcmp(boot_mode, "factorycable"))
+		androidusb_device.dev.platform_data = &andusb_plat_factory;
+
 	platform_device_register(&usb_mass_storage_device);
+#ifdef CONFIG_USB_ANDROID_RNDIS
+	platform_device_register(&rndis_device);
+#endif
+	platform_device_register(&androidusb_device);
 	platform_driver_register(&cpcap_usb_connected_driver);
 }
 
@@ -274,6 +452,7 @@ static void sholes_audio_init(void)
 	gpio_direction_output(SHOLES_AUDIO_PATH_GPIO, 1);
 	omap_cfg_reg(AE5_34XX_GPIO143);
 }
+
 
 static struct omap_uart_config sholes_uart_config __initdata = {
 	.enabled_uarts = ((1 << 0) | (1 << 1) | (1 << 2)),
@@ -490,7 +669,7 @@ static struct qtouch_ts_platform_data sholes_ts_platform_data = {
 		.cfg		= sholes_key_array_data,
 		.num_keys   = ARRAY_SIZE(sholes_key_array_data),
 	},
-	.vkeys			= {
+	.vkeys			= { 
 		.keys		= sholes_touch_vkeys,
 		.count		= ARRAY_SIZE(sholes_touch_vkeys),
 		.start		= 961,
@@ -627,35 +806,41 @@ static void sholes_usb_port_suspend(struct platform_device *dev,
 		gpio_set_value(SHOLES_IPC_USB_SUSP_GPIO, suspend);
 }
 
-
-static struct omap_usb_port_data usb_port_data[] = {
-	[0] = { .flags = 0x0, }, /* disabled */
-	[1] = { .flags = 0x0, }, /* disabled */
-	[2] = {
-		.flags = OMAP_USB_PORT_FLAG_ENABLED |
-			OMAP_USB_PORT_FLAG_AUTOIDLE |
-			OMAP_USB_PORT_FLAG_NOBITSTUFF,
-		.mode = OMAP_USB_PORT_MODE_UTMI_PHY_4PIN,
-		.startup = sholes_usb_port_startup,
-		.shutdown = sholes_usb_port_shutdown,
-		.suspend = sholes_usb_port_suspend,
+static struct ehci_hcd_omap_platform_data usb_platform_data = {
+	.port_data = {
+		{ .flags = 0x0, }, /* disabled */
+		{ .flags = 0x0, }, /* disabled */
+		{
+			.flags = EHCI_HCD_OMAP_FLAG_ENABLED |
+				EHCI_HCD_OMAP_FLAG_AUTOIDLE |
+				EHCI_HCD_OMAP_FLAG_NOBITSTUFF,
+			.mode = EHCI_HCD_OMAP_MODE_UTMI_PHY_4PIN,
+			.startup = sholes_usb_port_startup,
+			.shutdown = sholes_usb_port_shutdown,
+			.suspend = sholes_usb_port_suspend,
+		},
 	},
-};
-
-static struct omap_usb_platform_data usb_platform_data = {
-	.port_data = usb_port_data,
-	.num_ports = ARRAY_SIZE(usb_port_data),
 };
 
 static struct resource ehci_resources[] = {
-	[0] = {
-		.start	= OMAP34XX_HSUSB_HOST_BASE + 0x800,
-		.end	= OMAP34XX_HSUSB_HOST_BASE + 0x800 + SZ_1K - 1,
+	{
+		.start	= OMAP34XX_EHCI_BASE,
+		.end	= OMAP34XX_EHCI_BASE + SZ_1K - 1,
 		.flags	= IORESOURCE_MEM,
 	},
-	[1] = {         /* general IRQ */
-		.start	= INT_34XX_EHCI_IRQ,
-		.flags	= IORESOURCE_IRQ,
+	{
+		.start	= OMAP34XX_UHH_CONFIG_BASE,
+		.end	= OMAP34XX_UHH_CONFIG_BASE + SZ_1K - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.start	= OMAP34XX_USBTLL_BASE,
+		.end	= OMAP34XX_USBTLL_BASE + SZ_4K - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	{         /* general IRQ */
+		.start   = INT_34XX_EHCI_IRQ,
+		.flags   = IORESOURCE_IRQ,
 	}
 };
 
@@ -687,8 +872,8 @@ static int omap_ohci_bus_check_ctrl_standby(void)
 
 static struct resource ohci_resources[] = {
 	[0] = {
-		.start	= OMAP34XX_HSUSB_HOST_BASE + 0x400,
-		.end	= OMAP34XX_HSUSB_HOST_BASE + 0x400 + SZ_1K - 1,
+		.start	= OMAP34XX_OHCI_BASE,
+		.end	= OMAP34XX_OHCI_BASE + SZ_1K - 1,
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {         /* general IRQ */
@@ -717,7 +902,6 @@ static struct platform_device ohci_device = {
 };
 #endif /* OHCI specific data */
 
-
 static void __init sholes_ehci_init(void)
 {
 	omap_cfg_reg(AF5_34XX_GPIO142);		/*  IPC_USB_SUSP      */
@@ -743,16 +927,17 @@ static void __init sholes_sdrc_init(void)
 
 static void __init sholes_serial_init(void)
 {
-	omap_cfg_reg(AA8_3430_UART1_TX);
-	omap_cfg_reg(Y8_3430_UART1_RX);
-	omap_cfg_reg(AA9_3430_UART1_RTS);
-	omap_cfg_reg(W8_3430_UART1_CTS);
+	omap_cfg_reg(AA8_34XX_UART1_TX);
+	omap_cfg_reg(Y8_34XX_UART1_RX);
+	omap_cfg_reg(AA9_34XX_UART1_RTS);
+	omap_cfg_reg(W8_34XX_UART1_CTS);
 	omap_cfg_reg(AA25_34XX_UART2_TX);
 	omap_cfg_reg(AD25_34XX_UART2_RX);
 	omap_cfg_reg(AB25_34XX_UART2_RTS);
 	omap_cfg_reg(AB26_34XX_UART2_CTS);
 
 	omap_serial_init(SHOLES_BPWAKE_STROBE_GPIO, 0x01);
+
 }
 
 /* SMPS I2C voltage control register Address for VDD1 */
@@ -852,7 +1037,7 @@ int sholes_voltagescale_vcbypass(u32 target_opp, u32 current_opp,
 
 extern void omap_uart_block_sleep(int num);
 static struct wake_lock baseband_wakeup_wakelock;
-static int sholes_bpwake_irqhandler(int irq, void *unused)
+static irqreturn_t sholes_bpwake_irqhandler(int irq, void *unused)
 {
 	omap_uart_block_sleep(0);
 	/*
@@ -959,7 +1144,8 @@ static struct notifier_block sholes_pm_reboot_notifier = {
 
 static void sholes_pm_init(void)
 {
-	omap3_set_prm_setup_vc(&sholes_prm_setup);
+	sleep_while_idle = 1;
+	omap3_pm_init_vc(&sholes_prm_setup);
 	omap3_voltagescale_vcbypass_setup(sholes_voltagescale_vcbypass);
 
 	/* Initialize CPCAP SW1&SW2 OPP1&OPP2 registers */
@@ -990,6 +1176,7 @@ static void sholes_pm_init(void)
 	sholes_pm_set_reset(1);
 
 	register_reboot_notifier(&sholes_pm_reboot_notifier);
+
 }
 
 static void __init config_wlan_gpio(void)
@@ -1004,12 +1191,12 @@ static void __init config_mmc2_init(void)
 	u32 val;
 
 	/* MMC2 */
-	omap_cfg_reg(AE2_3430_MMC2_CLK);
-	omap_cfg_reg(AG5_3430_MMC2_CMD);
-	omap_cfg_reg(AH5_3430_MMC2_DAT0);
-	omap_cfg_reg(AH4_3430_MMC2_DAT1);
-	omap_cfg_reg(AG4_3430_MMC2_DAT2);
-	omap_cfg_reg(AF4_3430_MMC2_DAT3);
+	omap_cfg_reg(AE2_34XX_MMC2_CLK);
+	omap_cfg_reg(AG5_34XX_MMC2_CMD);
+	omap_cfg_reg(AH5_34XX_MMC2_DAT0);
+	omap_cfg_reg(AH4_34XX_MMC2_DAT1);
+	omap_cfg_reg(AG4_34XX_MMC2_DAT2);
+	omap_cfg_reg(AF4_34XX_MMC2_DAT3);
 
 	/* Set internal loopback clock */
 	val = omap_ctrl_readl(OMAP343X_CONTROL_DEVCONF1);
@@ -1107,10 +1294,10 @@ static struct platform_device sholes_wl1271_test_device = {
 static void __init sholes_bt_init(void)
 {
 	/* Mux setup for Bluetooth chip-enable */
-	omap_cfg_reg(T3_34XX_GPIO_179);
+	omap_cfg_reg(T3_34XX_GPIO179);
 
 	/* Mux setup for BT wake GPIO and hostwake GPIO */
-	omap_cfg_reg(AF21_34XX_GPIO8);
+	omap_cfg_reg(AF21_34XX_GPIO8_OUT);
 	omap_cfg_reg(W7_34XX_GPIO178_DOWN);
 
 	platform_device_register(&sholes_wl1271_device);
@@ -1229,7 +1416,7 @@ static void sholes_pm_power_off(void)
 	printk(KERN_INFO "sholes_pm_power_off start...\n");
 	local_irq_disable();
 
-	/* config gpio 176 back from safe mode to reset the device*/
+        /* config gpio 176 back from safe mode to reset the device*/
 	omap_writew(0x4, 0x480021D2);
 	gpio_direction_output(SHOLES_POWER_OFF_GPIO, 0);
 
@@ -1240,7 +1427,7 @@ static void sholes_pm_power_off(void)
 
 static void sholes_pm_reset(void)
 {
-	arch_reset('h');
+	arch_reset('h', NULL);
 }
 
 static int cpcap_charger_connected_probe(struct platform_device *pdev)
@@ -1333,7 +1520,7 @@ static void __init sholes_map_io(void)
 MACHINE_START(SHOLES, "sholes")
 	/* Maintainer: Motorola, Inc. */
 	.phys_io	= 0x48000000,
-	.io_pg_offst	= ((0xd8000000) >> 18) & 0xfffc,
+	.io_pg_offst	= ((0xfa000000) >> 18) & 0xfffc,
 #ifdef CONFIG_MACH_SHOLES_UMTS
 	.boot_params	= 0x80C00100,
 #else

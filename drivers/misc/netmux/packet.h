@@ -1,7 +1,7 @@
 /******************************************************************************
  * NetMUX packet.h                                                            *
  *                                                                            *
- * Copyright (C) Motorola 2006-2007                                                *
+ * Copyright (C) 2006-2010 Motorola, Inc.                                     *
  *                                                                            *
  * Redistribution and use in source and binary forms, with or without         *
  * modification, are permitted provided that the following conditions are     *
@@ -35,6 +35,7 @@
  *   2006/12/19  Motorola    Combined header and data into one transfer       *
  *                           Align packets on 4 byte boundaries               *
  *   2007/07/31  Motorola    Add support for larger bytecredit
+ *   2010/04/28  Motorola    Format cleanup                                   *
  ******************************************************************************/
 
 /* packet.h defines a list of structures to hold each packet type. Each       */
@@ -75,12 +76,13 @@
  */
 START_PACKED_STRUCT(DATA_PACKET_HDR)
     PACKED_MEMBER(int8 type);
-    PACKED_MEMBER(int8 channel);
-    PACKED_MEMBER(int16 len);
+PACKED_MEMBER(int8 channel);
+PACKED_MEMBER(int16 len);
 END_PACKED_STRUCT(DATA_PACKET_HDR)
 
 /*
- * CREDIT_PACKET defines a credit control packet to change the amount of receive space.
+ * CREDIT_PACKET defines a credit control packet to change
+ * the amount of receive space.
  * A brief description follows.
  *
  * type identifies the packet
@@ -90,13 +92,13 @@ END_PACKED_STRUCT(DATA_PACKET_HDR)
  * bytecredit is the number of bytes to augment the credit by
  * sendcredit is the number of sends to augment the credit by
  */
-START_PACKED_STRUCT(CREDIT_PACKET)
+    START_PACKED_STRUCT(CREDIT_PACKET)
     PACKED_MEMBER(int8 type);
-    PACKED_MEMBER(int8 acktype);
-    PACKED_MEMBER(int8 channel);
-    PACKED_MEMBER(int8 padding);
-    PACKED_MEMBER(int32 bytecredit);
-    PACKED_MEMBER(int32 sendcredit);
+PACKED_MEMBER(int8 acktype);
+PACKED_MEMBER(int8 channel);
+PACKED_MEMBER(int8 padding);
+PACKED_MEMBER(int32 bytecredit);
+PACKED_MEMBER(int32 sendcredit);
 END_PACKED_STRUCT(CREDIT_PACKET)
 
 /*
@@ -108,11 +110,11 @@ END_PACKED_STRUCT(CREDIT_PACKET)
  * padding_byte1 is only used for data alignment
  * padding_byte2 is only used for data alignment
  */
-START_PACKED_STRUCT(ENABLEMUX_PACKET)
+    START_PACKED_STRUCT(ENABLEMUX_PACKET)
     PACKED_MEMBER(int8 type);
-    PACKED_MEMBER(int8 acktype);
-    PACKED_MEMBER(int8 padding_byte1);
-    PACKED_MEMBER(int8 padding_byte2);
+PACKED_MEMBER(int8 acktype);
+PACKED_MEMBER(int8 padding_byte1);
+PACKED_MEMBER(int8 padding_byte2);
 END_PACKED_STRUCT(ENABLEMUX_PACKET)
 
 /*
@@ -124,16 +126,17 @@ END_PACKED_STRUCT(ENABLEMUX_PACKET)
  * padding_byte1 is only used for data alignment
  * padding_byte2 is only used for data alignment
  */
-START_PACKED_STRUCT(DISABLEMUX_PACKET)
+    START_PACKED_STRUCT(DISABLEMUX_PACKET)
     PACKED_MEMBER(int8 type);
-    PACKED_MEMBER(int8 acktype);
-    PACKED_MEMBER(int8 padding_byte1);
-    PACKED_MEMBER(int8 padding_byte2);
+PACKED_MEMBER(int8 acktype);
+PACKED_MEMBER(int8 padding_byte1);
+PACKED_MEMBER(int8 padding_byte2);
 END_PACKED_STRUCT(DISABLEMUX_PACKET)
 
 /*
- * ENABLECHANNEL_PACKET defines a enable channel control packet to enable a specific
- * channel.  A brief description follows,
+ * ENABLECHANNEL_PACKET defines a enable channel control packet
+ * to enable a specific channel.
+ * A brief description follows,
  *
  * type identifies the packet
  * acktype defines direction and result of the control packet
@@ -144,17 +147,17 @@ END_PACKED_STRUCT(DISABLEMUX_PACKET)
  * bytecredit describes the senders receive space
  * sendcredit describes the senders send space
  */
-START_PACKED_STRUCT(ENABLECHANNEL_PACKET)
+    START_PACKED_STRUCT(ENABLECHANNEL_PACKET)
     PACKED_MEMBER(int8 type);
-    PACKED_MEMBER(int8 acktype);
-    PACKED_MEMBER(int8 channel);
-    PACKED_MEMBER(int8 host_interface);
-    PACKED_MEMBER(int8 client_interface);
-    PACKED_MEMBER(int8 padding_byte1);
-    PACKED_MEMBER(int8 padding_byte2);
-    PACKED_MEMBER(int8 padding_byte3);
-    PACKED_MEMBER(int32 bytecredit);
-    PACKED_MEMBER(int32 sendcredit);
+PACKED_MEMBER(int8 acktype);
+PACKED_MEMBER(int8 channel);
+PACKED_MEMBER(int8 host_interface);
+PACKED_MEMBER(int8 client_interface);
+PACKED_MEMBER(int8 padding_byte1);
+PACKED_MEMBER(int8 padding_byte2);
+PACKED_MEMBER(int8 padding_byte3);
+PACKED_MEMBER(int32 bytecredit);
+PACKED_MEMBER(int32 sendcredit);
 END_PACKED_STRUCT(ENABLECHANNEL_PACKET)
 
 /*
@@ -170,20 +173,21 @@ END_PACKED_STRUCT(ENABLECHANNEL_PACKET)
  * padding_byte2 is only used for data alignment
  * padding_byte3 is only used for data alignment
  */
-START_PACKED_STRUCT(DISABLECHANNEL_PACKET)
+    START_PACKED_STRUCT(DISABLECHANNEL_PACKET)
     PACKED_MEMBER(int8 type);
-    PACKED_MEMBER(int8 acktype);
-    PACKED_MEMBER(int8 channel);
-    PACKED_MEMBER(int8 host_interface);
-    PACKED_MEMBER(int8 client_interface);
-    PACKED_MEMBER(int8 padding_byte1);
-    PACKED_MEMBER(int8 padding_byte2);
-    PACKED_MEMBER(int8 padding_byte3);
+PACKED_MEMBER(int8 acktype);
+PACKED_MEMBER(int8 channel);
+PACKED_MEMBER(int8 host_interface);
+PACKED_MEMBER(int8 client_interface);
+PACKED_MEMBER(int8 padding_byte1);
+PACKED_MEMBER(int8 padding_byte2);
+PACKED_MEMBER(int8 padding_byte3);
 END_PACKED_STRUCT(DISABLECHANNEL_PACKET)
 
 /*
- * QUERYINTERFACE_PACKET defines a query interface control packet to retrieve an interface
- * id.  A brief description follows.
+ * QUERYINTERFACE_PACKET defines a query interface control packet to
+ * retrieve an interface id.
+ * A brief description follows.
  *
  * type identifies the packet
  * acktype defines direction and result of the control packet
@@ -191,16 +195,17 @@ END_PACKED_STRUCT(DISABLECHANNEL_PACKET)
  * result only applies to a successful query and is the requested interface id
  * name is the name of the interface queried
  */
-START_PACKED_STRUCT(QUERYINTERFACE_PACKET)
+    START_PACKED_STRUCT(QUERYINTERFACE_PACKET)
     PACKED_MEMBER(int8 type);
-    PACKED_MEMBER(int8 acktype);
-    PACKED_MEMBER(int8 host_interface);
-    PACKED_MEMBER(int8 result);
-    PACKED_MEMBER(sint8 name[PACKET_MAXNAME_LENGTH]);
+PACKED_MEMBER(int8 acktype);
+PACKED_MEMBER(int8 host_interface);
+PACKED_MEMBER(int8 result);
+PACKED_MEMBER(sint8 name[PACKET_MAXNAME_LENGTH]);
 END_PACKED_STRUCT(QUERYINTERFACE_PACKET)
 
 /*
- * CHANNELSIGNAL_PACKET defines a channel signal control packet to signal a channel
+ * CHANNELSIGNAL_PACKET defines a channel signal control packet to
+ * signal a channel
  * A brief description follows.
  *
  * type identifies the packet
@@ -209,13 +214,12 @@ END_PACKED_STRUCT(QUERYINTERFACE_PACKET)
  * padding is only used for data alignment
  * signal is the signal to send
  */
-START_PACKED_STRUCT(CHANNELSIGNAL_PACKET)
+    START_PACKED_STRUCT(CHANNELSIGNAL_PACKET)
     PACKED_MEMBER(int8 type);
-    PACKED_MEMBER(int8 acktype);
-    PACKED_MEMBER(int8 channel);
-    PACKED_MEMBER(int8 padding);
-    PACKED_MEMBER(int32 signal);
+PACKED_MEMBER(int8 acktype);
+PACKED_MEMBER(int8 channel);
+PACKED_MEMBER(int8 padding);
+PACKED_MEMBER(int32 signal);
 END_PACKED_STRUCT(CHANNELSIGNAL_PACKET)
-
 
 #endif

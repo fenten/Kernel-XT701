@@ -1,7 +1,7 @@
 /*
  * Mailbox reservation modules for DSP
  *
- * Copyright (C) 2006-2008 Nokia Corporation
+ * Copyright (C) 2006-2009 Nokia Corporation
  * Written by: Hiroshi DOYU <Hiroshi.DOYU@nokia.com>
  *
  * This file is subject to the terms and conditions of the GNU General Public
@@ -14,10 +14,8 @@
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
-#include <mach/mailbox.h>
+#include <plat/mailbox.h>
 #include <mach/irqs.h>
-
-#define DRV_NAME "omap1-mailbox"
 
 #define MAILBOX_ARM2DSP1		0x00
 #define MAILBOX_ARM2DSP1b		0x04
@@ -186,7 +184,7 @@ static struct platform_driver omap1_mbox_driver = {
 	.probe	= omap1_mbox_probe,
 	.remove	= __devexit_p(omap1_mbox_remove),
 	.driver	= {
-		.name	= DRV_NAME,
+		.name	= "omap1-mailbox",
 	},
 };
 
@@ -205,5 +203,5 @@ module_exit(omap1_mbox_exit);
 
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("omap mailbox: omap1 architecture specific functions");
-MODULE_AUTHOR("Hiroshi DOYU" <Hiroshi.DOYU@nokia.com>);
-MODULE_ALIAS("platform:"DRV_NAME);
+MODULE_AUTHOR("Hiroshi DOYU <Hiroshi.DOYU@nokia.com>");
+MODULE_ALIAS("platform:omap1-mailbox");

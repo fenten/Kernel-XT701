@@ -148,6 +148,8 @@ static struct ts0710_con ts0710_connection;
 
 static int debug = 0;
 
+module_param_named(debug_level, debug, int, S_IRUGO | S_IWUSR);
+
 #define ts_debug(level, format, arg...)	do {	\
 	if (debug & level)			\
 		pr_debug(format , ## arg);	\
@@ -370,7 +372,14 @@ static int ts0710_pkt_send(struct ts0710_con *ts0710, u8 *data)
 	ts27010_debughex(DBG_VERBOSE, "ts27010: > ",
 			 data, TS0710_FRAME_SIZE(len));
 
-	res = ts27010_ldisc_send(ts27010mux_tty, data, TS0710_FRAME_SIZE(len));
+	if (!ts27010mux_tty) {
+		pr_warning("ts27010: ldisc closed.  discarding %d bytes\n",
+			   TS0710_FRAME_SIZE(len));
+		return TS0710_FRAME_SIZE(len);
+	}
+
+	res = ts27010_ldisc_send(ts27010mux_tty, data,
+				 TS0710_FRAME_SIZE(len));
 
 	if (res < 0) {
 		pr_err("ts27010: pkt write error %d\n", res);

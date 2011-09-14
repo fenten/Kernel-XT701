@@ -38,6 +38,7 @@
  *                           kernel                                           *
  *   2008/10/25  Motorola    update  kernel to TI 25.1                        *
  *   2009/10/02  Motorola    replace down_interruptible() with down()         *
+ *   2010/04/28  Motorola    Format cleanup                                   *
  ******************************************************************************/
 
 
@@ -62,8 +63,8 @@
 #include <asm/irq.h>
 
 
-void initialize_utilities (void);
-void shutdown_utilities   (void);
+void initialize_utilities(void);
+void shutdown_utilities(void);
 
 /*
  * PANIC macro to halt everything
@@ -94,8 +95,8 @@ void shutdown_utilities   (void);
  */
 #define free_mem(ptr)       kfree(ptr)
 
-void* int_alloc_mem (int32 size);
-void* alloc_mem     (int32 size);
+void *int_alloc_mem(int32 size);
+void *alloc_mem(int32 size);
 
 /*
  * The NetMUX refers to a data type called a 'COMMBUFF' for transmitting and
@@ -103,47 +104,48 @@ void* alloc_mem     (int32 size);
  */
 typedef struct sk_buff COMMBUFF;
 
-typedef struct COMMBUFFTAG
-{
-    COMMBUFF* commbuff;
+typedef struct COMMBUFFTAG {
+	COMMBUFF *commbuff;
 
-    int32 channel;
-    int32 size;
-    void* param;
+	int32 channel;
+	int32 size;
+	void *param;
 
-    void (*CommBuffRelease) (int32, int32, void*);
+	void (*CommBuffRelease) (int32, int32, void *);
 
-    struct COMMBUFFTAG* next_tag;
-}COMMBUFFTAG;
+	struct COMMBUFFTAG *next_tag;
+} COMMBUFFTAG;
 
 /*
  * The following declare routines for manipulating data inside a COMMBUFF
  */
-COMMBUFF* int_alloc_commbuff (int32);
-COMMBUFF* alloc_commbuff     (int32, int32);
+COMMBUFF *int_alloc_commbuff(int32);
+COMMBUFF *alloc_commbuff(int32, int32);
 
 #define free_commbuff(ptr)                   kfree_skb(ptr)
 #define ref_commbuff(ptr)                    skb_get(ptr)
 #define deref_commbuff(ptr)                  kfree_skb(ptr)
-#define commbuff_length(ptr)                 (ptr)->len
-#define commbuff_data(ptr)                   (ptr)->data
+#define commbuff_length(ptr)                 ((ptr)->len)
+#define commbuff_data(ptr)                   ((ptr)->data)
 #define commbuff_copyout(dst, cb, off, len)  memcpy(dst, ((cb)->data)+off, len)
 #define commbuff_remove_front(ptr, amount)   skb_pull(ptr, amount)
 /* the memcopys work because the skbuff is in contiguous memory */
-#define commbuff_add_header(ptr, hdr, amount)  { \
-                                                  skb_push(ptr, amount); \
-                                                  memcpy((ptr)->data, hdr, amount); \
-                                                }
+#define commbuff_add_header(ptr, hdr, amount) \
+	{ 			\
+		skb_push(ptr, amount);\
+		memcpy((ptr)->data, hdr, amount);\
+	}
 #define commbuff_copyin(cb, off, src, len)   memcpy((cb)->data+(off), src, len);
-#define commbuff_copyin_byte(ptr, off, val)  *((ptr)->data+off) = val
-#define commbuff_copyin_word(ptr, off, val)  *(int16*)((ptr)->data+off) = val
-#define commbuff_copyin_dword(ptr, off, val) *(int32*)((ptr)->data+off) = val
+#define commbuff_copyin_byte(ptr, off, val)  (*((ptr)->data+off) = val)
+#define commbuff_copyin_word(ptr, off, val)  (*(int16 *)((ptr)->data+off) = val)
+#define commbuff_copyin_dword(ptr, off, val) (*(int32 *)((ptr)->data+off) = val)
 #define commbuff_data_pullup(ptr, len)
 
-COMMBUFF* commbuff_split  (COMMBUFF*, int32);
-COMMBUFF* commbuff_merge  (COMMBUFF*, COMMBUFF*);
-void      tag_commbuff    (COMMBUFF*, int32, void*, void (*__cdecl)(int32, int32, void*));
-void      detag_commbuff  (COMMBUFF*);
+COMMBUFF *commbuff_split(COMMBUFF *, int32);
+COMMBUFF *commbuff_merge(COMMBUFF *, COMMBUFF *);
+void tag_commbuff(COMMBUFF *, int32, void *,
+		  void (*__cdecl) (int32, int32, void *));
+void detag_commbuff(COMMBUFF *);
 
 /*
  * The NetMUX uses a data type called a COMMBUFFQUEUE to store COMMBUFF's
@@ -156,60 +158,58 @@ typedef struct sk_buff_head COMMBUFFQUEUE;
 #define initialize_commbuff_queue(queue) skb_queue_head_init(queue)
 #define destroy_commbuff_queue(queue)    {}
 #define queue_length(queue)              skb_queue_len(queue)
-#define queue_frontbuff(queue) queue->next
+#define queue_frontbuff(queue) (queue->next)
 
-void      queue_commbuff            (COMMBUFF*, COMMBUFFQUEUE*);
-void      queuefront_commbuff       (COMMBUFF*, COMMBUFFQUEUE*);
-COMMBUFF* dequeue_commbuff          (COMMBUFFQUEUE*);
-void      empty_commbuff_queue      (COMMBUFFQUEUE*);
+void queue_commbuff(COMMBUFF *, COMMBUFFQUEUE *);
+void queuefront_commbuff(COMMBUFF *, COMMBUFFQUEUE *);
+COMMBUFF *dequeue_commbuff(COMMBUFFQUEUE *);
+void empty_commbuff_queue(COMMBUFFQUEUE *);
 
 /*
  * TASKDATA defines a routine that can be manipulated like a Linux tasklet
  */
-typedef struct TASKDATA
-{
-    struct work_struct work;
-    int8               state;
-}TASKDATA;
+typedef struct TASKDATA {
+	struct work_struct work;
+	int8 state;
+} TASKDATA;
 
-#define initialize_task(task, function) { \
-                                    unsigned long flags; \
-                                    local_irq_save(flags); \
-                                    INIT_WORK(&(task)->work, function); \
-                                    (task)->state = 0; \
-                                    local_irq_restore(flags); \
-                                  }
+#define initialize_task(task, function) { 				\
+					unsigned long flags; 		\
+					local_irq_save(flags); 		\
+					INIT_WORK(&(task)->work, function);\
+					(task)->state = 0; 		\
+					local_irq_restore(flags); 	\
+					}
 
 #define destroy_task(task)        {}
 
-#define enable_task(task)         { \
-                                    unsigned long flags; \
-                                    local_irq_save(flags); \
-                                    (task)->state &= ~0x01; \
-                                    if((task)->state) \
-                                    { \
-                                        schedule_work(&(task)->work); \
-                                        (task)->state = 0; \
-                                    } \
-                                    local_irq_restore(flags); \
-                                  }
+#define enable_task(task)	{ 					\
+					unsigned long flags;		\
+					local_irq_save(flags); 		\
+					(task)->state &= ~0x01; 	\
+					if ((task)->state) { 		\
+						schedule_work(&(task)->work);\
+						(task)->state = 0;	\
+					} 				\
+					local_irq_restore(flags); 	\
+				}
 
-#define disable_task(task)        { \
-                                    unsigned long flags; \
-                                    local_irq_save(flags); \
-                                    (task)->state |= 0x01; \
-                                    local_irq_restore(flags); \
-                                  }
+#define disable_task(task)	{ 					\
+					unsigned long flags; 		\
+					local_irq_save(flags); 		\
+					(task)->state |= 0x01; 		\
+					local_irq_restore(flags); 	\
+				}
 
-#define task_schedule(task)       { \
-                                    unsigned long flags; \
-                                    local_irq_save(flags); \
-                                    if(!(task)->state) \
-                                        schedule_work(&(task)->work); \
-                                    else \
-                                        (task)->state |= 0x02; \
-                                    local_irq_restore(flags); \
-                                  }
+#define task_schedule(task)	{ 					\
+					unsigned long flags; 		\
+					local_irq_save(flags); 		\
+					if (!(task)->state) 		\
+						schedule_work(&(task)->work);\
+					else 				\
+						(task)->state |= 0x02; 	\
+					local_irq_restore(flags); 	\
+				}
 
 #define global_tasklet() {}
 
@@ -226,17 +226,19 @@ typedef struct semaphore CRITICALSECTION;
 
 #define enter_read_criticalsection(lock)      down(lock)
 
-// Keep this implementation for further investigation;
-//#define enter_read_criticalsection(lock)     if(down_interruptible(lock)){ \
-//					          panic("kernel error in netmux:down_interruptible\n");}
+/* Keep this implementation for further investigation;
+ *#define enter_read_criticalsection(lock)     if(down_interruptible(lock)){ \
+ *                  panic("kernel error in netmux:down_interruptible\n");}
+ */
 
 #define exit_read_criticalsection(lock)       up(lock)
 
 #define enter_write_criticalsection(lock)     down(lock)
 
-// Keep this implementation for further investigation;
-//#define enter_write_criticalsection(lock)     if(down_interruptible(lock)){ \
-//					          panic("kernel erro in netmux: down_interruptible\n");}
+/* Keep this implementation for further investigation;
+ *#define enter_write_criticalsection(lock)     if(down_interruptible(lock)){ \
+ *                     panic("kernel erro in netmux: down_interruptible\n");}
+ */
 
 #define exit_write_criticalsection(lock)      up(lock)
 

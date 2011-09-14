@@ -25,6 +25,9 @@
 #ifndef __TWL4030_H_
 #define __TWL4030_H_
 
+#include <linux/types.h>
+#include <linux/input/matrix_keypad.h>
+
 /*
  * Using the twl4030 core we address registers using a pair
  *	{ module id, relative register offset }
@@ -220,19 +223,28 @@ int twl4030_i2c_read(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes);
 
 /* Power bus message definitions */
 
-#define DEV_GRP_NULL		0x0
-#define DEV_GRP_P1		0x1
-#define DEV_GRP_P2		0x2
-#define DEV_GRP_P3		0x4
+/* The TWL4030/5030 splits its power-management resources (the various
+ * regulators, clock and reset lines) into 3 processor groups - P1, P2 and
+ * P3. These groups can then be configured to transition between sleep, wait-on
+ * and active states by sending messages to the power bus.  See Section 5.4.2
+ * Power Resources of TWL4030 TRM
+ */
 
-#define RES_GRP_RES		0x0
-#define RES_GRP_PP		0x1
-#define RES_GRP_RC		0x2
+/* Processor groups */
+#define DEV_GRP_NULL		0x0
+#define DEV_GRP_P1		0x1	/* P1: all OMAP devices */
+#define DEV_GRP_P2		0x2	/* P2: all Modem devices */
+#define DEV_GRP_P3		0x4	/* P3: all peripheral devices */
+
+/* Resource groups */
+#define RES_GRP_RES		0x0	/* Reserved */
+#define RES_GRP_PP		0x1	/* Power providers */
+#define RES_GRP_RC		0x2	/* Reset and control */
 #define RES_GRP_PP_RC		0x3
-#define RES_GRP_PR		0x4
+#define RES_GRP_PR		0x4	/* Power references */
 #define RES_GRP_PP_PR		0x5
 #define RES_GRP_RC_PR		0x6
-#define RES_GRP_ALL		0x7
+#define RES_GRP_ALL		0x7	/* All resource groups */
 
 #define RES_TYPE2_R0		0x0
 
@@ -245,6 +257,7 @@ int twl4030_i2c_read(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes);
 
 /* Power resources */
 
+/* Power providers */
 #define RES_VAUX1               1
 #define RES_VAUX2               2
 #define RES_VAUX3               3
@@ -266,14 +279,17 @@ int twl4030_i2c_read(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes);
 #define RES_VUSB_3V1            19
 #define RES_VUSBCP              20
 #define RES_REGEN               21
+/* Reset and control */
 #define RES_NRES_PWRON          22
 #define RES_CLKEN               23
 #define RES_SYSEN               24
 #define RES_HFCLKOUT            25
 #define RES_32KCLKOUT           26
 #define RES_RESET               27
+/* Power Reference */
 #define RES_Main_Ref            28
 
+#define TOTAL_RESOURCES		28
 /*
  * Power Bus Message Format ... these can be sent individually by Linux,
  * but are usually part of downloaded scripts that are run when various
@@ -333,20 +349,17 @@ struct twl4030_madc_platform_data {
 	int		irq_line;
 };
 
-/* Boards have uniqe mappings of {col, row} --> keycode.
- * Column and row are 4 bits, but range only from 0..7;
+/* Boards have uniqe mappings of {row, col} --> keycode.
+ * Column and row are 8 bits each, but range only from 0..7.
  * a PERSISTENT_KEY is "always on" and never reported.
  */
-#define KEY_PERSISTENT		0x00800000
-#define KEY(col, row, keycode)	(((col) << 28) | ((row) << 24) | (keycode))
-#define PERSISTENT_KEY(c, r)	KEY(c, r, KEY_PERSISTENT)
+#define PERSISTENT_KEY(r, c)	KEY((r), (c), KEY_RESERVED)
 
 struct twl4030_keypad_data {
+	const struct matrix_keymap_data *keymap_data;
 	unsigned rows;
 	unsigned cols;
-	unsigned *keymap;
-	unsigned short keymapsize;
-	unsigned int rep:1;
+	bool rep;
 };
 
 enum twl4030_usb_mode {
@@ -367,23 +380,43 @@ struct twl4030_script {
 	struct twl4030_ins *script;
 	unsigned size;
 	u8 flags;
-#define TRITON_WRST_SCRIPT	(1<<0)
-#define TRITON_WAKEUP12_SCRIPT	(1<<1)
-#define TRITON_WAKEUP3_SCRIPT	(1<<2)
-#define TRITON_SLEEP_SCRIPT	(1<<3)
+#define TWL4030_WRST_SCRIPT	(1<<0)
+#define TWL4030_WAKEUP12_SCRIPT	(1<<1)
+#define TWL4030_WAKEUP3_SCRIPT	(1<<2)
+#define TWL4030_SLEEP_SCRIPT	(1<<3)
 };
 
 struct twl4030_resconfig {
 	u8 resource;
-	u8 devgroup;
-	u8 type;
-	u8 type2;
+	u8 devgroup;	/* Processor group that Power resource belongs to */
+	u8 type;	/* Power resource addressed, 6 / broadcast message */
+	u8 type2;	/* Power resource addressed, 3 / broadcast message */
 };
 
 struct twl4030_power_data {
 	struct twl4030_script **scripts;
-	unsigned size;
-	const struct twl4030_resconfig *resource_config;
+	unsigned num;
+	struct twl4030_resconfig *resource_config;
+};
+
+extern void twl4030_power_init(struct twl4030_power_data *triton2_scripts);
+
+struct twl4030_codec_audio_data {
+	unsigned int	audio_mclk;
+	unsigned int ramp_delay_value;
+	unsigned int hs_extmute:1;
+	void (*set_hs_extmute)(int mute);
+};
+
+struct twl4030_codec_vibra_data {
+	unsigned int	audio_mclk;
+	unsigned int	coexist;
+};
+
+struct twl4030_codec_data {
+	unsigned int	audio_mclk;
+	struct twl4030_codec_audio_data		*audio;
+	struct twl4030_codec_vibra_data		*vibra;
 };
 
 struct twl4030_platform_data {
@@ -394,6 +427,7 @@ struct twl4030_platform_data {
 	struct twl4030_keypad_data		*keypad;
 	struct twl4030_usb_data			*usb;
 	struct twl4030_power_data		*power;
+	struct twl4030_codec_data		*codec;
 
 	/* LDO regulators */
 	struct regulator_init_data		*vdac;
@@ -423,8 +457,6 @@ int twl4030_sih_setup(int module);
 #define TWL4030_VAUX2_DEDICATED		0x1E
 #define TWL4030_VAUX3_DEV_GRP		0x1F
 #define TWL4030_VAUX3_DEDICATED		0x22
-#define TWL4030_VAUX4_DEV_GRP		0x23
-#define TWL4030_VAUX4_DEDICATED		0x26
 
 #if defined(CONFIG_TWL4030_BCI_BATTERY) || \
 	defined(CONFIG_TWL4030_BCI_BATTERY_MODULE)

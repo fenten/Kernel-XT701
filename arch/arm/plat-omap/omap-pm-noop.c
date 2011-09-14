@@ -6,8 +6,8 @@
  * debug/demonstration use, as it does nothing but printk() whenever a
  * function is called (when DEBUG is defined, below)
  *
- * Copyright (C) 2008 Texas Instruments, Inc.
- * Copyright (C) 2008 Nokia Corporation
+ * Copyright (C) 2008-2009 Texas Instruments, Inc.
+ * Copyright (C) 2008-2009 Nokia Corporation
  * Paul Walmsley
  *
  * Interface developed by (in alphabetical order):
@@ -22,9 +22,9 @@
 #include <linux/device.h>
 
 /* Interface documentation is in mach/omap-pm.h */
-#include <mach/omap-pm.h>
+#include <plat/omap-pm.h>
 
-#include <mach/powerdomain.h>
+#include <plat/powerdomain.h>
 
 struct omap_opp *dsp_opps;
 struct omap_opp *mpu_opps;
@@ -182,7 +182,6 @@ void omap_pm_dsp_set_min_opp(u8 opp_id)
 	 */
 }
 
-
 u8 omap_pm_dsp_get_opp(void)
 {
 	pr_debug("OMAP PM: DSP requests current DSP OPP ID\n");
@@ -277,6 +276,8 @@ unsigned long omap_pm_cpu_get_freq(void)
 
 int omap_pm_get_dev_context_loss_count(struct device *dev)
 {
+	static u32 counter = 0;
+
 	if (!dev) {
 		WARN_ON(1);
 		return -EINVAL;
@@ -290,48 +291,14 @@ int omap_pm_get_dev_context_loss_count(struct device *dev)
 	 * off counter.
 	 */
 
-	return 0;
+	/* For the noop case, we cannot know the off counter, so
+	 * return an increasing counter which will ensure that
+	 * context is always restored. */
+	return counter++;
 }
 
-/*
- * Powerdomain usecounting hooks
- */
 
-void omap_pm_pwrdm_active(struct powerdomain *pwrdm)
-{
-	if (!pwrdm) {
-		WARN_ON(1);
-		return;
-	};
-
-	pr_debug("OMAP PM: powerdomain %s is becoming active\n", pwrdm->name);
-
-	/*
-	 * CDP code apparently will need these for the enable_power_domain()
-	 * and disable_power_domain() functions.
-	 */
-}
-
-void omap_pm_pwrdm_inactive(struct powerdomain *pwrdm)
-{
-	if (!pwrdm) {
-		WARN_ON(1);
-		return;
-	};
-
-	pr_debug("OMAP PM: powerdomain %s is becoming inactive\n",
-		 pwrdm->name);
-
-	/*
-	 * CDP code apparently will need these for the enable_power_domain()
-	 * and disable_power_domain() functions.
-	 */
-}
-
-/*
- * Should be called before clk framework since clk fw will call
- * omap_pm_pwrdm_{in,}active()
- */
+/* Should be called before clk framework init */
 int __init omap_pm_if_early_init(struct omap_opp *mpu_opp_table,
 				 struct omap_opp *dsp_opp_table,
 				 struct omap_opp *l3_opp_table)

@@ -11,11 +11,15 @@ obj-$(CONFIG_BT_HCIDTL1)	+= dtl1_cs.o
 obj-$(CONFIG_BT_HCIBT3C)	+= bt3c_cs.o
 obj-$(CONFIG_BT_HCIBLUECARD)	+= bluecard_cs.o
 obj-$(CONFIG_BT_HCIBTUART)	+= btuart_cs.o
-obj-$(CONFIG_BT_HCIBRF6150)	+= brf6150.o
-obj-$(CONFIG_BT_HCIH4P)		+= hci_h4p/
 
 obj-$(CONFIG_BT_HCIBTUSB)	+= btusb.o
 obj-$(CONFIG_BT_HCIBTSDIO)	+= btsdio.o
+
+obj-$(CONFIG_BT_MRVL)		+= btmrvl.o
+obj-$(CONFIG_BT_MRVL_SDIO)	+= btmrvl_sdio.o
+
+btmrvl-y			:= btmrvl_main.o
+btmrvl-$(CONFIG_DEBUG_FS)	+= btmrvl_debugfs.o
 
 hci_uart-y				:= hci_ldisc.o
 hci_uart-$(CONFIG_BT_HCIUART_H4)	+= hci_h4.o

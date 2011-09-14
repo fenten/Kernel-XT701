@@ -23,7 +23,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/err.h>
 
-#include <mach/display.h>
+#include <plat/display.h>
 
 struct sharp_data {
 	/* XXX This regulator should actually be in SDP board file, not here,
@@ -66,7 +66,7 @@ static int sharp_ls_panel_probe(struct omap_dss_device *dssdev)
 	sd->vdvi_reg = regulator_get(&dssdev->dev, "vdvi");
 	if (IS_ERR(sd->vdvi_reg)) {
 		kfree(sd);
-		printk("failed to get VDVI regulator\n");
+		pr_err("failed to get VDVI regulator\n");
 		return PTR_ERR(sd->vdvi_reg);
 	}
 

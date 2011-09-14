@@ -1,6 +1,4 @@
 /*
- * linux/arch/arm/mach-omap2/pm_debug.c
- *
  * OMAP Power Management debug routines
  *
  * Copyright (C) 2005 Texas Instruments, Inc.
@@ -28,17 +26,18 @@
 #include <linux/io.h>
 #include <linux/module.h>
 
-#include <mach/clock.h>
-#include <mach/board.h>
-#include <mach/powerdomain.h>
-#include <mach/clockdomain.h>
+#include <plat/clock.h>
+#include <plat/board.h>
+#include <plat/powerdomain.h>
+#include <plat/clockdomain.h>
 
 #include "prm.h"
 #include "cm.h"
 #include "pm.h"
+#include "smartreflex.h"
+#include "prm-regbits-34xx.h"
 
-#ifdef CONFIG_PM_DEBUG
-int omap2_pm_debug = 0;
+int omap2_pm_debug;
 
 #define DUMP_PRM_MOD_REG(mod, reg)    \
 	regs[reg_count].name = #mod "." #reg; \
@@ -54,7 +53,10 @@ int omap2_pm_debug = 0;
 	regs[reg_count++].val = __raw_readl(reg)
 #define DUMP_INTC_REG(reg, off) \
 	regs[reg_count].name = #reg; \
-	regs[reg_count++].val = __raw_readl(IO_ADDRESS(0x480fe000 + (off)))
+	regs[reg_count++].val = \
+			 __raw_readl(OMAP2_L4_IO_ADDRESS(0x480fe000 + (off)))
+
+static int __init pm_dbg_init(void);
 
 void omap2_pm_dump(int mode, int resume, unsigned int us)
 {
@@ -85,9 +87,9 @@ void omap2_pm_dump(int mode, int resume, unsigned int us)
 		if (cpu_is_omap24xx()) {
 			DUMP_CM_MOD_REG(CORE_MOD, OMAP24XX_CM_FCLKEN2);
 			DUMP_PRM_MOD_REG(OMAP24XX_GR_MOD,
-					OMAP24XX_PRCM_CLKEMUL_CTRL_OFFSET);
+					OMAP2_PRCM_CLKEMUL_CTRL_OFFSET);
 			DUMP_PRM_MOD_REG(OMAP24XX_GR_MOD,
-					OMAP24XX_PRCM_CLKSRC_CTRL_OFFSET);
+					OMAP2_PRCM_CLKSRC_CTRL_OFFSET);
 		}
 		DUMP_CM_MOD_REG(WKUP_MOD, CM_FCLKEN);
 		DUMP_CM_MOD_REG(CORE_MOD, CM_ICLKEN1);
@@ -117,7 +119,7 @@ void omap2_pm_dump(int mode, int resume, unsigned int us)
 		if (cpu_is_omap24xx())
 			DUMP_PRM_MOD_REG(CORE_MOD, OMAP24XX_PM_WKST2);
 		DUMP_PRM_MOD_REG(WKUP_MOD, PM_WKST);
-		DUMP_PRM_MOD_REG(OCP_MOD, OMAP2_PRM_IRQSTATUS_MPU_OFFSET);
+		DUMP_PRM_MOD_REG(OCP_MOD, OMAP2_PRCM_IRQSTATUS_MPU_OFFSET);
 #if 1
 		DUMP_INTC_REG(INTC_PENDING_IRQ0, 0x0098);
 		DUMP_INTC_REG(INTC_PENDING_IRQ1, 0x00b8);
@@ -141,19 +143,20 @@ void omap2_pm_dump(int mode, int resume, unsigned int us)
 	}
 
 	if (!resume)
-#if defined(CONFIG_NO_IDLE_HZ) || defined(CONFIG_NO_HZ)
-		printk("--- Going to %s %s (next timer after %u ms)\n", s1, s2,
+#ifdef CONFIG_NO_HZ
+		printk(KERN_INFO
+		       "--- Going to %s %s (next timer after %u ms)\n", s1, s2,
 		       jiffies_to_msecs(get_next_timer_interrupt(jiffies) -
 					jiffies));
 #else
-		printk("--- Going to %s %s\n", s1, s2);
+		printk(KERN_INFO "--- Going to %s %s\n", s1, s2);
 #endif
 	else
-		printk("--- Woke up (slept for %u.%03u ms)\n",
+		printk(KERN_INFO "--- Woke up (slept for %u.%03u ms)\n",
 			us / 1000, us % 1000);
 
 	for (i = 0; i < reg_count; i++)
-		printk("%-20s: 0x%08x\n", regs[i].name, regs[i].val);
+		printk(KERN_INFO "%-20s: 0x%08x\n", regs[i].name, regs[i].val);
 }
 
 #ifdef CONFIG_DEBUG_FS
@@ -182,7 +185,8 @@ struct pm_module_def {
 #define MOD_CM 0
 #define MOD_PRM 1
 
-static const struct pm_module_def pm_dbg_reg_modules[] = {
+static const struct pm_module_def *pm_dbg_reg_modules;
+static const struct pm_module_def omap3_pm_reg_modules[] = {
 	{ "IVA2", MOD_CM, OMAP3430_IVA2_MOD, 0, 0x4c },
 	{ "OCP", MOD_CM, OCP_MOD, 0, 0x10 },
 	{ "MPU", MOD_CM, MPU_MOD, 4, 0x4c },
@@ -260,12 +264,12 @@ static int pm_dbg_show_regs(struct seq_file *s, void *unused)
 		if (pm_dbg_reg_modules[i].type == MOD_CM)
 			seq_printf(s, "MOD: CM_%s (%08x)\n",
 				pm_dbg_reg_modules[i].name,
-				(u32)(OMAP2_CM_BASE +
+				(u32)(OMAP3430_CM_BASE +
 				pm_dbg_reg_modules[i].offset));
 		else
 			seq_printf(s, "MOD: PRM_%s (%08x)\n",
 				pm_dbg_reg_modules[i].name,
-				(u32)(OMAP2_PRM_BASE +
+				(u32)(OMAP3430_PRM_BASE +
 				pm_dbg_reg_modules[i].offset));
 
 		for (j = pm_dbg_reg_modules[i].low;
@@ -461,6 +465,9 @@ int pm_dbg_regset_init(int reg_set)
 {
 	char name[2];
 
+	if (!pm_dbg_init_done)
+		pm_dbg_init();
+
 	if (reg_set < 1 || reg_set > PM_DBG_MAX_REG_SETS ||
 		pm_dbg_reg_set[reg_set-1] != NULL)
 		return -EINVAL;
@@ -522,13 +529,53 @@ static int __init pwrdms_setup(struct powerdomain *pwrdm, void *dir)
 	return 0;
 }
 
+static int option_get(void *data, u64 *val)
+{
+	u32 *option = data;
+
+	*val = *option;
+
+	return 0;
+}
+
+static int option_set(void *data, u64 val)
+{
+	u32 *option = data;
+
+	*option = val;
+
+	if (option == &enable_off_mode)
+		omap3_pm_off_mode_enable(val);
+	if (option == &voltage_off_while_idle) {
+		if (voltage_off_while_idle)
+			prm_set_mod_reg_bits(OMAP3430_SEL_OFF, OMAP3430_GR_MOD,
+					     OMAP3_PRM_VOLTCTRL_OFFSET);
+		else
+			prm_clear_mod_reg_bits(OMAP3430_SEL_OFF,
+					       OMAP3430_GR_MOD,
+					       OMAP3_PRM_VOLTCTRL_OFFSET);
+	}
+
+	return 0;
+}
+
+DEFINE_SIMPLE_ATTRIBUTE(pm_dbg_option_fops, option_get, option_set, "%llu\n");
+
 static int __init pm_dbg_init(void)
 {
 	int i;
 	struct dentry *d;
 	char name[2];
 
-	printk(KERN_INFO "pm_dbg_init()\n");
+	if (pm_dbg_init_done)
+		return 0;
+
+	if (cpu_is_omap34xx())
+		pm_dbg_reg_modules = omap3_pm_reg_modules;
+	else {
+		printk(KERN_ERR "%s: only OMAP3 supported\n", __func__);
+		return -ENODEV;
+	}
 
 	d = debugfs_create_dir("pm_debug", NULL);
 	if (IS_ERR(d))
@@ -539,7 +586,7 @@ static int __init pm_dbg_init(void)
 	(void) debugfs_create_file("time", S_IRUGO,
 		d, (void *)DEBUG_FILE_TIMERS, &debug_fops);
 
-	pwrdm_for_each(pwrdms_setup, (void *)d);
+	pwrdm_for_each_nolock(pwrdms_setup, (void *)d);
 
 	pm_dbg_dir = debugfs_create_dir("registers", d);
 	if (IS_ERR(pm_dbg_dir))
@@ -556,14 +603,27 @@ static int __init pm_dbg_init(void)
 
 		}
 
+	(void) debugfs_create_file("enable_off_mode", S_IRUGO | S_IWUGO, d,
+				   &enable_off_mode, &pm_dbg_option_fops);
+	(void) debugfs_create_file("sleep_while_idle", S_IRUGO | S_IWUGO, d,
+				   &sleep_while_idle, &pm_dbg_option_fops);
+	(void) debugfs_create_file("wakeup_timer_seconds", S_IRUGO | S_IWUGO, d,
+				   &wakeup_timer_seconds, &pm_dbg_option_fops);
+
+	/* Only enable for >= ES2.1 . Going to 0V on anything under
+	 * ES2.1 will eventually cause a crash */
+	if (omap_rev() > OMAP3430_REV_ES2_0)
+		(void) debugfs_create_file("voltage_off_while_idle",
+					   S_IRUGO | S_IWUGO, d,
+					   &voltage_off_while_idle,
+					   &pm_dbg_option_fops);
+
+	(void)sr_debugfs_create_entries(d);
+
 	pm_dbg_init_done = 1;
 
 	return 0;
 }
-late_initcall(pm_dbg_init);
-
-#else
-void pm_dbg_update_time(struct powerdomain *pwrdm, int prev) {}
-#endif
+arch_initcall(pm_dbg_init);
 
 #endif

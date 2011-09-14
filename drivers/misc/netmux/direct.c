@@ -32,18 +32,19 @@
 /*   DATE        OWNER       COMMENT                                          *
  *   ----------  ----------  -----------------------------------------------  *
  *   2006/09/28  Motorola    Initial version                                  *
- *   2006/11/15  Motorola    Fixed DestroyDirectInterface disable channel code* 
+ *   2006/11/15  Motorola    Fixed DestroyDirectInterface disable channel code*
  *   2006/11/18  Motorola    Fixed CreateDirectInterface() such that memory   *
  *                           is now being allocated, while interrupts are not *
  *                           disabled.                                        *
  *   2006/12/19  Motorola    Combine header and data into one transfer        *
  *   2007/05/01  Motorola    Change codes to ensure "shared" netmux           *
  *                           code is identical between AP and BP.             *
- *   2007/12/05  Motorola    port to kernel 2.6.22 for OMAP3430               * 
+ *   2007/12/05  Motorola    port to kernel 2.6.22 for OMAP3430               *
  *   2008/07/09  Motorola    port to kernel 2.6.24 for TI 23.5                *
  *   2008/10/25  Motorola    update  kernel to TI 25.1                        *
  *   2009/08/13  Motorola    Remove wait in DirectClose()                     *
  *   2009/10/02  Motorola    Replace LOGCOMMBUFF with DEBUG                   *
+ *   2010/04/28  Motorola    Format cleanup                                   *
  ******************************************************************************/
 
 /* direct.c defines an interface between a NetMUX and the Linux raw character */
@@ -63,7 +64,7 @@
  * contains information to be associated with the
  * major number.
  */
-DIRECT_MAJOR_LIST* major_list = 0;
+DIRECT_MAJOR_LIST *major_list = 0;
 
 extern struct class *netmux_class;
 
@@ -101,140 +102,175 @@ extern struct class *netmux_class;
  * param1 -- a custom pointer, in this case an INTERFACEINFORM struct
  * param2 -- a custom pointer, in this case a DIRECTINTERFACE struct
  */
-int32 DirectInform (void* param1, void* param2)
+int32 DirectInform(void *param1, void *param2)
 {
-    DIRECTINTERFACE*      direct;
-    DIRECT_CHANNELDATA*   chdat;
-    CONFIGPACKET*         configpacket;
-    ENABLECHANNEL_PACKET* enablechannel;
-    INTERFACEINFORM*      informdata;
-    int32                 channel;
-    int32                 type;
+	DIRECTINTERFACE *direct;
+	DIRECT_CHANNELDATA *chdat;
+	CONFIGPACKET *configpacket;
+	ENABLECHANNEL_PACKET *enablechannel;
+	INTERFACEINFORM *informdata;
+	int32 channel;
+	int32 type;
 
-    DEBUG("DirectInform(0x%p, 0x%p)\n", param1, param2);
+	DEBUG("DirectInform(0x%p, 0x%p)\n", param1, param2);
 
-    informdata = (INTERFACEINFORM*)param1;
-    direct     = (DIRECTINTERFACE*)param2;
+	informdata = (INTERFACEINFORM *) param1;
+	direct = (DIRECTINTERFACE *) param2;
 
-    switch(informdata->inform_type)
-    {
-        case INFORM_INTERFACE_CONFIGPACKET:
-        {
-            channel = ((CONFIGPACKET*)informdata->data)->channel;
+	switch (informdata->inform_type) {
+	case INFORM_INTERFACE_CONFIGPACKET:
+		{
+			channel =
+			    ((CONFIGPACKET *) informdata->data)->channel;
 
-            if(channel > direct->channel_max || channel < direct->channel_min)
-            {
-                return DEBUGERROR(ERROR_INVALIDPARAMETER);
-            }
+			if (channel > direct->channel_max
+			    || channel < direct->channel_min) {
+				return DEBUGERROR(ERROR_INVALIDPARAMETER);
+			}
 
-            chdat        = &direct->channel_data[channel-direct->channel_min];
-            configpacket = (CONFIGPACKET*)informdata->data;
+			chdat =
+			    &direct->channel_data[channel -
+						  direct->channel_min];
+			configpacket = (CONFIGPACKET *) informdata->data;
 
-            chdat->client_interface = configpacket->host_interface;
-            chdat->burstsize        = configpacket->client_burstsize;
-            chdat->maxdata          = configpacket->client_maxdata;
-            chdat->host_byte_credit = configpacket->client_byte_credit;
-            chdat->host_send_credit = configpacket->client_send_credit;
+			chdat->client_interface =
+			    configpacket->host_interface;
+			chdat->burstsize = configpacket->client_burstsize;
+			chdat->maxdata = configpacket->client_maxdata;
+			chdat->host_byte_credit =
+			    configpacket->client_byte_credit;
+			chdat->host_send_credit =
+			    configpacket->client_send_credit;
 
-            memcpy(chdat->device_file, configpacket->channel_name, PACKET_MAXNAME_LENGTH);
+			memcpy(chdat->device_file,
+			       configpacket->channel_name,
+			       PACKET_MAXNAME_LENGTH);
 
-            init_waitqueue_head(&chdat->event_wait);
-            init_waitqueue_head(&chdat->close_wait);
-            init_waitqueue_head(&chdat->rdevent);
-            init_waitqueue_head(&chdat->wrevent);
+			init_waitqueue_head(&chdat->event_wait);
+			init_waitqueue_head(&chdat->close_wait);
+			init_waitqueue_head(&chdat->rdevent);
+			init_waitqueue_head(&chdat->wrevent);
 
-            if(netmux_class)
-            {
-                if(IS_ERR(device_create(netmux_class, NULL, 
-                           MKDEV(direct->major, channel), NULL, "%s", chdat->device_file)))
-                    return DEBUGERROR(ERROR_OPERATIONFAILED);
-            }
-            else
-            {
-                DEBUGERROR(ERROR_INVALIDPARAMETER);
-            }
-            
-            if(chdat->refcount == 0)
-                chdat->state = DIRECT_STATE_READY;
-        }break;
+			if (netmux_class) {
+				if (IS_ERR
+				    (device_create
+				     (netmux_class, NULL,
+				      MKDEV(direct->major, channel), NULL,
+				      "%s", chdat->device_file)))
+					return
+					    DEBUGERROR
+					    (ERROR_OPERATIONFAILED);
+			} else {
+				DEBUGERROR(ERROR_INVALIDPARAMETER);
+			}
 
-        case INFORM_INTERFACE_DISABLEMUX:
-        {
-            for(channel = 0; channel < direct->channel_max-direct->channel_min+1; channel++)
-            {
-                wake_up_interruptible(&direct->channel_data[channel].event_wait);
+			if (chdat->refcount == 0)
+				chdat->state = DIRECT_STATE_READY;
+		}
+		break;
 
-                direct->channel_data[channel].state = DIRECT_STATE_DEFAULT;
-            }
-        }break;
+	case INFORM_INTERFACE_DISABLEMUX:
+		{
+			for (channel = 0;
+			     channel <
+			     direct->channel_max - direct->channel_min + 1;
+			     channel++) {
+				wake_up_interruptible(&direct->
+						      channel_data
+						      [channel].
+						      event_wait);
 
-        case INFORM_INTERFACE_ENABLECHANNEL:
-        {
-            enablechannel = (ENABLECHANNEL_PACKET*)informdata->data;
-            type          = strip_end(enablechannel->acktype);
+				direct->channel_data[channel].state =
+				    DIRECT_STATE_DEFAULT;
+			}
+		}
+		break;
 
-            if(type == COMMAND)
-            {
-                EnableChannel(
-                              client_end(FAILURE),
-                              enablechannel->channel,
-                              0,
-                              0,
-                              enablechannel->host_interface,
-                              enablechannel->client_interface,
-                              0,
-                              0,
-                              0,
-                              0,
-                              direct->mux
-                             );
-            }
-            else if(type == SUCCESS)
-            {
-                channel = enablechannel->channel;
-                chdat   = &direct->channel_data[channel-direct->channel_min];
+	case INFORM_INTERFACE_ENABLECHANNEL:
+		{
+			enablechannel =
+			    (ENABLECHANNEL_PACKET *) informdata->data;
+			type = strip_end(enablechannel->acktype);
 
-                chdat->refcount++;
-                chdat->state |= DIRECT_STATE_EVENT|DIRECT_STATE_EVENT_SUCCESS;
+			if (type == COMMAND) {
+				EnableChannel(client_end(FAILURE),
+					      enablechannel->channel,
+					      0,
+					      0,
+					      enablechannel->
+					      host_interface,
+					      enablechannel->
+					      client_interface, 0, 0, 0, 0,
+					      direct->mux);
+			} else if (type == SUCCESS) {
+				channel = enablechannel->channel;
+				chdat =
+				    &direct->channel_data[channel -
+							  direct->
+							  channel_min];
 
-                wake_up_interruptible(&chdat->event_wait);
-            }
-            else if(type == FAILURE)
-            {
-                channel = enablechannel->channel;
-                chdat   = &direct->channel_data[channel-direct->channel_min];
+				chdat->refcount++;
+				chdat->state |=
+				    DIRECT_STATE_EVENT |
+				    DIRECT_STATE_EVENT_SUCCESS;
 
-                chdat->state |= DIRECT_STATE_EVENT;
+				wake_up_interruptible(&chdat->event_wait);
+			} else if (type == FAILURE) {
+				channel = enablechannel->channel;
+				chdat =
+				    &direct->channel_data[channel -
+							  direct->
+							  channel_min];
 
-                wake_up_interruptible(&chdat->event_wait);
-            }
-        }break;
+				chdat->state |= DIRECT_STATE_EVENT;
 
-        case INFORM_INTERFACE_DISABLECHANNEL:
-        {
-	    printk("DisableChannel: ackType = %x, channel = %x, host = %x, client = %x\n", 
-		   ((DISABLECHANNEL_PACKET*)informdata->data)->acktype,
-		   ((DISABLECHANNEL_PACKET*)informdata->data)->channel,
-		   ((DISABLECHANNEL_PACKET*)informdata->data)->host_interface,
-		   ((DISABLECHANNEL_PACKET*)informdata->data)->client_interface);
-            channel = ((DISABLECHANNEL_PACKET*)informdata->data)->channel;
-	    chdat   = &direct->channel_data[channel-direct->channel_min];
+				wake_up_interruptible(&chdat->event_wait);
+			}
+		}
+		break;
 
-            chdat->refcount--;
-            wake_up_interruptible(&chdat->close_wait);
-        }break;
+	case INFORM_INTERFACE_DISABLECHANNEL:
+		{
+			printk
+			    (KERN_INFO "DisableChannel: ackType = %x,   \
+			     channel = %x, host = %x, client = %x \n",
+			     ((DISABLECHANNEL_PACKET *) informdata->data)->
+			     acktype,
+			     ((DISABLECHANNEL_PACKET *) informdata->data)->
+			     channel,
+			     ((DISABLECHANNEL_PACKET *) informdata->data)->
+			     host_interface,
+			     ((DISABLECHANNEL_PACKET *) informdata->data)->
+			     client_interface);
+			channel =
+			    ((DISABLECHANNEL_PACKET *) informdata->data)->
+			    channel;
+			chdat =
+			    &direct->channel_data[channel -
+						  direct->channel_min];
 
-        case INFORM_INTERFACE_DATA:
-        {
-            channel = (int32)informdata->data;
+			chdat->refcount--;
+			wake_up_interruptible(&chdat->close_wait);
+		}
+		break;
 
-            wake_up_interruptible(&direct->channel_data[channel-direct->channel_min].wrevent);
-        }break;
+	case INFORM_INTERFACE_DATA:
+		{
+			channel = (int32) informdata->data;
 
-        default:break;
-    }
+			wake_up_interruptible(&direct->
+					      channel_data[channel -
+							   direct->
+							   channel_min].
+					      wrevent);
+		}
+		break;
 
-    return DEBUGERROR(ERROR_NONE);
+	default:
+		break;
+	}
+
+	return DEBUGERROR(ERROR_NONE);
 }
 
 /*
@@ -249,21 +285,23 @@ int32 DirectInform (void* param1, void* param2)
  * commbuff -- a pointer to the received data
  * param -- a custom pointer, in this case an INTERFACEINFORM struct
  */
-int32 DirectReceive (COMMBUFF* commbuff, void* param)
+int32 DirectReceive(COMMBUFF *commbuff, void *param)
 {
-    DIRECTINTERFACE*   direct;
-    INTERFACEINFORM*   inform_data;
-    int32              channel;
+	DIRECTINTERFACE *direct;
+	INTERFACEINFORM *inform_data;
+	int32 channel;
 
-    DEBUG("DirectReceive(0x%p, 0x%p)\n", commbuff, param);
+	DEBUG("DirectReceive(0x%p, 0x%p)\n", commbuff, param);
 
-    inform_data = (INTERFACEINFORM*)param;
-    direct      = (DIRECTINTERFACE*)inform_data->inform_type;
-    channel     = (int32)inform_data->data;
+	inform_data = (INTERFACEINFORM *) param;
+	direct = (DIRECTINTERFACE *) inform_data->inform_type;
+	channel = (int32) inform_data->data;
 
-    wake_up_interruptible(&direct->channel_data[channel-direct->channel_min].rdevent);
+	wake_up_interruptible(&direct->
+			      channel_data[channel -
+					   direct->channel_min].rdevent);
 
-    return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
+	return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
 }
 
 /*
@@ -276,110 +314,118 @@ int32 DirectReceive (COMMBUFF* commbuff, void* param)
  * name -- the name of the interface
  * path -- the path to create device entries in
  * major -- the major number for the driver, 0 if it's to be dynamic
- * channel_min -- the inclusive lower bound of channel numbers assigned to the interface
- * channel_max -- the inclusive upper bound of channel numbers assigned to the interface
+ * channel_min -- the inclusive lower bound of channel numbers
+ * 	 assigned to the interface
+ * channel_max -- the inclusive upper bound of channel numbers
+ * 	 assigned to the interface
  * mux -- the mux object this interface is associated with
  * direct -- a pointer to a pointer to receive the newly created object
  */
-int32 CreateDirectInterface (sint8* name, sint8* path, int32 major, int32 channel_min, int32 channel_max, MUX* mux, DIRECTINTERFACE** direct)
+int32 CreateDirectInterface(sint8 *name, sint8 *path, int32 major,
+			    int32 channel_min, int32 channel_max,
+			    MUX *mux, DIRECTINTERFACE **direct)
 {
-    DIRECT_MAJOR_LIST** browse;
-    DIRECT_MAJOR_LIST*  node;
-    DIRECTINTERFACE*    newdirect;
-    DIRECT_CHANNELDATA* chdat;
-    INTERRUPT_STATE     state;
-    int32               result;
-    int32               namesize;
-    int32               pathsize;
-    int32               size;
+	DIRECT_MAJOR_LIST **browse;
+	DIRECT_MAJOR_LIST *node;
+	DIRECTINTERFACE *newdirect;
+	DIRECT_CHANNELDATA *chdat;
+	INTERRUPT_STATE state;
+	int32 result;
+	int32 namesize;
+	int32 pathsize;
+	int32 size;
 
-    DEBUG("CreateDirectInterface(0x%p, %lu, %lu, %lu, 0x%p, 0x%p)\n", name, major, channel_min, channel_max, mux, direct);
+	DEBUG("CreateDirectInterface(0x%p, %lu, %lu, %lu, 0x%p, 0x%p)\n",
+	      name, major, channel_min, channel_max, mux, direct);
 
-    if(!direct || !name || !mux)
-        return DEBUGERROR(ERROR_INVALIDPARAMETER);
+	if (!direct || !name || !mux)
+		return DEBUGERROR(ERROR_INVALIDPARAMETER);
 
-    if(channel_min > channel_max)
-        return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
+	if (channel_min > channel_max)
+		return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
 
-    if(channel_max >= mux->maxchannels)
-        return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
+	if (channel_max >= mux->maxchannels)
+		return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
 
-    size = (channel_max-channel_min+1)*sizeof(DIRECT_CHANNELDATA);
+	size =
+	    (channel_max - channel_min + 1) * sizeof(DIRECT_CHANNELDATA);
 
-    namesize = strlen(name)+1;
-    if(namesize > PACKET_MAXNAME_LENGTH)
-        return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
+	namesize = strlen(name) + 1;
+	if (namesize > PACKET_MAXNAME_LENGTH)
+		return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
 
-    pathsize = strlen(path)+1;
-    if(pathsize > PACKET_MAXNAME_LENGTH)
-        return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
+	pathsize = strlen(path) + 1;
+	if (pathsize > PACKET_MAXNAME_LENGTH)
+		return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
 
-    chdat     = (DIRECT_CHANNELDATA*)alloc_mem(size);
-    newdirect = (DIRECTINTERFACE*)alloc_mem(sizeof(DIRECTINTERFACE));
+	chdat = (DIRECT_CHANNELDATA *) alloc_mem(size);
+	newdirect = (DIRECTINTERFACE *) alloc_mem(sizeof(DIRECTINTERFACE));
 
-    memset(newdirect, 0, sizeof(DIRECTINTERFACE));
+	memset(newdirect, 0, sizeof(DIRECTINTERFACE));
 
-    result = RegisterInterface(name, &DirectInform, &DirectReceive, (int32)newdirect, mux->interface_lib);
-    if(result != ERROR_NONE)
-    {
-        free_mem(newdirect);
-        free_mem(chdat);
+	result =
+	    RegisterInterface(name, &DirectInform, &DirectReceive,
+			      (int32) newdirect, mux->interface_lib);
+	if (result != ERROR_NONE) {
+		free_mem(newdirect);
+		free_mem(chdat);
 
-        return DEBUGERROR(result);
-    }
+		return DEBUGERROR(result);
+	}
 
-    QueryInterfaceIndex(name, mux->interface_lib, &newdirect->host_interface);
+	QueryInterfaceIndex(name, mux->interface_lib,
+			    &newdirect->host_interface);
 
-    newdirect->operations.open    = &DirectOpen;
-    newdirect->operations.release = &DirectClose;
-    newdirect->operations.read    = &DirectRead;
-    newdirect->operations.write   = &DirectWrite;
-    newdirect->operations.poll    = &DirectPoll;
+	newdirect->operations.open = &DirectOpen;
+	newdirect->operations.release = &DirectClose;
+	newdirect->operations.read = &DirectRead;
+	newdirect->operations.write = &DirectWrite;
+	newdirect->operations.poll = &DirectPoll;
 
-    newdirect->operations.owner   = THIS_MODULE;
+	newdirect->operations.owner = THIS_MODULE;
 
-    result = register_chrdev(major, name, &newdirect->operations);
-    if(result < 0)
-    {
-        UnregisterInterface(newdirect->host_interface, mux->interface_lib);
+	result = register_chrdev(major, name, &newdirect->operations);
+	if (result < 0) {
+		UnregisterInterface(newdirect->host_interface,
+				    mux->interface_lib);
 
-        free_mem(chdat);
-        free_mem(newdirect);
+		free_mem(chdat);
+		free_mem(newdirect);
 
-        return DEBUGERROR(ERROR_OPERATIONFAILED);
-    }
+		return DEBUGERROR(ERROR_OPERATIONFAILED);
+	}
 
-    if(major == DIRECT_DYNAMIC_MAJOR_ASSIGNMENT)
-        major = result;
+	if (major == DIRECT_DYNAMIC_MAJOR_ASSIGNMENT)
+		major = result;
 
-    newdirect->major        = major;
-    newdirect->channel_min  = channel_min;
-    newdirect->channel_max  = channel_max;
-    newdirect->channel_data = chdat;
-    newdirect->mux          = mux;
+	newdirect->major = major;
+	newdirect->channel_min = channel_min;
+	newdirect->channel_max = channel_max;
+	newdirect->channel_data = chdat;
+	newdirect->mux = mux;
 
-    memcpy(newdirect->device_directory, path, pathsize);
-    memcpy(newdirect->interface_name, name, namesize);
-    memset(chdat, 0, size);
+	memcpy(newdirect->device_directory, path, pathsize);
+	memcpy(newdirect->interface_name, name, namesize);
+	memset(chdat, 0, size);
 
-    node           = alloc_mem(sizeof(DIRECT_MAJOR_LIST));
-    node->major    = major;
-    node->directif = newdirect;
-    node->next     = 0;
+	node = alloc_mem(sizeof(DIRECT_MAJOR_LIST));
+	node->major = major;
+	node->directif = newdirect;
+	node->next = 0;
 
-    disable_interrupts(state);
+	disable_interrupts(state);
 
-    browse = &major_list;
-    while(*browse)
-        browse = &(*browse)->next;
+	browse = &major_list;
+	while (*browse)
+		browse = &(*browse)->next;
 
-    *browse = node;
+	*browse = node;
 
-    enable_interrupts(state);
+	enable_interrupts(state);
 
-    *direct = newdirect;
+	*direct = newdirect;
 
-    return DEBUGERROR(ERROR_NONE);
+	return DEBUGERROR(ERROR_NONE);
 }
 
 /*
@@ -389,63 +435,63 @@ int32 CreateDirectInterface (sint8* name, sint8* path, int32 major, int32 channe
  * Params:
  * direct -- the interface to be destroyed
  */
-int32 DestroyDirectInterface (DIRECTINTERFACE* direct)
+int32 DestroyDirectInterface(DIRECTINTERFACE *direct)
 {
-    DIRECT_MAJOR_LIST** browse;
-    DIRECT_MAJOR_LIST*  found;
-    DIRECT_CHANNELDATA* chdat;
-    INTERRUPT_STATE     state;
-    int32               channels;
-    int32               index;
+	DIRECT_MAJOR_LIST **browse;
+	DIRECT_MAJOR_LIST *found;
+	DIRECT_CHANNELDATA *chdat;
+	INTERRUPT_STATE state;
+	int32 channels;
+	int32 index;
 
-    DEBUG("DestroyDirectInterface(0x%p)\n", direct);
+	DEBUG("DestroyDirectInterface(0x%p)\n", direct);
 
-    chdat    = direct->channel_data;
-    channels = direct->channel_max-direct->channel_min+1;
+	chdat = direct->channel_data;
+	channels = direct->channel_max - direct->channel_min + 1;
 
-    for(index = 0; index < channels; index++)
-    {
-        if(chdat[index].state&DIRECT_STATE_READY)
-        {
-            DisableChannel(
-                           host_end(COMMAND),
-                           index+direct->channel_min,
-                           direct->host_interface,
-                           chdat[index].client_interface,
-                           direct->mux
-                          );
+	for (index = 0; index < channels; index++) {
+		if (chdat[index].state & DIRECT_STATE_READY) {
+			DisableChannel(host_end(COMMAND),
+				       index + direct->channel_min,
+				       direct->host_interface,
+				       chdat[index].client_interface,
+				       direct->mux);
 
-            if(chdat[index].refcount)
-                wait_event_interruptible(chdat[index].close_wait, !(chdat[index].refcount));
+			if (chdat[index].refcount)
+				wait_event_interruptible(chdat[index].
+							 close_wait,
+							 !(chdat[index].
+							   refcount));
 
-            device_destroy(netmux_class, MKDEV(direct->major, index));
-        }
-    }
+			device_destroy(netmux_class,
+				       MKDEV(direct->major, index));
+		}
+	}
 
-    unregister_chrdev(direct->major, direct->interface_name);
+	unregister_chrdev(direct->major, direct->interface_name);
 
-    disable_interrupts(state);
+	disable_interrupts(state);
 
-    browse = &major_list;
-    while(*browse && (*browse)->major != direct->major)
-        browse = &(*browse)->next;
+	browse = &major_list;
+	while (*browse && (*browse)->major != direct->major)
+		browse = &(*browse)->next;
 
-    if(*browse)
-    {
-        found   = *browse;
-        *browse = found->next;
+	if (*browse) {
+		found = *browse;
+		*browse = found->next;
 
-        free_mem(found);
-    }
+		free_mem(found);
+	}
 
-    enable_interrupts(state);
+	enable_interrupts(state);
 
-    UnregisterInterface(direct->host_interface, direct->mux->interface_lib);
+	UnregisterInterface(direct->host_interface,
+			    direct->mux->interface_lib);
 
-    free_mem(direct->channel_data);
-    free_mem(direct);
+	free_mem(direct->channel_data);
+	free_mem(direct);
 
-    return DEBUGERROR(ERROR_NONE);
+	return DEBUGERROR(ERROR_NONE);
 }
 
 /*
@@ -458,75 +504,70 @@ int32 DestroyDirectInterface (DIRECTINTERFACE* direct)
  * inode -- used to let us fetch the major/minor of the device
  * filp -- some private data is set within this structure
  */
-int DirectOpen (struct inode* inode, struct file* filp)
+int DirectOpen(struct inode *inode, struct file *filp)
 {
-    DIRECT_MAJOR_LIST*  browse;
-    DIRECTINTERFACE*    direct;
-    DIRECT_CHANNELDATA* chdat;
-    INTERRUPT_STATE     state;
-    int32               major;
-    int32               minor;
-    int32               result;
+	DIRECT_MAJOR_LIST *browse;
+	DIRECTINTERFACE *direct;
+	DIRECT_CHANNELDATA *chdat;
+	INTERRUPT_STATE state;
+	int32 major;
+	int32 minor;
+	int32 result;
 
-    DEBUG("DirectOpen(0x%p, 0x%p)\n", inode, filp);
+	DEBUG("DirectOpen(0x%p, 0x%p)\n", inode, filp);
 
-    major = MAJOR(inode->i_rdev);
-    minor = MINOR(inode->i_rdev);
+	major = MAJOR(inode->i_rdev);
+	minor = MINOR(inode->i_rdev);
 
-    disable_interrupts(state);
+	disable_interrupts(state);
 
-    browse = major_list;
-    while(browse && browse->major != major)
-        browse = browse->next;
+	browse = major_list;
+	while (browse && browse->major != major)
+		browse = browse->next;
 
-    direct = browse->directif;
+	direct = browse->directif;
 
-    enable_interrupts(state);
+	enable_interrupts(state);
 
-    if(minor < direct->channel_min || minor > direct->channel_max)
-        return -EADDRNOTAVAIL;
+	if (minor < direct->channel_min || minor > direct->channel_max)
+		return -EADDRNOTAVAIL;
 
-    chdat = &direct->channel_data[minor-direct->channel_min];
-    if(!(chdat->state&DIRECT_STATE_READY))
-        return -EADDRNOTAVAIL;
+	chdat = &direct->channel_data[minor - direct->channel_min];
+	if (!(chdat->state & DIRECT_STATE_READY))
+		return -EADDRNOTAVAIL;
 
-    if(chdat->refcount > 0)
-        return -EBUSY;
+	if (chdat->refcount > 0)
+		return -EBUSY;
 
-    result = EnableChannel(
-                           host_end(COMMAND),
-                           minor,
-                           chdat->burstsize,
-                           chdat->maxdata,
-                           direct->host_interface,
-                           chdat->client_interface,
-                           chdat->host_byte_credit,
-                           chdat->host_send_credit,
-                           0,
-                           0,
-                           direct->mux
-                          );
-    if(result != ERROR_NONE)
-        return -ECONNABORTED;
+	result = EnableChannel(host_end(COMMAND),
+			       minor,
+			       chdat->burstsize,
+			       chdat->maxdata,
+			       direct->host_interface,
+			       chdat->client_interface,
+			       chdat->host_byte_credit,
+			       chdat->host_send_credit, 0, 0, direct->mux);
+	if (result != ERROR_NONE)
+		return -ECONNABORTED;
 
-    /* Wake up when either one of two conditions occur:
-       1 - A response is received from the BP for our open request.
-       2 - The channel is not configured and running properly.
-       In case the latter is true an error will be returned eventually. */
-    wait_event_interruptible(chdat->event_wait,
-                            (chdat->state&DIRECT_STATE_EVENT) ||
-                            !(chdat->state&DIRECT_STATE_READY));
+	/* Wake up when either one of two conditions occur:
+	   1 - A response is received from the BP for our open request.
+	   2 - The channel is not configured and running properly.
+	   In case the latter is true an error will be returned eventually. */
+	wait_event_interruptible(chdat->event_wait,
+				 (chdat->state & DIRECT_STATE_EVENT) ||
+				 !(chdat->state & DIRECT_STATE_READY));
 
-    chdat->state &= ~DIRECT_STATE_EVENT;
+	chdat->state &= ~DIRECT_STATE_EVENT;
 
-    if(!(chdat->state&DIRECT_STATE_EVENT_SUCCESS))
-        return -ECONNREFUSED;
+	if (!(chdat->state & DIRECT_STATE_EVENT_SUCCESS))
+		return -ECONNREFUSED;
 
-    chdat->state &= ~DIRECT_STATE_EVENT_SUCCESS;
+	chdat->state &= ~DIRECT_STATE_EVENT_SUCCESS;
 
-    filp->private_data = direct;
+	filp->private_data = direct;
 
-    return 0;
+	return 0;
 }
 
 /*
@@ -541,37 +582,39 @@ int DirectOpen (struct inode* inode, struct file* filp)
  * filp -- stores some private data which we use to fetch the direct
  *         interface structure
  */
-int DirectClose (struct inode* inode, struct file* filp)
+int DirectClose(struct inode *inode, struct file *filp)
 {
-    DIRECTINTERFACE*    direct;
-    DIRECT_CHANNELDATA* chdat;
-    int32               minor;
-    int32               client_interface;
-    int32               result;
+	DIRECTINTERFACE *direct;
+	DIRECT_CHANNELDATA *chdat;
+	int32 minor;
+	int32 client_interface;
+	int32 result;
 
-    DEBUG("DirectClose(0x%p, 0x%p)\n", inode, filp);
+	DEBUG("DirectClose(0x%p, 0x%p)\n", inode, filp);
 
-    direct = filp->private_data;
-    minor  = MINOR(inode->i_rdev);
+	direct = filp->private_data;
+	minor = MINOR(inode->i_rdev);
 
-    if(minor < direct->channel_min || minor > direct->channel_max)
-        return -EADDRNOTAVAIL;
+	if (minor < direct->channel_min || minor > direct->channel_max)
+		return -EADDRNOTAVAIL;
 
-    chdat = &direct->channel_data[minor-direct->channel_min];
+	chdat = &direct->channel_data[minor - direct->channel_min];
 
-    chdat->state = DIRECT_STATE_READY;
+	chdat->state = DIRECT_STATE_READY;
 
-    client_interface = chdat->client_interface;
+	client_interface = chdat->client_interface;
 
-    result = DisableChannel(host_end(COMMAND), minor, direct->host_interface, client_interface, direct->mux);
+	result =
+	    DisableChannel(host_end(COMMAND), minor,
+			   direct->host_interface, client_interface,
+			   direct->mux);
 
-    if (chdat->refcount <= 0)
-    {
-        if(result != ERROR_NONE)
-            return -ENOTCONN;
-    }
+	if (chdat->refcount <= 0) {
+		if (result != ERROR_NONE)
+			return -ENOTCONN;
+	}
 
-    return 0;
+	return 0;
 }
 
 /*
@@ -588,36 +631,36 @@ int DirectClose (struct inode* inode, struct file* filp)
  *          the function needs to wait for some conditions
  *          to be met.
  */
-unsigned int DirectPoll (struct file* filp, poll_table* table)
+unsigned int DirectPoll(struct file *filp, poll_table * table)
 {
-    DIRECTINTERFACE*    direct;
-    DIRECT_CHANNELDATA* chdat;
-    int32               minor;
-    int32               mask;
+	DIRECTINTERFACE *direct;
+	DIRECT_CHANNELDATA *chdat;
+	int32 minor;
+	int32 mask;
 
-    DEBUG("DirectPoll(0x%p, 0x%p)\n", filp, table);
+	DEBUG("DirectPoll(0x%p, 0x%p)\n", filp, table);
 
-    direct = filp->private_data;
-    minor  = MINOR(filp->f_dentry->d_inode->i_rdev);
-    mask   = 0;
+	direct = filp->private_data;
+	minor = MINOR(filp->f_dentry->d_inode->i_rdev);
+	mask = 0;
 
-    if(minor < direct->channel_min || minor > direct->channel_max)
-        return POLLERR;
+	if (minor < direct->channel_min || minor > direct->channel_max)
+		return POLLERR;
 
-    chdat = &direct->channel_data[minor-direct->channel_min];
-    if(!(chdat->state&DIRECT_STATE_READY) || chdat->refcount == 0)
-        return POLLERR;
+	chdat = &direct->channel_data[minor - direct->channel_min];
+	if (!(chdat->state & DIRECT_STATE_READY) || chdat->refcount == 0)
+		return POLLERR;
 
-    poll_wait(filp, &chdat->rdevent, table);
-    poll_wait(filp, &chdat->wrevent, table);
+	poll_wait(filp, &chdat->rdevent, table);
+	poll_wait(filp, &chdat->wrevent, table);
 
-    if(ReadDataAvailable(minor, direct->mux))
-      mask |= POLLIN|POLLRDNORM;
+	if (ReadDataAvailable(minor, direct->mux))
+		mask |= POLLIN | POLLRDNORM;
 
-    if(SendDataAvailable(minor, direct->mux))
-      mask |= POLLOUT|POLLWRNORM;
+	if (SendDataAvailable(minor, direct->mux))
+		mask |= POLLOUT | POLLWRNORM;
 
-    return mask;
+	return mask;
 }
 
 /*
@@ -633,52 +676,55 @@ unsigned int DirectPoll (struct file* filp, poll_table* table)
  * count -- the amount of data to attempt to read
  * f_pos -- an unused paramater
  */
-ssize_t DirectRead (struct file* filp, char* buf, size_t count, loff_t* f_pos)
+ssize_t DirectRead(struct file *filp, char *buf, size_t count,
+		   loff_t *f_pos)
 {
-    DIRECTINTERFACE*    direct;
-    DIRECT_CHANNELDATA* chdat;
-    COMMBUFF*           commbuff = 0;
-    int32               minor;
-    int32               result;
-    int32               commbuffsize;
+	DIRECTINTERFACE *direct;
+	DIRECT_CHANNELDATA *chdat;
+	COMMBUFF *commbuff = 0;
+	int32 minor;
+	int32 result;
+	int32 commbuffsize;
 
-    DEBUG("DirectRead(0x%p, 0x%p, %d, 0x%p)\n", filp, buf, count, f_pos);
+	DEBUG("DirectRead(0x%p, 0x%p, %d, 0x%p)\n", filp, buf, count,
+	      f_pos);
 
-    direct = filp->private_data;
-    minor  = MINOR(filp->f_dentry->d_inode->i_rdev);
+	direct = filp->private_data;
+	minor = MINOR(filp->f_dentry->d_inode->i_rdev);
 
-    if(minor < direct->channel_min || minor > direct->channel_max)
-        return -EADDRNOTAVAIL;
+	if (minor < direct->channel_min || minor > direct->channel_max)
+		return -EADDRNOTAVAIL;
 
-    chdat = &direct->channel_data[minor-direct->channel_min];
-    if(!(chdat->state&DIRECT_STATE_READY) || chdat->refcount == 0)
-        return -ENOTCONN;
+	chdat = &direct->channel_data[minor - direct->channel_min];
+	if (!(chdat->state & DIRECT_STATE_READY) || chdat->refcount == 0)
+		return -ENOTCONN;
 
-    if (count <= 0)
-        return 0;
+	if (count <= 0)
+		return 0;
 
-    if(!(filp->f_flags&O_NONBLOCK))
-        wait_event_interruptible(chdat->rdevent, ReadDataAvailable(minor, direct->mux));
+	if (!(filp->f_flags & O_NONBLOCK))
+		wait_event_interruptible(chdat->rdevent,
+					 ReadDataAvailable(minor,
+							   direct->mux));
 
-    ReadData(minor, direct->mux, &commbuff, count);
-    if(!commbuff)
-        return -EAGAIN;
+	ReadData(minor, direct->mux, &commbuff, count);
+	if (!commbuff)
+		return -EAGAIN;
 
-    commbuffsize = commbuff_length(commbuff);
+	commbuffsize = commbuff_length(commbuff);
 
-    result = copy_to_user(buf, commbuff_data(commbuff), commbuffsize);
-    if(result)
-    {
-        free_commbuff(commbuff);
+	result = copy_to_user(buf, commbuff_data(commbuff), commbuffsize);
+	if (result) {
+		free_commbuff(commbuff);
 
-        return -EFAULT;
-    }
+		return -EFAULT;
+	}
 
-    LOGCOMMBUFF_CH(minor, "DirectRead( )-->", commbuff, commbuffsize);
+	LOGCOMMBUFF_CH(minor, "DirectRead( )-->", commbuff, commbuffsize);
 
-    free_commbuff(commbuff);
+	free_commbuff(commbuff);
 
-    return commbuffsize;
+	return commbuffsize;
 }
 
 /*
@@ -694,45 +740,46 @@ ssize_t DirectRead (struct file* filp, char* buf, size_t count, loff_t* f_pos)
  * count -- the number of bytes to be copied
  * f_pos -- not used
  */
-ssize_t DirectWrite (struct file* filp, const char* buf, size_t count, loff_t* f_pos)
+ssize_t DirectWrite(struct file *filp, const char *buf, size_t count,
+		    loff_t *f_pos)
 {
-    COMMBUFF*           commbuff;
-    DIRECTINTERFACE*    direct;
-    DIRECT_CHANNELDATA* chdat;
-    int32               minor;
-    int32               result;
+	COMMBUFF *commbuff;
+	DIRECTINTERFACE *direct;
+	DIRECT_CHANNELDATA *chdat;
+	int32 minor;
+	int32 result;
 
-    DEBUG("DirectWrite begin(0x%p, 0x%p, %d, 0x%p)\n", filp, buf, count, f_pos);
+	DEBUG("DirectWrite begin(0x%p, 0x%p, %d, 0x%p)\n", filp, buf,
+	      count, f_pos);
 
-    direct = filp->private_data;
-    minor  = MINOR(filp->f_dentry->d_inode->i_rdev);
+	direct = filp->private_data;
+	minor = MINOR(filp->f_dentry->d_inode->i_rdev);
 
-    if(minor < direct->channel_min || minor > direct->channel_max)
-        return -EADDRNOTAVAIL;
+	if (minor < direct->channel_min || minor > direct->channel_max)
+		return -EADDRNOTAVAIL;
 
-    chdat = &direct->channel_data[minor-direct->channel_min];
-    if(!(chdat->state&DIRECT_STATE_READY) || chdat->refcount == 0)
-        return -ENOTCONN;
+	chdat = &direct->channel_data[minor - direct->channel_min];
+	if (!(chdat->state & DIRECT_STATE_READY) || chdat->refcount == 0)
+		return -ENOTCONN;
 
-    commbuff = alloc_commbuff(count, sizeof(DATA_PACKET_HDR));
+	commbuff = alloc_commbuff(count, sizeof(DATA_PACKET_HDR));
 
-    result = copy_from_user(commbuff_data(commbuff), buf, count);
-    if(result)
-    {
-        free_commbuff(commbuff);
+	result = copy_from_user(commbuff_data(commbuff), buf, count);
+	if (result) {
+		free_commbuff(commbuff);
 
-        return -EFAULT;
-    }
+		return -EFAULT;
+	}
 
-    result = SendData(minor, commbuff, NULL, direct->mux);
-    if(result != ERROR_NONE)
-    {
-        free_commbuff(commbuff);
+	result = SendData(minor, commbuff, NULL, direct->mux);
+	if (result != ERROR_NONE) {
+		free_commbuff(commbuff);
 
-        return 0;
-    }
+		return 0;
+	}
 
-    DEBUG("DirectWrite end(0x%p, 0x%p, %d, 0x%p)\n", filp, buf, count, f_pos);
+	DEBUG("DirectWrite end(0x%p, 0x%p, %d, 0x%p)\n", filp, buf, count,
+	      f_pos);
 
-    return count;
+	return count;
 }

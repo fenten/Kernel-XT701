@@ -25,7 +25,9 @@
  * so keys can be mapped directly at the index of the
  * LM8323 keycode instead of subtracting one.
  */
-#define LM8323_KEYMAP_SIZE (0x7f + 1)
+#define LM8323_KEYMAP_SIZE	(0x7f + 1)
+
+#define LM8323_NUM_PWMS		3
 
 struct lm8323_platform_data {
 	int debounce_time; /* Time to watch for key bouncing, in ms. */
@@ -33,14 +35,12 @@ struct lm8323_platform_data {
 
 	int size_x;
 	int size_y;
-	int repeat:1;
-	const s16 *keymap;
+	bool repeat;
+	const unsigned short *keymap;
 
-	char *pwm1_name; /* Device name for PWM1. */
-	char *pwm2_name; /* Device name for PWM2. */
-	char *pwm3_name; /* Device name for PWM3. */
+	const char *pwm_names[LM8323_NUM_PWMS];
 
-	char *name; /* Device name. */
+	const char *name; /* Device name. */
 };
 
 #endif /* __LINUX_LM8323_H */

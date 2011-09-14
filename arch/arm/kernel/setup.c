@@ -25,6 +25,7 @@
 #include <linux/smp.h>
 #include <linux/fs.h>
 
+#include <asm/unified.h>
 #include <asm/cpu.h>
 #include <asm/cputype.h>
 #include <asm/elf.h>
@@ -36,21 +37,23 @@
 #include <asm/cachetype.h>
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_ARM_OF
+#include <asm/prom.h>
+#include <plat/board-mapphone.h>
+#endif
+
 #include <asm/mach/arch.h>
 #include <asm/mach/irq.h>
 #include <asm/mach/time.h>
 #include <asm/traps.h>
-
-#ifdef CONFIG_ARM_OF
-#include <asm/prom.h>
-#include <mach/hardware.h>
-#endif
+#include <asm/unwind.h>
 #ifdef CONFIG_BOOTINFO
 #include <asm/bootinfo.h>
 #endif
 
 #include "compat.h"
 #include "atags.h"
+#include "tcm.h"
 
 #ifndef MEM_SIZE
 #define MEM_SIZE	(16*1024*1024)
@@ -113,9 +116,6 @@ struct stack {
 	u32 irq[3];
 	u32 abt[3];
 	u32 und[3];
-#ifdef CONFIG_NON_NESTED_FIQ
-	u32 fiq[3];
-#endif
 } ____cacheline_aligned;
 
 static struct stack stacks[NR_CPUS];
@@ -125,6 +125,7 @@ EXPORT_SYMBOL(elf_platform);
 
 static const char *cpu_name;
 static const char *machine_name;
+static char *cpu_tier;
 static char __initdata command_line[COMMAND_LINE_SIZE];
 
 static char default_command_line[COMMAND_LINE_SIZE] __initdata = CONFIG_CMDLINE;
@@ -337,35 +338,38 @@ void cpu_init(void)
 	}
 
 	/*
+	 * Define the placement constraint for the inline asm directive below.
+	 * In Thumb-2, msr with an immediate value is not allowed.
+	 */
+#ifdef CONFIG_THUMB2_KERNEL
+#define PLC	"r"
+#else
+#define PLC	"I"
+#endif
+
+	/*
 	 * setup stacks for re-entrant exception handlers
 	 */
 	__asm__ (
 	"msr	cpsr_c, %1\n\t"
-	"add	sp, %0, %2\n\t"
+	"add	r14, %0, %2\n\t"
+	"mov	sp, r14\n\t"
 	"msr	cpsr_c, %3\n\t"
-	"add	sp, %0, %4\n\t"
+	"add	r14, %0, %4\n\t"
+	"mov	sp, r14\n\t"
 	"msr	cpsr_c, %5\n\t"
-	"add	sp, %0, %6\n\t"
-#ifndef CONFIG_NON_NESTED_FIQ
-	"msr    cpsr_c, %7"
-#else
-	"msr	cpsr_c, %7\n\t"
-	"add	sp, %0, %8\n\t"
-	"msr	cpsr_c, %9"
-#endif
+	"add	r14, %0, %6\n\t"
+	"mov	sp, r14\n\t"
+	"msr	cpsr_c, %7"
 	    :
 	    : "r" (stk),
-	      "I" (PSR_F_BIT | PSR_I_BIT | IRQ_MODE),
+	      PLC (PSR_F_BIT | PSR_I_BIT | IRQ_MODE),
 	      "I" (offsetof(struct stack, irq[0])),
-	      "I" (PSR_F_BIT | PSR_I_BIT | ABT_MODE),
+	      PLC (PSR_F_BIT | PSR_I_BIT | ABT_MODE),
 	      "I" (offsetof(struct stack, abt[0])),
-	      "I" (PSR_F_BIT | PSR_I_BIT | UND_MODE),
+	      PLC (PSR_F_BIT | PSR_I_BIT | UND_MODE),
 	      "I" (offsetof(struct stack, und[0])),
-#ifdef CONFIG_NON_NESTED_FIQ
-	      "I" (PSR_F_BIT | PSR_I_BIT | FIQ_MODE),
-	      "I" (offsetof(struct stack, fiq[0])),
-#endif
-	      "I" (PSR_F_BIT | PSR_I_BIT | SVC_MODE)
+	      PLC (PSR_F_BIT | PSR_I_BIT | SVC_MODE)
 	    : "r14");
 }
 
@@ -632,7 +636,6 @@ static int __init parse_tag_revision(const struct tag *tag)
 
 __tagtable(ATAG_REVISION, parse_tag_revision);
 
-#ifndef CONFIG_CMDLINE_FORCE
 static int __init parse_tag_cmdline(const struct tag *tag)
 {
 	strlcpy(default_command_line, tag->u.cmdline.cmdline, COMMAND_LINE_SIZE);
@@ -640,9 +643,9 @@ static int __init parse_tag_cmdline(const struct tag *tag)
 }
 
 __tagtable(ATAG_CMDLINE, parse_tag_cmdline);
-#endif /* CONFIG_CMDLINE_FORCE */
 
 #ifdef CONFIG_BOOTINFO
+
 static int __init parse_tag_powerup_reason(const struct tag *tag)
 {
 	bi_set_powerup_reason(tag->u.powerup_reason.powerup_reason);
@@ -696,6 +699,7 @@ static int __init parse_tag_cid_recover_boot(const struct tag *tag)
 __tagtable(ATAG_CID_RECOVER_BOOT, parse_tag_cid_recover_boot);
 
 #endif /* CONFIG_BOOTINFO */
+
 /*
  * Scan the tag table for this tag, and call its parse function.
  * The tag table is built by the linker from all the __tagtable
@@ -762,6 +766,8 @@ void __init setup_arch(char **cmdline_p)
 	struct machine_desc *mdesc;
 	char *from = default_command_line;
 
+	unwind_init();
+
 	setup_processor();
 	mdesc = setup_machine(machine_arch_type);
 	machine_name = mdesc->name;
@@ -802,8 +808,19 @@ void __init setup_arch(char **cmdline_p)
 	boot_command_line[COMMAND_LINE_SIZE-1] = '\0';
 	parse_cmdline(cmdline_p, from);
 	paging_init(mdesc);
-#if defined(CONFIG_ARM_OF)
+#ifdef CONFIG_OF
 	unflatten_device_tree();
+#define DT_PATH_MACHINE		"/Machine@0"
+#define DT_PROP_MACHINE_TYPE	"machine_type"
+#define DT_PROP_CPU_TIER	"cpu_tier"
+	{
+		struct device_node *machine_node;
+		const void *machine_prop;
+		const void *cpu_tier_prop;
+
+		cpu_tier = NULL;
+		machine_name = (char *)"mapphone_";
+}
 #endif
 	request_standard_resources(&meminfo, mdesc);
 
@@ -812,6 +829,7 @@ void __init setup_arch(char **cmdline_p)
 #endif
 
 	cpu_init();
+	tcm_init();
 
 	/*
 	 * Set up various architecture-specific pointers
@@ -868,7 +886,6 @@ static const char *hwcap_str[] = {
 static int c_show(struct seq_file *m, void *v)
 {
 	int i;
-
 #if defined(CONFIG_ARM_OF)
 	static char *p = NULL;
 	int len = strlen(bp_model);
@@ -882,7 +899,6 @@ static int c_show(struct seq_file *m, void *v)
 		}
 	}
 #endif
-
 	seq_printf(m, "Processor\t: %s rev %d (%s)\n",
 		   cpu_name, read_cpuid_id() & 15, elf_platform);
 
@@ -938,7 +954,8 @@ static int c_show(struct seq_file *m, void *v)
 	seq_printf(m, "Revision\t: %04x\n", system_rev);
 	seq_printf(m, "Serial\t\t: %08x%08x\n",
 		   system_serial_high, system_serial_low);
-
+	if (cpu_tier)
+		seq_printf(m, "CPU Tier\t: %s\n", cpu_tier);
 	return 0;
 }
 

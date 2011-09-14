@@ -1,4 +1,5 @@
-menuconfig SIM
-	tristate "SIM support"
+config SIM
+	bool "SIM support"
+	default n
 	help
 	  Say Y here to enable SIM support.

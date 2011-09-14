@@ -1,6 +1,4 @@
 /*
- * linux/arch/arm/mach-omap2/pm.c
- *
  * OMAP2 Power Management Routines
  *
  * Copyright (C) 2005 Texas Instruments, Inc.
@@ -31,19 +29,19 @@
 #include <linux/io.h>
 #include <linux/irq.h>
 #include <linux/time.h>
+#include <linux/gpio.h>
 
 #include <asm/mach/time.h>
 #include <asm/mach/irq.h>
 #include <asm/mach-types.h>
 
 #include <mach/irqs.h>
-#include <mach/clock.h>
-#include <mach/sram.h>
-#include <mach/control.h>
-#include <mach/gpio.h>
-#include <mach/mux.h>
-#include <mach/dma.h>
-#include <mach/board.h>
+#include <plat/clock.h>
+#include <plat/sram.h>
+#include <plat/control.h>
+#include <plat/mux.h>
+#include <plat/dma.h>
+#include <plat/board.h>
 
 #include "prm.h"
 #include "prm-regbits-24xx.h"
@@ -52,13 +50,12 @@
 #include "sdrc.h"
 #include "pm.h"
 
-#include <mach/powerdomain.h>
-#include <mach/clockdomain.h>
+#include <plat/powerdomain.h>
+#include <plat/clockdomain.h>
 
 static void (*omap2_sram_idle)(void);
 static void (*omap2_sram_suspend)(u32 dllctrl, void __iomem *sdrc_dlla_ctrl,
-					void __iomem *sdrc_power);
-static void (*saved_idle)(void);
+				  void __iomem *sdrc_power);
 
 static struct powerdomain *mpu_pwrdm;
 static struct powerdomain *core_pwrdm;
@@ -131,13 +128,14 @@ static void omap2_enter_full_retention(void)
 
 	/* Jump to SRAM suspend code */
 	omap2_sram_suspend(sdrc_read_reg(SDRC_DLLA_CTRL),
-				OMAP_SDRC_REGADDR(SDRC_DLLA_CTRL),
-				OMAP_SDRC_REGADDR(SDRC_POWER));
-no_sleep:
+			   OMAP_SDRC_REGADDR(SDRC_DLLA_CTRL),
+			   OMAP_SDRC_REGADDR(SDRC_POWER));
+
 	omap_uart_resume_idle(2);
 	omap_uart_resume_idle(1);
 	omap_uart_resume_idle(0);
 
+no_sleep:
 	if (omap2_pm_debug) {
 		unsigned long long tmp;
 
@@ -158,16 +156,16 @@ no_sleep:
 	prm_clear_mod_reg_bits(0x4 | 0x1, WKUP_MOD, PM_WKST);
 
 	/* MPU domain wake events */
-	l = prm_read_mod_reg(OCP_MOD, OMAP2_PRM_IRQSTATUS_MPU_OFFSET);
+	l = prm_read_mod_reg(OCP_MOD, OMAP2_PRCM_IRQSTATUS_MPU_OFFSET);
 	if (l & 0x01)
 		prm_write_mod_reg(0x01, OCP_MOD,
-				OMAP2_PRM_IRQSTATUS_MPU_OFFSET);
+				  OMAP2_PRCM_IRQSTATUS_MPU_OFFSET);
 	if (l & 0x20)
 		prm_write_mod_reg(0x20, OCP_MOD,
-				OMAP2_PRM_IRQSTATUS_MPU_OFFSET);
+				  OMAP2_PRCM_IRQSTATUS_MPU_OFFSET);
 
 	/* Mask future PRCM-to-MPU interrupts */
-	prm_write_mod_reg(0x0, OCP_MOD, OMAP2_PRM_IRQSTATUS_MPU_OFFSET);
+	prm_write_mod_reg(0x0, OCP_MOD, OMAP2_PRCM_IRQSTATUS_MPU_OFFSET);
 }
 
 static int omap2_i2c_active(void)
@@ -183,9 +181,6 @@ static int sti_console_enabled;
 static int omap2_allow_mpu_retention(void)
 {
 	u32 l;
-
-	if (atomic_read(&sleep_block))
-		return 0;
 
 	/* Check for MMC, UART2, UART1, McSPI2, McSPI1 and DSS1. */
 	l = cm_read_mod_reg(CORE_MOD, CM_FCLKEN1);
@@ -251,11 +246,7 @@ static void omap2_enter_mpu_retention(void)
 
 static int omap2_can_sleep(void)
 {
-	if (!enable_dyn_sleep)
-		return 0;
 	if (omap2_fclks_active())
-		return 0;
-	if (atomic_read(&sleep_block) > 0)
 		return 0;
 	if (osc_ck->usecount > 1)
 		return 0;
@@ -265,17 +256,13 @@ static int omap2_can_sleep(void)
 	return 1;
 }
 
-/*
- * Note that you can use clock_event_device->min_delta_ns if you want to
- * avoid reprogramming timer too often when using CONFIG_NO_HZ.
- */
 static void omap2_pm_idle(void)
 {
 	local_irq_disable();
 	local_fiq_disable();
 
 	if (!omap2_can_sleep()) {
-		if (!atomic_read(&sleep_block) && omap_irq_pending())
+		if (omap_irq_pending())
 			goto out;
 		omap2_enter_mpu_retention();
 		goto out;
@@ -294,9 +281,7 @@ out:
 static int omap2_pm_prepare(void)
 {
 	/* We cannot sleep in idle until we have resumed */
-	saved_idle = pm_idle;
-	pm_idle = NULL;
-
+	disable_hlt();
 	return 0;
 }
 
@@ -338,7 +323,7 @@ static int omap2_pm_enter(suspend_state_t state)
 
 static void omap2_pm_finish(void)
 {
-	pm_idle = saved_idle;
+	enable_hlt();
 }
 
 static struct platform_suspend_ops omap_pm_ops = {
@@ -361,7 +346,7 @@ static void __init prcm_setup_regs(void)
 
 	/* Enable autoidle */
 	prm_write_mod_reg(OMAP24XX_AUTOIDLE, OCP_MOD,
-				OMAP24XX_PRM_SYSCONFIG_OFFSET);
+			  OMAP2_PRCM_SYSCONFIG_OFFSET);
 
 	/* Set all domain wakeup dependencies */
 	prm_write_mod_reg(OMAP_EN_WKUP_MASK, MPU_MOD, PM_WKDEP);
@@ -468,29 +453,32 @@ static void __init prcm_setup_regs(void)
 	/* REVISIT: Configure number of 32 kHz clock cycles for sys_clk
 	 * stabilisation */
 	prm_write_mod_reg(15 << OMAP_SETUP_TIME_SHIFT, OMAP24XX_GR_MOD,
-					OMAP24XX_PRCM_CLKSSETUP_OFFSET);
+			  OMAP2_PRCM_CLKSSETUP_OFFSET);
 
 	/* Configure automatic voltage transition */
 	prm_write_mod_reg(2 << OMAP_SETUP_TIME_SHIFT, OMAP24XX_GR_MOD,
-					OMAP24XX_PRCM_VOLTSETUP_OFFSET);
+			  OMAP2_PRCM_VOLTSETUP_OFFSET);
 	prm_write_mod_reg(OMAP24XX_AUTO_EXTVOLT |
-		      (0x1 << OMAP24XX_SETOFF_LEVEL_SHIFT) |
-		      OMAP24XX_MEMRETCTRL |
-		      (0x1 << OMAP24XX_SETRET_LEVEL_SHIFT) |
-		      (0x0 << OMAP24XX_VOLT_LEVEL_SHIFT),
-		      OMAP24XX_GR_MOD, OMAP24XX_PRCM_VOLTCTRL_OFFSET);
+			  (0x1 << OMAP24XX_SETOFF_LEVEL_SHIFT) |
+			  OMAP24XX_MEMRETCTRL |
+			  (0x1 << OMAP24XX_SETRET_LEVEL_SHIFT) |
+			  (0x0 << OMAP24XX_VOLT_LEVEL_SHIFT),
+			  OMAP24XX_GR_MOD, OMAP2_PRCM_VOLTCTRL_OFFSET);
 
 	/* Enable wake-up events */
 	prm_write_mod_reg(OMAP24XX_EN_GPIOS | OMAP24XX_EN_GPT1,
 			  WKUP_MOD, PM_WKEN);
 }
 
-int __init omap2_pm_init(void)
+static int __init omap2_pm_init(void)
 {
 	u32 l;
 
+	if (!cpu_is_omap24xx())
+		return -ENODEV;
+
 	printk(KERN_INFO "Power Management for OMAP2 initializing\n");
-	l = prm_read_mod_reg(OCP_MOD, OMAP24XX_PRM_REVISION_OFFSET);
+	l = prm_read_mod_reg(OCP_MOD, OMAP2_PRCM_REVISION_OFFSET);
 	printk(KERN_INFO "PRCM revision %d.%d\n", (l >> 4) & 0x0f, l & 0x0f);
 
 	/* Look up important powerdomains, clockdomains */
@@ -557,3 +545,5 @@ int __init omap2_pm_init(void)
 
 	return 0;
 }
+
+late_initcall(omap2_pm_init);

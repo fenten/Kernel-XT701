@@ -1,7 +1,7 @@
 /******************************************************************************
  * NetMUX errorcodes.h                                                        *
  *                                                                            *
- * Copyright Motorola 2006                                                    *
+ * Copyright (C) 2006-2010 Motorola, Inc.                                     *
  *                                                                            *
  * Redistribution and use in source and binary forms, with or without         *
  * modification, are permitted provided that the following conditions are     *
@@ -32,6 +32,7 @@
 /*   DATE        OWNER       COMMENT                                          *
  *   ----------  ----------  -----------------------------------------------  *
  *   2006/09/28  Motorola    Initial version                                  *
+ *   2010/04/28  Motorola    Format cleanup                                   *
  ******************************************************************************/
 
 /* errorcodes.h defines a list of common return values that have a unique     */
@@ -42,40 +43,39 @@
 #define _NETMUX_ERRORCODES_H_
 
 
-/* 
- * ERROR_NONE specifies no error occured 
+/*
+ * ERROR_NONE specifies no error occured
  */
 #define ERROR_NONE 0
 
-/* 
- * ERROR_INVALIDPARAMETER specifies a value to a function is not 
- * valid 
+/*
+ * ERROR_INVALIDPARAMETER specifies a value to a function is not
+ * valid
  */
 #define ERROR_INVALIDPARAMETER 1
 
-/* 
+/*
  * ERROR_MEMORY states an error involving memory occured, usually
- * allocating it 
+ * allocating it
  */
 #define ERROR_MEMORY 2
 
-/* 
- * ERROR_OPERATIONFAILED occurs if a something went wrong within 
- * the function 
+/*
+ * ERROR_OPERATIONFAILED occurs if a something went wrong within
+ * the function
  */
 #define ERROR_OPERATIONFAILED 3
 
- /* 
-  * ERROR_OPERATIONRESTRICTED occurs if the function couldn't 
-  * proceed 
+ /*
+  * ERROR_OPERATIONRESTRICTED occurs if the function couldn't
+  * proceed
   */
 #define ERROR_OPERATIONRESTRICTED 4
 
- /* 
-  * ERROR_INCOMPLETE occurs if the function needs to be called again 
+ /*
+  * ERROR_INCOMPLETE occurs if the function needs to be called again
   */
 #define ERROR_INCOMPLETE 5
 
 
 #endif
-

@@ -1,7 +1,7 @@
 /******************************************************************************
  * NetMUX interface.c                                                         *
  *                                                                            *
- * Copyright (C) 2006-2007 Motorola, Inc.                                     *
+ * Copyright (C) 2006-2010 Motorola, Inc.                                     *
  *                                                                            *
  * Redistribution and use in source and binary forms, with or without         *
  * modification, are permitted provided that the following conditions are     *
@@ -34,6 +34,7 @@
  *   2006/09/28  Motorola    Initial version                                  *
  *   2007/05/01  Motorola    Change codes to ensure "shared" netmux           *
  *                           code is identical between AP and BP.             *
+ *   2010/04/28  Motorola    Format cleanup                                   *
  ******************************************************************************/
 
 /* interface.c provides an API to the mux and its interfaces which allows     */
@@ -53,69 +54,71 @@
  *
  * Params:
  * maxinterfaces -- the number of shelves in the library
- * lib -- a poitner to receive the library object 
+ * lib -- a poitner to receive the library object
  */
-int32 CreateInterfaceLibrary (int32 maxinterfaces, MUXINTERFACE_LIBRARY** lib)
+int32 CreateInterfaceLibrary(int32 maxinterfaces,
+			     MUXINTERFACE_LIBRARY **lib)
 {
-    MUXINTERFACE**        newinterfaces;
-    sint8**               newnames;
-    MUXINTERFACE_LIBRARY* newlib;
-    int32                 size;
+	MUXINTERFACE **newinterfaces;
+	sint8 **newnames;
+	MUXINTERFACE_LIBRARY *newlib;
+	int32 size;
 
-    DEBUG("CreateInterfaceLibrary(%lu, %p)\n", maxinterfaces, lib);
+	DEBUG("CreateInterfaceLibrary(%lu, %p)\n", maxinterfaces, lib);
 
-    if(!maxinterfaces || !lib)
-        return DEBUGERROR(ERROR_INVALIDPARAMETER);
+	if (!maxinterfaces || !lib)
+		return DEBUGERROR(ERROR_INVALIDPARAMETER);
 
-    newlib        = (MUXINTERFACE_LIBRARY*)alloc_mem(sizeof(MUXINTERFACE_LIBRARY));
-    size          = maxinterfaces*sizeof(void*);
-    newinterfaces = (MUXINTERFACE**)alloc_mem(size);
+	newlib =
+	    (MUXINTERFACE_LIBRARY *)
+	    alloc_mem(sizeof(MUXINTERFACE_LIBRARY));
+	size = maxinterfaces * sizeof(void *);
+	newinterfaces = (MUXINTERFACE **) alloc_mem(size);
 
-    newnames = (sint8**)alloc_mem(size);
+	newnames = (sint8 **) alloc_mem(size);
 
-    memset(newinterfaces, 0, size);
-    memset(newnames, 0, size);
+	memset(newinterfaces, 0, size);
+	memset(newnames, 0, size);
 
-    newlib->interfaces    = newinterfaces;
-    newlib->names         = newnames;
-    newlib->maxinterfaces = maxinterfaces;
+	newlib->interfaces = newinterfaces;
+	newlib->names = newnames;
+	newlib->maxinterfaces = maxinterfaces;
 
-    initialize_criticalsection_lock(&newlib->lock);
+	initialize_criticalsection_lock(&newlib->lock);
 
-    *lib = newlib;
+	*lib = newlib;
 
-    return DEBUGERROR(ERROR_NONE);
+	return DEBUGERROR(ERROR_NONE);
 }
 
 /*
  * DestroyInterfaceLibrary will free any resources currently consumed
- * by the library object itself. If there are any interfaces still 
+ * by the library object itself. If there are any interfaces still
  * contained in the library this function call will fail. It is assumed
- * that there are no operations happening on this object at the time 
+ * that there are no operations happening on this object at the time
  * the destroy is called.
- * 
+ *
  * Params:
  * lib -- a pointer to the library to be destroyed
  */
-int32 DestroyInterfaceLibrary (MUXINTERFACE_LIBRARY* lib)
+int32 DestroyInterfaceLibrary(MUXINTERFACE_LIBRARY *lib)
 {
-    int32 index;
+	int32 index;
 
-    DEBUG("DestroyInterfaceLibrary(%p)\n", lib);
+	DEBUG("DestroyInterfaceLibrary(%p)\n", lib);
 
-    for(index = 0; index < lib->maxinterfaces; index++)
-    {
-        if(lib->interfaces[index])
-            return DEBUGERROR(ERROR_OPERATIONFAILED);
-    }
+	for (index = 0; index < lib->maxinterfaces; index++) {
+		if (lib->interfaces[index])
+			return DEBUGERROR(ERROR_OPERATIONFAILED);
+	}
 
-    destroy_criticalsection_lock(&lib->lock);
+	destroy_criticalsection_lock(&lib->lock);
 
-    free_mem(lib->interfaces);
-    free_mem(lib->names);
-    free_mem(lib);
+	free_mem(lib->interfaces);
+	free_mem(lib->names);
+	free_mem(lib);
 
-    return DEBUGERROR(ERROR_NONE);
+	return DEBUGERROR(ERROR_NONE);
 }
 
 /*
@@ -134,91 +137,90 @@ int32 DestroyInterfaceLibrary (MUXINTERFACE_LIBRARY* lib)
  *          into an inform or receive call
  * lib -- the library object to attach the interface to
  */
-int32 RegisterInterface (sint8* name, int32 (*inform) (void*, void*), int32 (*receive) (COMMBUFF*, void*), int32 param, MUXINTERFACE_LIBRARY* lib)
+int32 RegisterInterface(sint8 *name, int32(*inform) (void *, void *),
+			int32(*receive) (COMMBUFF *, void *), int32 param,
+			MUXINTERFACE_LIBRARY *lib)
 {
-    MUXINTERFACE* newinterface;
-    sint8*        newname;
-    int32         namelength;
-    int32         index;
+	MUXINTERFACE *newinterface;
+	sint8 *newname;
+	int32 namelength;
+	int32 index;
 
-    DEBUG("RegisterInterface(%p, %p, %p, %lu, %p)\n", name, inform, receive, param, lib);
+	DEBUG("RegisterInterface(%p, %p, %p, %lu, %p)\n", name, inform,
+	      receive, param, lib);
 
-    if(!name || !inform || !receive || !lib)
-        return DEBUGERROR(ERROR_INVALIDPARAMETER);
+	if (!name || !inform || !receive || !lib)
+		return DEBUGERROR(ERROR_INVALIDPARAMETER);
 
-    enter_write_criticalsection(&lib->lock);
+	enter_write_criticalsection(&lib->lock);
 
-    for(index = 0; index < lib->maxinterfaces; index++)
-    {
-        if(!lib->interfaces[index])
-            break;
-    }
+	for (index = 0; index < lib->maxinterfaces; index++) {
+		if (!lib->interfaces[index])
+			break;
+	}
 
-    if(index >= lib->maxinterfaces)
-    {
-        exit_write_criticalsection(&lib->lock);
+	if (index >= lib->maxinterfaces) {
+		exit_write_criticalsection(&lib->lock);
 
-        return DEBUGERROR(ERROR_OPERATIONFAILED);
-    }
+		return DEBUGERROR(ERROR_OPERATIONFAILED);
+	}
 
-    namelength = strlen((char*)name)+1;
+	namelength = strlen((char *) name) + 1;
 
-    newinterface = (MUXINTERFACE*)alloc_mem(sizeof(MUXINTERFACE));
-    newname      = (sint8*)alloc_mem(namelength);
+	newinterface = (MUXINTERFACE *) alloc_mem(sizeof(MUXINTERFACE));
+	newname = (sint8 *) alloc_mem(namelength);
 
-    memcpy(newname, name, namelength);
+	memcpy(newname, name, namelength);
 
-    newinterface->Inform          = inform;
-    newinterface->Receive         = receive;
-    newinterface->interface_index = index;
-    newinterface->param           = param;
+	newinterface->Inform = inform;
+	newinterface->Receive = receive;
+	newinterface->interface_index = index;
+	newinterface->param = param;
 
-    lib->interfaces[index] = newinterface;
-    lib->names[index]      = newname;
+	lib->interfaces[index] = newinterface;
+	lib->names[index] = newname;
 
-    exit_write_criticalsection(&lib->lock);
+	exit_write_criticalsection(&lib->lock);
 
-    return DEBUGERROR(ERROR_NONE);
+	return DEBUGERROR(ERROR_NONE);
 }
 
 /*
  * UnregisterInterface will pull a interface from the library. The caller
  * should take care to ensure no operations are depending on this interface.
- * 
+ *
  * Params:
  * interface_index -- the interface id/index for the interface to be removed
  * lib -- the library which holds the interface
  */
-int32 UnregisterInterface (int32 interface_index, MUXINTERFACE_LIBRARY* lib)
+int32 UnregisterInterface(int32 interface_index,
+			  MUXINTERFACE_LIBRARY *lib)
 {
-    MUXINTERFACE* unreg_interface;
+	MUXINTERFACE *unreg_interface;
 
-    DEBUG("UnregisterInterface(%lu, %p)\n", interface_index, lib);
+	DEBUG("UnregisterInterface(%lu, %p)\n", interface_index, lib);
 
-    if(interface_index >= lib->maxinterfaces)
-    {
-        return DEBUGERROR(ERROR_OPERATIONFAILED);
-    }
+	if (interface_index >= lib->maxinterfaces)
+		return DEBUGERROR(ERROR_OPERATIONFAILED);
 
-    enter_write_criticalsection(&lib->lock);
+	enter_write_criticalsection(&lib->lock);
 
-    unreg_interface = lib->interfaces[interface_index];
-    if(!unreg_interface)
-    {
-        exit_write_criticalsection(&lib->lock);
+	unreg_interface = lib->interfaces[interface_index];
+	if (!unreg_interface) {
+		exit_write_criticalsection(&lib->lock);
 
-        return DEBUGERROR(ERROR_OPERATIONFAILED);
-    }
+		return DEBUGERROR(ERROR_OPERATIONFAILED);
+	}
 
-    free_mem(unreg_interface);
-    free_mem(lib->names[interface_index]);
+	free_mem(unreg_interface);
+	free_mem(lib->names[interface_index]);
 
-    lib->interfaces[interface_index] = 0;
-    lib->names[interface_index]      = 0;
+	lib->interfaces[interface_index] = 0;
+	lib->names[interface_index] = 0;
 
-    exit_write_criticalsection(&lib->lock);
+	exit_write_criticalsection(&lib->lock);
 
-    return DEBUGERROR(ERROR_NONE);
+	return DEBUGERROR(ERROR_NONE);
 }
 
 /*
@@ -232,31 +234,32 @@ int32 UnregisterInterface (int32 interface_index, MUXINTERFACE_LIBRARY* lib)
  * lib -- the library the interface belongs to
  * interface_index -- a pointer to a location to receive the index
  */
-int32 QueryInterfaceIndex (sint8* name, MUXINTERFACE_LIBRARY* lib, int32* interface_index)
+int32 QueryInterfaceIndex(sint8 *name, MUXINTERFACE_LIBRARY *lib,
+			  int32 *interface_index)
 {
-    int32 index;
+	int32 index;
 
-    DEBUG("QueryInterfaceIndex(%p, %p, %p)\n", name, lib, interface_index);
+	DEBUG("QueryInterfaceIndex(%p, %p, %p)\n", name, lib,
+	      interface_index);
 
-    enter_read_criticalsection(&lib->lock);
+	enter_read_criticalsection(&lib->lock);
 
-    for(index = 0; index < lib->maxinterfaces; index++)
-    {
-        if(lib->names[index] && (!strcmp((char*)lib->names[index], (char*)name)))
-            break;
-    }
+	for (index = 0; index < lib->maxinterfaces; index++) {
+		if (lib->names[index]
+		    &&
+		    (!strcmp((char *) lib->names[index], (char *) name)))
+			break;
+	}
 
-    exit_read_criticalsection(&lib->lock);
+	exit_read_criticalsection(&lib->lock);
 
-    if(index >= lib->maxinterfaces)
-    {
-        return DEBUGERROR(ERROR_OPERATIONFAILED);
-    }
+	if (index >= lib->maxinterfaces)
+		return DEBUGERROR(ERROR_OPERATIONFAILED);
 
-    if(interface_index)
-        *interface_index = index;
+	if (interface_index)
+		*interface_index = index;
 
-    return DEBUGERROR(ERROR_NONE);
+	return DEBUGERROR(ERROR_NONE);
 }
 
 /*
@@ -269,33 +272,34 @@ int32 QueryInterfaceIndex (sint8* name, MUXINTERFACE_LIBRARY* lib, int32* interf
  * lib -- the library holding the interface
  * interface_connection -- pointer to a variable to hold the interface pointer
  */
-int32 ConnectInterface (int32 interface_index, MUXINTERFACE_LIBRARY* lib, MUXINTERFACE** interface_connection)
+int32 ConnectInterface(int32 interface_index, MUXINTERFACE_LIBRARY *lib,
+		       MUXINTERFACE **interface_connection)
 {
-    MUXINTERFACE* connecting_interface;
+	MUXINTERFACE *connecting_interface;
 
-    DEBUG("ConnectInterface(%lu, %p, %p)\n", interface_index, lib, interface_connection);
+	DEBUG("ConnectInterface(%lu, %p, %p)\n", interface_index, lib,
+	      interface_connection);
 
-    if(!lib || !interface_connection)
-        return DEBUGERROR(ERROR_INVALIDPARAMETER);
+	if (!lib || !interface_connection)
+		return DEBUGERROR(ERROR_INVALIDPARAMETER);
 
-    if(interface_index >= lib->maxinterfaces)
-        return DEBUGERROR(ERROR_OPERATIONFAILED);
+	if (interface_index >= lib->maxinterfaces)
+		return DEBUGERROR(ERROR_OPERATIONFAILED);
 
-    enter_write_criticalsection(&lib->lock);
+	enter_write_criticalsection(&lib->lock);
 
-    connecting_interface = lib->interfaces[interface_index];
-    if(!connecting_interface)
-    {
-        exit_write_criticalsection(&lib->lock);
+	connecting_interface = lib->interfaces[interface_index];
+	if (!connecting_interface) {
+		exit_write_criticalsection(&lib->lock);
 
-        return DEBUGERROR(ERROR_OPERATIONFAILED);
-    }
+		return DEBUGERROR(ERROR_OPERATIONFAILED);
+	}
 
-    *interface_connection = connecting_interface;
+	*interface_connection = connecting_interface;
 
-    exit_write_criticalsection(&lib->lock);
+	exit_write_criticalsection(&lib->lock);
 
-    return DEBUGERROR(ERROR_NONE);
+	return DEBUGERROR(ERROR_NONE);
 }
 
 /*
@@ -304,32 +308,33 @@ int32 ConnectInterface (int32 interface_index, MUXINTERFACE_LIBRARY* lib, MUXINT
  * interface's registered inform function.
  *
  * informdata -- some known data to be passed to the inform function
- * interface_lib -- the library to perform the broadcast on 
+ * interface_lib -- the library to perform the broadcast on
  */
-int32 BroadcastLibraryInform (INTERFACEINFORM* informdata, MUXINTERFACE_LIBRARY* interface_lib)
+int32 BroadcastLibraryInform(INTERFACEINFORM *informdata,
+			     MUXINTERFACE_LIBRARY *interface_lib)
 {
-    int32 (*Inform)  (void*, void*);
-    void*   param;
-    int32   index;
+	int32(*Inform) (void *, void *);
+	void *param;
+	int32 index;
 
-    DEBUG("BroadcastLibraryInform(%p, %p)\n", informdata,interface_lib);
+	DEBUG("BroadcastLibraryInform(%p, %p)\n", informdata,
+	      interface_lib);
 
-    for(index = 0; index < interface_lib->maxinterfaces; index++)
-    {
-        enter_read_criticalsection(&interface_lib->lock);
+	for (index = 0; index < interface_lib->maxinterfaces; index++) {
+		enter_read_criticalsection(&interface_lib->lock);
 
-        if(interface_lib->interfaces[index])
-        {
-            Inform = interface_lib->interfaces[index]->Inform;
-            param  = (void*)interface_lib->interfaces[index]->param;
+		if (interface_lib->interfaces[index]) {
+			Inform = interface_lib->interfaces[index]->Inform;
+			param =
+			    (void *) interface_lib->interfaces[index]->
+			    param;
 
-            exit_read_criticalsection(&interface_lib->lock);
+			exit_read_criticalsection(&interface_lib->lock);
 
-            Inform((void*)informdata, param);
-        }
-        else
-            exit_read_criticalsection(&interface_lib->lock);
-    }
+			Inform((void *) informdata, param);
+		} else
+			exit_read_criticalsection(&interface_lib->lock);
+	}
 
-    return DEBUGERROR(ERROR_NONE);
+	return DEBUGERROR(ERROR_NONE);
 }

@@ -25,11 +25,11 @@
 #include <linux/fb.h>
 #include <linux/delay.h>
 #include <linux/clk.h>
-#include <linux/omapfb.h>
 
-#include <mach/dma.h>
-#include <mach/blizzard.h>
+#include <plat/dma.h>
+#include <plat/blizzard.h>
 
+#include "omapfb.h"
 #include "dispc.h"
 
 #define MODULE_NAME				"blizzard"
@@ -93,7 +93,7 @@ struct blizzard_reg_list {
 };
 
 /* These need to be saved / restored separately from the rest. */
-static struct blizzard_reg_list blizzard_pll_regs[] = {
+static const struct blizzard_reg_list blizzard_pll_regs[] = {
 	{
 		.start	= 0x04,		/* Don't save PLL ctrl (0x0C) */
 		.end	= 0x0a,
@@ -104,7 +104,7 @@ static struct blizzard_reg_list blizzard_pll_regs[] = {
 	},
 };
 
-static struct blizzard_reg_list blizzard_gen_regs[] = {
+static const struct blizzard_reg_list blizzard_gen_regs[] = {
 	{
 		.start	= 0x18,		/* SDRAM control */
 		.end	= 0x20,
@@ -191,7 +191,7 @@ struct blizzard_struct {
 
 	struct omapfb_device	*fbdev;
 	struct lcd_ctrl_extif	*extif;
-	struct lcd_ctrl		*int_ctrl;
+	const struct lcd_ctrl	*int_ctrl;
 
 	void			(*power_up)(struct device *dev);
 	void			(*power_down)(struct device *dev);
@@ -520,8 +520,9 @@ static int do_full_screen_update(struct blizzard_request *req)
 
 static int check_1d_intersect(int a1, int a2, int b1, int b2)
 {
-    if (a2 <= b1 || b2 <= a1) return 0;
-    return 1;
+	if (a2 <= b1 || b2 <= a1)
+		return 0;
+	return 1;
 }
 
 /* Setup all planes with an overlapping area with the update window. */
@@ -665,7 +666,7 @@ static int do_partial_update(struct blizzard_request *req, int plane,
 	    (gy2_out - gy1_out) != (gy2 - gy1))
 		have_zoom_for_this_update = 1;
 
-	/* 'background' type of screen update (as opposed to 'destructive') 
+	/* 'background' type of screen update (as opposed to 'destructive')
 	   can be used to disable scaling if scaling is active */
 	zoom_off = blizzard.zoom_on && !have_zoom_for_this_update &&
 	    (gx1_out == 0) && (gx2_out == blizzard.screen_width) &&
@@ -674,9 +675,9 @@ static int do_partial_update(struct blizzard_request *req, int plane,
 
 	if (blizzard.zoom_on && !have_zoom_for_this_update && !zoom_off &&
 	    check_1d_intersect(blizzard.zoom_area_gx1, blizzard.zoom_area_gx2,
-	                       gx1_out, gx2_out) &&
+			       gx1_out, gx2_out) &&
 	    check_1d_intersect(blizzard.zoom_area_gy1, blizzard.zoom_area_gy2,
-	                       gy1_out, gy2_out)) {
+			       gy1_out, gy2_out)) {
 		/* Previous screen update was using scaling, current update
 		 * is not using it. Additionally, current screen update is
 		 * going to overlap with the scaled area. Scaling needs to be
@@ -1371,7 +1372,7 @@ static void blizzard_get_caps(int plane, struct omapfb_caps *caps)
 			   (1 << OMAPFB_COLOR_YUV420);
 }
 
-static void _save_regs(struct blizzard_reg_list *list, int cnt)
+static void _save_regs(const struct blizzard_reg_list *list, int cnt)
 {
 	int i;
 
@@ -1382,7 +1383,7 @@ static void _save_regs(struct blizzard_reg_list *list, int cnt)
 	}
 }
 
-static void _restore_regs(struct blizzard_reg_list *list, int cnt)
+static void _restore_regs(const struct blizzard_reg_list *list, int cnt)
 {
 	int i;
 

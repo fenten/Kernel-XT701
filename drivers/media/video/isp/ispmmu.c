@@ -21,12 +21,17 @@
 #include "ispmmu.h"
 #include "isp.h"
 
-#include <mach/iommu.h>
-#include <mach/iovmm.h>
+#include <plat/iommu.h>
+#include <plat/iovmm.h>
 
 #define IOMMU_FLAG (IOVMF_ENDIAN_LITTLE | IOVMF_ELSZ_8)
 
 static struct iommu *isp_iommu;
+
+void *ispmmu_da_to_va(dma_addr_t da)
+{
+	return da_to_va(isp_iommu, (u32)da);
+}
 
 dma_addr_t ispmmu_vmalloc(size_t bytes)
 {
@@ -91,6 +96,41 @@ err_sg_alloc:
 	return -ENOMEM;
 }
 EXPORT_SYMBOL_GPL(ispmmu_vmap);
+
+dma_addr_t ispmmu_vmap_pages(struct page **pages,
+				int page_nr)
+{
+	int err;
+	void *da;
+	struct sg_table *sgt;
+	unsigned int i;
+	struct scatterlist *sg;
+
+	/* printk(KERN_INFO "%s: mapping pages %d\n", __func__, page_nr); */
+
+	sgt = kmalloc(sizeof(*sgt), GFP_KERNEL);
+	if (!sgt)
+		return -ENOMEM;
+	err = sg_alloc_table(sgt, page_nr, GFP_KERNEL);
+	if (err)
+		goto err_sg_alloc;
+
+	for_each_sg(sgt->sgl, sg, sgt->nents, i)
+		sg_set_page(sg, pages[i], PAGE_SIZE, 0);
+
+	da = (void *)iommu_vmap(isp_iommu, 0, sgt, IOMMU_FLAG);
+	if (IS_ERR(da))
+		goto err_vmap;
+
+	return (dma_addr_t)da;
+
+err_vmap:
+	sg_free_table(sgt);
+err_sg_alloc:
+	kfree(sgt);
+	return -ENOMEM;
+}
+EXPORT_SYMBOL_GPL(ispmmu_vmap_pages);
 
 void ispmmu_vunmap(dma_addr_t da)
 {

@@ -18,4 +18,3 @@
 #
 
 obj-y		+= sim_core.o
-

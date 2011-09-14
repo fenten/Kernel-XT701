@@ -31,9 +31,9 @@
 #include "prm.h"
 #include "prm-regbits-34xx.h"
 
-#include <mach/cpu.h>
-#include <mach/powerdomain.h>
-#include <mach/clockdomain.h>
+#include <plat/cpu.h>
+#include <plat/powerdomain.h>
+#include <plat/clockdomain.h>
 
 #include "pm.h"
 
@@ -273,37 +273,49 @@ struct powerdomain *pwrdm_lookup(const char *name)
 }
 
 /**
- * pwrdm_for_each - call function on each registered clockdomain
+ * pwrdm_for_each_nolock - call function on each registered clockdomain
  * @fn: callback function *
  *
  * Call the supplied function for each registered powerdomain.  The
  * callback function can return anything but 0 to bail out early from
- * the iterator.  The callback function is called with the pwrdm_rwlock
- * held for reading, so no powerdomain structure manipulation
- * functions should be called from the callback, although hardware
- * powerdomain control functions are fine.  Returns the last return
- * value of the callback function, which should be 0 for success or
- * anything else to indicate failure; or -EINVAL if the function
- * pointer is null.
+ * the iterator.  Returns the last return value of the callback function, which
+ * should be 0 for success or anything else to indicate failure; or -EINVAL if
+ * the function pointer is null.
  */
-int pwrdm_for_each(int (*fn)(struct powerdomain *pwrdm, void *user),
-			void *user)
+int pwrdm_for_each_nolock(int (*fn)(struct powerdomain *pwrdm, void *user),
+				void *user)
 {
 	struct powerdomain *temp_pwrdm;
-	unsigned long flags;
 	int ret = 0;
 
 	if (!fn)
 		return -EINVAL;
 
-	read_lock_irqsave(&pwrdm_rwlock, flags);
 	list_for_each_entry(temp_pwrdm, &pwrdm_list, node) {
 		ret = (*fn)(temp_pwrdm, user);
 		if (ret)
 			break;
 	}
-	read_unlock_irqrestore(&pwrdm_rwlock, flags);
 
+	return ret;
+}
+
+/**
+ * pwrdm_for_each - call function on each registered clockdomain
+ * @fn: callback function *
+ *
+ * This function is the same as 'pwrdm_for_each_nolock()', but keeps the
+ * &pwrdm_rwlock locked for reading, so no powerdomain structure manipulation
+ * functions should be called from the callback, although hardware powerdomain
+ * control functions are fine.
+ */
+int pwrdm_for_each(int (*fn)(struct powerdomain *pwrdm, void *user),
+			void *user)
+{
+	int ret;
+	read_lock(&pwrdm_rwlock);
+	ret = pwrdm_for_each_nolock(fn, user);
+	read_unlock(&pwrdm_rwlock);
 	return ret;
 }
 
@@ -424,20 +436,18 @@ int pwrdm_for_each_clkdm(struct powerdomain *pwrdm,
 			 int (*fn)(struct powerdomain *pwrdm,
 				   struct clockdomain *clkdm))
 {
-	unsigned long flags;
 	int ret = 0;
 	int i;
 
 	if (!fn)
 		return -EINVAL;
 
-	read_lock_irqsave(&pwrdm_rwlock, flags);
+	read_lock(&pwrdm_rwlock);
 
 	for (i = 0; i < PWRDM_MAX_CLKDMS && !ret; i++)
 		ret = (*fn)(pwrdm, pwrdm->pwrdm_clkdms[i]);
 
-	read_unlock_irqrestore(&pwrdm_rwlock, flags);
-
+	read_unlock(&pwrdm_rwlock);
 	return ret;
 }
 
@@ -1169,7 +1179,7 @@ int pwrdm_wait_transition(struct powerdomain *pwrdm)
 	       (c++ < PWRDM_TRANSITION_BAILOUT))
 		udelay(1);
 
-	if (c >= PWRDM_TRANSITION_BAILOUT) {
+	if (c > PWRDM_TRANSITION_BAILOUT) {
 		printk(KERN_ERR "powerdomain: waited too long for "
 		       "powerdomain %s to complete transition\n", pwrdm->name);
 		return -EAGAIN;
@@ -1179,6 +1189,29 @@ int pwrdm_wait_transition(struct powerdomain *pwrdm)
 
 	return 0;
 }
+
+/**
+ * pwrdm_can_idle - check if the powerdomain can enter idle
+ * @pwrdm: struct powerdomain * the powerdomain to check status of
+ *
+ * Does a functional clock check for the powerdomain and returns 1 if the
+ * powerdomain can enter idle, 0 if not.
+ */
+int pwrdm_can_idle(struct powerdomain *pwrdm)
+{
+	int i;
+	const int fclk_regs[] = { CM_FCLKEN, OMAP3430ES2_CM_FCLKEN3 };
+
+	if (!pwrdm)
+		return -EINVAL;
+
+	for (i = 0; i < pwrdm->fclk_reg_amt; i++)
+		if (cm_read_mod_reg(pwrdm->prcm_offs, fclk_regs[i]) &
+				(0xffffffff ^ pwrdm->fclk_masks[i]))
+			return 0;
+	return 1;
+}
+
 
 int pwrdm_state_switch(struct powerdomain *pwrdm)
 {
@@ -1196,8 +1229,8 @@ int pwrdm_clkdm_state_switch(struct clockdomain *clkdm)
 }
 int pwrdm_clk_state_switch(struct clk *clk)
 {
-	if (clk != NULL && clk->clkdm.ptr != NULL)
-		return pwrdm_clkdm_state_switch(clk->clkdm.ptr);
+	if (clk != NULL && clk->clkdm != NULL)
+		return pwrdm_clkdm_state_switch(clk->clkdm);
 	return -EINVAL;
 }
 

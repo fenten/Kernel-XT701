@@ -23,6 +23,11 @@
 #include <linux/workqueue.h>
 #include <linux/completion.h>
 #include <linux/power_supply.h>
+#include <linux/platform_device.h>
+#endif
+
+#ifdef CONFIG_RTC_INTF_SECCLKD
+#include <linux/rtc.h>
 #endif
 
 #define CPCAP_DEV_NAME "cpcap"
@@ -33,6 +38,7 @@
 #define CPCAP_IRQ_INT3_INDEX 32
 #define CPCAP_IRQ_INT4_INDEX 48
 #define CPCAP_IRQ_INT5_INDEX 64
+#define CONSIDER_CABLE_STATUS
 
 enum cpcap_regulator_id {
 	CPCAP_SW5,
@@ -295,7 +301,16 @@ enum {
 
 	CPCAP_IOCTL_NUM_UC__START,
 	CPCAP_IOCTL_NUM_UC_MACRO_START,
+	CPCAP_IOCTL_NUM_UC_MACRO_STOP,
+	CPCAP_IOCTL_NUM_UC_GET_VENDOR,
+	CPCAP_IOCTL_NUM_UC_SET_TURBO_MODE,
 	CPCAP_IOCTL_NUM_UC__END,
+
+#ifdef CONFIG_RTC_INTF_SECCLKD
+	CPCAP_IOCTL_NUM_RTC__START,
+	CPCAP_IOCTL_NUM_RTC_COUNT,
+	CPCAP_IOCTL_NUM_RTC__END,
+#endif
 };
 
 enum cpcap_irqs {
@@ -480,6 +495,50 @@ struct cpcap_adc_ato {
 	unsigned short atox_ps_factor_out;
 };
 
+struct cpcap_display_led {
+	unsigned int display_reg;
+	unsigned int display_mask;
+	unsigned int display_on;
+	unsigned int display_off;
+	unsigned int display_init;
+	unsigned int poll_intvl;
+};
+
+struct cpcap_button_led {
+	unsigned int button_reg;
+	unsigned int button_mask;
+	unsigned int button_on;
+	unsigned int button_off;
+};
+
+struct cpcap_kpad_led {
+	unsigned int kpad_reg;
+	unsigned int kpad_mask;
+	unsigned int kpad_on;
+	unsigned int kpad_off;
+};
+
+struct cpcap_rgb_led {
+	unsigned int rgb_reg;
+	unsigned int rgb_mask;
+	unsigned int rgb_on;
+	unsigned int rgb_off;
+};
+struct cpcap_als_data {
+	unsigned short lux_max;
+	unsigned short lux_min;
+	unsigned short als_max;
+	unsigned short als_min;
+};
+
+struct cpcap_leds {
+	struct cpcap_display_led display_led;
+	struct cpcap_button_led button_led;
+	struct cpcap_kpad_led kpad_led;
+	struct cpcap_rgb_led rgb_led;
+	struct cpcap_als_data als_data;
+};
+
 struct cpcap_batt_data {
 	int status;
 	int health;
@@ -487,6 +546,8 @@ struct cpcap_batt_data {
 	int capacity;
 	int batt_volt;
 	int batt_temp;
+	int batt_full_capacity;
+	int batt_capacity_one;
 };
 
 struct cpcap_batt_ac_data {
@@ -499,6 +560,12 @@ struct cpcap_batt_usb_data {
 	enum cpcap_batt_usb_model model;
 };
 
+#ifdef CONFIG_RTC_INTF_SECCLKD
+struct cpcap_rtc_time_cnt {
+	struct rtc_time time;
+	unsigned short count;
+};
+#endif
 struct cpcap_device;
 
 #ifdef __KERNEL__
@@ -509,13 +576,14 @@ struct cpcap_platform_data {
 	unsigned short *regulator_off_mode_values;
 	struct regulator_init_data *regulator_init;
 	struct cpcap_adc_ato *adc_ato;
-
+	struct cpcap_leds *leds;
 	void (*ac_changed)(struct power_supply *,
 			   struct cpcap_batt_ac_data *);
 	void (*batt_changed)(struct power_supply *,
 			     struct cpcap_batt_data *);
 	void (*usb_changed)(struct power_supply *,
 			    struct cpcap_batt_usb_data *);
+	unsigned short is_umts;
 };
 
 struct cpcap_adc_request {
@@ -569,6 +637,11 @@ struct cpcap_regacc {
  * OUTPUTS: The command writes the register data back to user space at the
  * location specified, or it may return an error code.
  */
+#ifdef CONFIG_RTC_INTF_SECCLKD
+#define CPCAP_IOCTL_GET_RTC_TIME_COUNTER \
+	_IOR(0, CPCAP_IOCTL_NUM_RTC_COUNT, struct cpcap_rtc_time_cnt)
+#endif
+
 #define CPCAP_IOCTL_TEST_READ_REG \
 	_IOWR(0, CPCAP_IOCTL_NUM_TEST_READ_REG, struct cpcap_regacc*)
 
@@ -606,7 +679,14 @@ struct cpcap_regacc {
 #define CPCAP_IOCTL_UC_MACRO_START \
 	_IOWR(0, CPCAP_IOCTL_NUM_UC_MACRO_START, enum cpcap_macro)
 
-/*#define CPCAP_AUDIO_REG_DEBUG*/
+#define CPCAP_IOCTL_UC_MACRO_STOP \
+	_IOWR(0, CPCAP_IOCTL_NUM_UC_MACRO_STOP, enum cpcap_macro)
+
+#define CPCAP_IOCTL_UC_GET_VENDOR \
+	_IOWR(0, CPCAP_IOCTL_NUM_UC_GET_VENDOR, enum cpcap_vendor)
+
+#define CPCAP_IOCTL_UC_SET_TURBO_MODE \
+	_IOW(0, CPCAP_IOCTL_NUM_UC_SET_TURBO_MODE, unsigned short)
 
 #ifdef __KERNEL__
 struct cpcap_device {
@@ -689,14 +769,20 @@ int cpcap_uc_stop(struct cpcap_device *cpcap, enum cpcap_macro macro);
 unsigned char cpcap_uc_status(struct cpcap_device *cpcap,
 			      enum cpcap_macro macro);
 
-#if defined(CONFIG_LEDS_FLASH_RESET)
-int cpcap_direct_misc_write(unsigned short reg, unsigned short value,\
-							unsigned short mask);
+#ifdef CONSIDER_CABLE_STATUS
+void set_accy_status(unsigned char accy_status);
 #endif
 
-#ifdef CPCAP_AUDIO_REG_DEBUG
-void cpcap_regacc_audio_reg_dump(void);
+#if defined(CONFIG_LEDS_FLASH_RESET)
+int cpcap_direct_misc_write(unsigned short reg, unsigned short value,\
+			    unsigned short mask);
 #endif
+
+#define  cpcap_driver_register platform_driver_register
+#define  cpcap_driver_unregister platform_driver_unregister
+
+int cpcap_device_register(struct platform_device *pdev);
+int cpcap_device_unregister(struct platform_device *pdev);
 
 #endif /* __KERNEL__ */
 #endif /* _LINUX_SPI_CPCAP_H */

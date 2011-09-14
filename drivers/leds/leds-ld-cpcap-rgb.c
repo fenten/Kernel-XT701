@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Motorola, Inc.
+ * Copyright (C) 2009-2010 Motorola, Inc.
  *
  * This program is free dispware; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -165,9 +165,9 @@ msg_ind_blink(struct device *dev, struct device_attribute *attr,
 		return -1;
 	}
 	if (led_blink > LED_OFF)
-		cpcap_irq_unmask(msg_ind_data->cpcap, CPCAP_IRQ_UC_PRIMACRO_6);
+		cpcap_uc_start(msg_ind_data->cpcap, CPCAP_MACRO_6);
 	else
-		cpcap_irq_mask(msg_ind_data->cpcap, CPCAP_IRQ_UC_PRIMACRO_6);
+		cpcap_uc_stop(msg_ind_data->cpcap, CPCAP_MACRO_6);
 
 	return 0;
 }
@@ -191,7 +191,7 @@ static int msg_ind_rgb_probe(struct platform_device *pdev)
 	info->cpcap = pdev->dev.platform_data;
 	platform_set_drvdata(pdev, info);
 
-	info->regulator = regulator_get(&pdev->dev, LD_SUPPLY);
+	info->regulator = regulator_get(NULL, LD_SUPPLY);
 	if (IS_ERR(info->regulator)) {
 		pr_err("%s: Cannot get %s regulator\n", __func__, LD_SUPPLY);
 		ret = PTR_ERR(info->regulator);
@@ -271,7 +271,7 @@ static struct platform_driver ld_msg_ind_rgb_driver = {
 
 static int __init ld_msg_ind_rgb_init(void)
 {
-	return platform_driver_register(&ld_msg_ind_rgb_driver);
+	return cpcap_driver_register(&ld_msg_ind_rgb_driver);
 }
 
 static void __exit ld_msg_ind_rgb_exit(void)

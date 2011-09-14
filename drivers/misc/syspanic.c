@@ -1,55 +1,33 @@
 /**  \file syspanic.c
 
-     \brief This file contains the source to the syspanic kernel driver
+ \brief This file contains the source to the syspanic kernel driver
 
-      \if INCLUDE_LICENSE_SECTION
-      * Copyright (C) 2009 Motorola, Inc.
-      * This program is free software; you can redistribute it
-      * and/or modify it under the terms of the GNU General
-      * Public License as published by the Free Software
-      * Foundation; either version 2 of the License, or (at
-      * your option) any later version.  You should have
-      * received a copy of the GNU General Public License
-      * along with this program; if not, write to the Free
-      * Software Foundation 51 Franklin Street, Fifth Floor
-      * Boston, MA 02110-1301 USA
-      \endif
+ \if INCLUDE_LICENSE_SECTION
+ * Copyright (C) 2009 Motorola, Inc.
+ * This program is free software; you can redistribute it
+ * and/or modify it under the terms of the GNU General
+ * Public License as published by the Free Software
+ * Foundation; either version 2 of the License, or (at
+ * your option) any later version.  You should have
+ * received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free
+ * Software Foundation 51 Franklin Street, Fifth Floor
+ * Boston, MA 02110-1301 USA
+ \endif
 
+  External Revision History:
 
-\if MOTOROLA_CONFIDENTIAL_PROPRIETARY
+ Modification Date | Release ID | Description of Changes \n
+ ----------------- | ---------- | -------------------------------- \n
+ -- 2009-02-18 --- | Version_01 | Initial Creation
+ -- 2009-08-24 --- | Version_02 | To prevent suspend when BP panic happen
+ -- 2010-05-10 --- | Version_03 | To prevent spin lock on kernel 2.6.32 version
 
-====================================================================================================
-
-                              Motorola Confidential Proprietary
-                                    Template version 1.1
-                       Copyright 2009 Motorola, Inc.  All Rights Reserved.
-
-Internal Revision History:
-                            Modification     Tracking
-Author                          Date          Number     Description of Changes
--------------------------   ------------    ----------   -------------------------------------------
-Falempe Jocelyn              18/02/2009     LIBss12162    initial creation
-LIU Peng - a22543            24/08/2009     LIBtt10246   Syspanic need to prevent suspend when BP panic happen
-
-\endif
-
-
-<tt>
-
-External Revision History:
-
-Modification Date | Release ID | Description of Changes \n
------------------ | ---------- | -------------------------------- \n
--- 2009-02-18 --- | Version_01 | Initial Creation
--- 2009-08-24 --- | Version_02 | To prevent suspend when BP panic happen
-
-
-</tt>
-*/
+ */
 
 /*=============================================================================
-................................INCLUDE FILES
-=============================================================================*/
+ ................................INCLUDE FILES
+ ============================================================================*/
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -63,13 +41,13 @@ Modification Date | Release ID | Description of Changes \n
 #include <linux/interrupt.h>
 #include <linux/device.h>
 #include <linux/timer.h>
-#include <asm/delay.h>
+#include <linux/delay.h>
 #ifdef CONFIG_HAS_WAKELOCK
 #include <linux/wakelock.h>
 #endif
 /*=============================================================================
-                                LOCAL CONSTANTS
-=============================================================================*/
+ LOCAL CONSTANTS
+ ============================================================================*/
 
 /**
  * Identifier of the driver. Used in all kernel APIs requiring a text
@@ -77,48 +55,47 @@ Modification Date | Release ID | Description of Changes \n
  */
 #define SYSPANIC_ID    "syspanic"
 
+/* Syspanic IRQ is 88 */
+#define SYSPANIC_IRQ 88
+
 /* #define SYSPDEBUG 1 */
 #ifdef SYSPDEBUG
-#  define DPRINTK(fmt, args...) printk(KERN_INFO "%s: " fmt, __FUNCTION__ ,\
+#  define DPRINTK(fmt, args...) printk(KERN_INFO "%s: " fmt, __func__ ,\
 									## args)
 #else
 #  define DPRINTK(fmt, args...)
 #endif
 /*=============================================================================
-                                LOCAL MACROS
-=============================================================================*/
+ LOCAL MACROS
+ =============================================================================*/
 
 /*=============================================================================
-                        LOCAL TYPEDEFS (STRUCTURES, UNIONS, ENUMS)
-=============================================================================*/
+ LOCAL TYPEDEFS (STRUCTURES, UNIONS, ENUMS)
+ =============================================================================*/
 
-typedef enum {
-	SYSP_IDLE,
-	SYSP_WAIT,
-	SYSP_CLEAR,
-	SYSP_PANIC,
-	SYSP_MEMORY_PANIC
-} sysp_state;
+enum sysp_state {
+	SYSP_IDLE, SYSP_WAIT, SYSP_CLEAR, SYSP_PANIC, SYSP_MEMORY_PANIC
+};
 
 /**
  * Internal representation of the syspanic driver.
  */
-typedef struct {
-	struct semaphore sem;		/**< Semaphore used to serialize I/O operations */
-	unsigned char openFlag;		/**< Bit indicating the driver is being used by
-                                             user-space */
-	wait_queue_head_t waitQueue;	/**< Wait queue used for sleeping */
+struct SysPanicDriverType {
+	struct semaphore sem; /**< Semaphore used to serialize I/O operations */
+	unsigned char openFlag; /**< Bit indicating the driver is being used by
+	 user-space */
+	wait_queue_head_t waitQueue; /**< Wait queue used for sleeping */
 	struct timer_list timerList;
 #ifdef CONFIG_HAS_WAKELOCK
-    struct wake_lock syspanic_wake_lock;
+	struct wake_lock syspanic_wake_lock;
 #endif
 	atomic_t state;
 
-} SysPanicDriverType;
+};
 
 /*=============================================================================
-                              LOCAL FUNCTION PROTOTYPES
-=============================================================================*/
+ LOCAL FUNCTION PROTOTYPES
+ =============================================================================*/
 
 /**
  * \brief Initializes the syspanic module when it's loaded into kernel
@@ -179,7 +156,6 @@ static int syspanicOpen(struct inode *inode, struct file *filp);
  */
 static int syspanicRelease(struct inode *inode, struct file *filp);
 
-
 /**
  * \brief Callback function when user-space invokes select()
  *
@@ -203,29 +179,26 @@ static int syspanicRequestIRQ(void);
 static void syspanicFreeIRQ(void);
 
 /*=============================================================================
-                                GLOBAL VARIABLES
-=============================================================================*/
+ GLOBAL VARIABLES
+ =============================================================================*/
 
 /**
  * This structure exposes the available I/O
  * operations of this driver to the kernel.
  * Each member points to a corresponding function
  */
-static struct file_operations syspanicFops = {
-	.owner = THIS_MODULE,
-	.open = syspanicOpen,
-	.release = syspanicRelease,
-	.poll = syspanicPoll,
-};
+static const struct file_operations syspanicFops = { .owner = THIS_MODULE,
+		.open = syspanicOpen, .release = syspanicRelease,
+		.poll = syspanicPoll, };
 
 static struct class *syspanic_class;
 struct device *syspanic_device_class;
 static int major_syspanic;
-static SysPanicDriverType sysp;	/**< Internal structure of syspanic driver */
+static struct SysPanicDriverType sysp; /**< Internal structure of syspanic */
 
 /*=============================================================================
-                                LOCAL FUNCTIONS
-=============================================================================*/
+ LOCAL FUNCTIONS
+ =============================================================================*/
 static int __init syspanicInit(void)
 {
 	int ret;
@@ -244,18 +217,18 @@ static int __init syspanicInit(void)
 	}
 
 	syspanic_device_class =
-	    device_create(syspanic_class, NULL, MKDEV(major_syspanic, 0),
-			  NULL, "syspanic");
+	device_create(syspanic_class, NULL, MKDEV(major_syspanic, 0),
+			NULL, "syspanic");
 	if (IS_ERR(syspanic_device_class)) {
 		class_destroy(syspanic_class);
 		unregister_chrdev(major_syspanic, "syspanic");
 		printk(KERN_INFO
-		       "Not able to do the class_device_create\n");
+				"Not able to do the class_device_create\n");
 		return (int) syspanic_device_class;
 	}
 
 	/* Initialize internal structures */
-	init_MUTEX(&sysp.sem);
+	sema_init(&sysp.sem, 1);
 
 	sysp.openFlag = 0;
 	init_waitqueue_head(&sysp.waitQueue);
@@ -269,12 +242,13 @@ static int __init syspanicInit(void)
 
 #ifdef CONFIG_HAS_WAKELOCK
 	wake_lock_init(&sysp.syspanic_wake_lock,
-		       WAKE_LOCK_SUSPEND,
-		       "syspanic");
+			WAKE_LOCK_SUSPEND,
+			"syspanic");
 #endif
 
 	/* Request for an interrupt from kernel */
-	if ((ret = syspanicRequestIRQ()) < 0) {
+	ret = syspanicRequestIRQ();
+	if (ret < 0) {
 		printk(KERN_ERR "Cannot request IRQ from kernel\n");
 		syspanicFreeIRQ();
 		return ret;
@@ -302,9 +276,8 @@ static void __exit syspanicExit(void)
 static int syspanicOpen(struct inode *inode, struct file *filp)
 {
 	/* Hold the semaphore */
-	if (down_interruptible(&sysp.sem)) {
+	if (down_interruptible(&sysp.sem))
 		return -ERESTARTSYS;
-	}
 
 	/* Checks if device is already opened */
 	if (sysp.openFlag) {
@@ -324,13 +297,12 @@ static int syspanicOpen(struct inode *inode, struct file *filp)
 static int syspanicRelease(struct inode *inode, struct file *filp)
 {
 #ifdef CONFIG_HAS_WAKELOCK
-    wake_unlock(&sysp.syspanic_wake_lock);
+	wake_unlock(&sysp.syspanic_wake_lock);
 #endif
 
 	/* Hold the semaphore */
-	if (down_interruptible(&sysp.sem)) {
+	if (down_interruptible(&sysp.sem))
 		return -ERESTARTSYS;
-	}
 	DPRINTK("syspanic closed\n");
 	/* Clears open flag */
 	sysp.openFlag = 0;
@@ -342,10 +314,10 @@ static int syspanicRelease(struct inode *inode, struct file *filp)
 
 static void syspTimeout(unsigned long ptr)
 {
-	if (atomic_read(&sysp.state) == SYSP_WAIT
-	    || atomic_read(&sysp.state) == SYSP_CLEAR) {
+	if (atomic_read(&sysp.state) == SYSP_WAIT || atomic_read(&sysp.state)
+			== SYSP_CLEAR) {
 		atomic_set(&sysp.state, SYSP_MEMORY_PANIC);
-		disable_irq(88);
+		disable_irq(SYSPANIC_IRQ);
 		DPRINTK("Syspanic Memory Panic\n");
 		/* wake up panic daemon */
 		wake_up_interruptible(&sysp.waitQueue);
@@ -355,13 +327,13 @@ static void syspTimeout(unsigned long ptr)
 static irqreturn_t irqHandler(int irq, void *data)
 {
 #ifdef CONFIG_HAS_WAKELOCK
-    wake_lock(&sysp.syspanic_wake_lock);
+	wake_lock(&sysp.syspanic_wake_lock);
 #endif
 
 	switch (atomic_read(&sysp.state)) {
 	case SYSP_IDLE:
 		atomic_set(&sysp.state, SYSP_WAIT);
-		sysp.timerList.expires = jiffies + (HZ / 10);	// timeout 100ms
+		sysp.timerList.expires = jiffies + (HZ / 10); /*timeout 100ms*/
 		add_timer(&sysp.timerList);
 		DPRINTK("Syspanic first irq Panic\n");
 		udelay(1000);
@@ -373,14 +345,14 @@ static irqreturn_t irqHandler(int irq, void *data)
 	case SYSP_CLEAR:
 		atomic_set(&sysp.state, SYSP_PANIC);
 		del_timer(&sysp.timerList);
-		disable_irq(88);
+		disable_irq_nosync(SYSPANIC_IRQ);
 		/* wake up panic daemon */
 		DPRINTK("Syspanic Standard BP Panic\n");
 		wake_up_interruptible(&sysp.waitQueue);
 		break;
 	default:
 		/* irq should be disabled */
-		disable_irq(88);
+		disable_irq_nosync(SYSPANIC_IRQ);
 		break;
 	}
 	return IRQ_HANDLED;
@@ -406,25 +378,25 @@ static unsigned int syspanicPoll(struct file *filp, poll_table * wait)
 static int syspanicRequestIRQ(void)
 {
 	int retval;
-	retval =
-	    request_irq(88, irqHandler, IRQF_DISABLED, SYSPANIC_ID, NULL);
+	retval = request_irq(SYSPANIC_IRQ, irqHandler,
+			IRQF_DISABLED, SYSPANIC_ID,	NULL);
 	if (retval < 0) {
-		printk("\nCan't get SysPanic IRQ\n");
+		printk(KERN_ERR "\nCan't get SysPanic IRQ\n");
 		return retval;
 	}
-	enable_irq_wake(88);
+	enable_irq_wake(SYSPANIC_IRQ);
 	return 0;
 }
 
 static void syspanicFreeIRQ(void)
 {
-	free_irq(88, NULL);
+	free_irq(SYSPANIC_IRQ, NULL);
 	return;
 }
 
 module_init(syspanicInit);
 module_exit(syspanicExit);
 
-MODULE_AUTHOR("Falempe Jocelyn");
+MODULE_AUTHOR("Motorola MDB");
 MODULE_DESCRIPTION("Syspanic Driver");
 MODULE_LICENSE("GPL");

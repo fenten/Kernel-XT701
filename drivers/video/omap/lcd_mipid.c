@@ -22,11 +22,10 @@
 #include <linux/delay.h>
 #include <linux/workqueue.h>
 #include <linux/spi/spi.h>
-#include <linux/omapfb.h>
 
-#include <mach/lcd_mipid.h>
+#include <plat/lcd_mipid.h>
 
-#include "../../cbus/tahvo.h"
+#include "omapfb.h"
 
 #define MIPID_MODULE_NAME		"lcd_mipid"
 
@@ -41,18 +40,13 @@
 #define MIPID_CMD_DISP_OFF		0x28
 #define MIPID_CMD_DISP_ON		0x29
 
-#define MIPID_VER_LPH8923		3
-#define MIPID_VER_LS041Y3		4
-
 #define MIPID_ESD_CHECK_PERIOD		msecs_to_jiffies(5000)
 
 #define to_mipid_device(p)		container_of(p, struct mipid_device, \
 						panel)
 struct mipid_device {
 	int		enabled;
-	int		model;
 	int		revision;
-	u8		display_id[3];
 	unsigned int	saved_bklight_level;
 	unsigned long	hw_guard_end;		/* next value of jiffies
 						   when we can issue the
@@ -85,16 +79,16 @@ static void mipid_transfer(struct mipid_device *md, int cmd, const u8 *wbuf,
 	x = &xfer[0];
 
 	cmd &=  0xff;
-	x->tx_buf	= &cmd;
-	x->bits_per_word= 9;
-	x->len		= 2;
+	x->tx_buf		= &cmd;
+	x->bits_per_word	= 9;
+	x->len			= 2;
 	spi_message_add_tail(x, &m);
 
 	if (wlen) {
 		x++;
-		x->tx_buf	= wbuf;
-		x->len		= wlen;
-		x->bits_per_word= 9;
+		x->tx_buf		= wbuf;
+		x->len			= wlen;
+		x->bits_per_word	= 9;
 		spi_message_add_tail(x, &m);
 	}
 
@@ -200,7 +194,8 @@ static void set_sleep_mode(struct mipid_device *md, int on)
 	 * When we enable the panel, it seems we _have_ to sleep
 	 * 120 ms before sending the init string. When disabling the
 	 * panel we'll sleep for the duration of 2 frames, so that the
-	 * controller can still provide the PCLK,HS,VS signals. */
+	 * controller can still provide the PCLK,HS,VS signals.
+	 */
 	if (!on)
 		sleep_time = 120;
 	msleep(sleep_time);
@@ -216,28 +211,41 @@ static void set_display_state(struct mipid_device *md, int enabled)
 static int mipid_set_bklight_level(struct lcd_panel *panel, unsigned int level)
 {
 	struct mipid_device *md = to_mipid_device(panel);
+	struct mipid_platform_data *pd = md->spi->dev.platform_data;
 
-	if (level > tahvo_get_max_backlight_level())
+	if (pd->get_bklight_max == NULL || pd->set_bklight_level == NULL)
+		return -ENODEV;
+	if (level > pd->get_bklight_max(pd))
 		return -EINVAL;
 	if (!md->enabled) {
 		md->saved_bklight_level = level;
 		return 0;
 	}
-	tahvo_set_backlight_level(level);
+	pd->set_bklight_level(pd, level);
 
 	return 0;
 }
 
 static unsigned int mipid_get_bklight_level(struct lcd_panel *panel)
 {
-	return tahvo_get_backlight_level();
+	struct mipid_device *md = to_mipid_device(panel);
+	struct mipid_platform_data *pd = md->spi->dev.platform_data;
+
+	if (pd->get_bklight_level == NULL)
+		return -ENODEV;
+	return pd->get_bklight_level(pd);
 }
 
 static unsigned int mipid_get_bklight_max(struct lcd_panel *panel)
 {
-	return tahvo_get_max_backlight_level();
-}
+	struct mipid_device *md = to_mipid_device(panel);
+	struct mipid_platform_data *pd = md->spi->dev.platform_data;
 
+	if (pd->get_bklight_max == NULL)
+		return -ENODEV;
+
+	return pd->get_bklight_max(pd);
+}
 
 static unsigned long mipid_get_caps(struct lcd_panel *panel)
 {
@@ -265,6 +273,7 @@ static u16 read_first_pixel(struct mipid_device *md)
 			(blue >> 3);
 		break;
 	default:
+		pixel = 0;
 		BUG();
 	}
 
@@ -391,7 +400,8 @@ static void mipid_esd_stop_check(struct mipid_device *md)
 
 static void mipid_esd_work(struct work_struct *work)
 {
-	struct mipid_device *md = container_of(work, struct mipid_device, esd_work.work);
+	struct mipid_device *md = container_of(work, struct mipid_device,
+					       esd_work.work);
 
 	mutex_lock(&md->mutex);
 	md->esd_check(md);
@@ -505,20 +515,21 @@ static struct lcd_panel mipid_panel = {
 	.vfp		= 1,
 	.vbp		= 3,
 
-	.init		= mipid_init,
-	.cleanup	= mipid_cleanup,
-	.enable		= mipid_enable,
-	.disable	= mipid_disable,
-	.get_caps	= mipid_get_caps,
-	.set_bklight_level= mipid_set_bklight_level,
-	.get_bklight_level= mipid_get_bklight_level,
-	.get_bklight_max= mipid_get_bklight_max,
-	.run_test	= mipid_run_test,
+	.init			= mipid_init,
+	.cleanup		= mipid_cleanup,
+	.enable			= mipid_enable,
+	.disable		= mipid_disable,
+	.get_caps		= mipid_get_caps,
+	.set_bklight_level	= mipid_set_bklight_level,
+	.get_bklight_level	= mipid_get_bklight_level,
+	.get_bklight_max	= mipid_get_bklight_max,
+	.run_test		= mipid_run_test,
 };
 
 static int mipid_detect(struct mipid_device *md)
 {
 	struct mipid_platform_data *pdata;
+	u8 display_id[3];
 
 	pdata = md->spi->dev.platform_data;
 	if (pdata == NULL) {
@@ -526,17 +537,15 @@ static int mipid_detect(struct mipid_device *md)
 		return -ENOENT;
 	}
 
-	mipid_read(md, MIPID_CMD_READ_DISP_ID, md->display_id, 3);
+	mipid_read(md, MIPID_CMD_READ_DISP_ID, display_id, 3);
 	dev_dbg(&md->spi->dev, "MIPI display ID: %02x%02x%02x\n",
-		md->display_id[0], md->display_id[1], md->display_id[2]);
+		display_id[0], display_id[1], display_id[2]);
 
-	switch (md->display_id[0]) {
+	switch (display_id[0]) {
 	case 0x45:
-		md->model = MIPID_VER_LPH8923;
 		md->panel.name = "lph8923";
 		break;
 	case 0x83:
-		md->model = MIPID_VER_LS041Y3;
 		md->panel.name = "ls041y3";
 		md->esd_check = ls041y3_esd_check;
 		break;
@@ -546,10 +555,10 @@ static int mipid_detect(struct mipid_device *md)
 		return -ENODEV;
 	}
 
-	md->revision = md->display_id[1];
+	md->revision = display_id[1];
 	md->panel.data_lines = pdata->data_lines;
-	pr_info("omapfb: %s rev %02x LCD detected\n",
-			md->panel.name, md->revision);
+	pr_info("omapfb: %s rev %02x LCD detected, %d data lines\n",
+			md->panel.name, md->revision, md->panel.data_lines);
 
 	return 0;
 }

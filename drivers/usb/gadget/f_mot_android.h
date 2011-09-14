@@ -28,5 +28,6 @@
 void usb_interface_enum_cb(int flag);
 void usb_data_transfer_callback(void);
 void mode_switch_cb(int mode);
+void adb_mode_change_cb(void);
 
 #endif /* __F_MOT_ANDROID_H */

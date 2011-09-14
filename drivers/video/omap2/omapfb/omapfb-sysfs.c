@@ -29,8 +29,8 @@
 #include <linux/mm.h>
 #include <linux/omapfb.h>
 
-#include <mach/display.h>
-#include <mach/vrfb.h>
+#include <plat/display.h>
+#include <plat/vrfb.h>
 
 #include "omapfb.h"
 
@@ -463,15 +463,9 @@ static struct device_attribute omapfb_attrs[] = {
 			store_rotate_type),
 	__ATTR(mirror, S_IRUGO | S_IWUSR, show_mirror, store_mirror),
 	__ATTR(size, S_IRUGO | S_IWUSR, show_size, store_size),
-#ifdef CONFIG_PANEL_HDTV /* charlotte change permission S_IRUGO->S_IRWXUGO */
-	__ATTR(overlays, S_IRWXUGO | S_IWUSR, show_overlays, store_overlays),
-	__ATTR(overlays_rotate, S_IRWXUGO | S_IWUSR, show_overlays_rotate,
-			store_overlays_rotate),
-#else
 	__ATTR(overlays, S_IRUGO | S_IWUSR, show_overlays, store_overlays),
 	__ATTR(overlays_rotate, S_IRUGO | S_IWUSR, show_overlays_rotate,
 			store_overlays_rotate),
-#endif
 	__ATTR(phys_addr, S_IRUGO, show_phys, NULL),
 	__ATTR(virt_addr, S_IRUGO, show_virt, NULL),
 };

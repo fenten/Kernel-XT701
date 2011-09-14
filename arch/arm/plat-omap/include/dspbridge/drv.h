@@ -173,30 +173,28 @@ struct PROCESS_CONTEXT{
 	/* Process State */
 	enum GPP_PROC_RES_STATE resState;
 
-	/* Process ID (Same as UNIX process ID) */
-	u32 pid;
-
-	/* Reference to the task struct associated with this context */
-	struct task_struct *task;
-
-	/* Pointer to next process context
-	* (To maintain a linked list of process contexts) */
-	struct PROCESS_CONTEXT *next;
-
-	/* Processor info to which the process is related */
+	/* Handle to Processor */
 	DSP_HPROCESSOR hProcessor;
 
 	/* DSP Node resources */
 	struct NODE_RES_OBJECT *pNodeList;
+	struct mutex node_lock;
 
 	/* DMM resources */
 	struct DMM_RES_OBJECT *pDMMList;
+	struct mutex dmm_lock;
 
 	/* DSP Heap resources */
 	struct DSPHEAP_RES_OBJECT *pDSPHEAPList;
 
 	/* Stream resources */
 	struct STRM_RES_OBJECT *pSTRMList;
+	struct mutex strm_lock;
+
+#ifdef CONFIG_BRIDGE_RECOVERY
+	struct task_struct *task;
+	struct list_head list;
+#endif
 } ;
 #endif
 
@@ -435,18 +433,5 @@ struct PROCESS_CONTEXT{
  */
 	extern DSP_STATUS DRV_ReleaseResources(IN u32 dwContext,
 					       struct DRV_OBJECT *hDrvObject);
-
-/*
- *  ======== DRV_ProcFreeDMMRes ========
- *  Purpose:
- *       Actual DMM De-Allocation.
- *  Parameters:
- *      hPCtxt:      Path to the driver Registry Key.
- *  Returns:
- *      DSP_SOK if success;
- */
-
-
-	extern DSP_STATUS  DRV_ProcFreeDMMRes(HANDLE hPCtxt);
 
 #endif				/* DRV_ */

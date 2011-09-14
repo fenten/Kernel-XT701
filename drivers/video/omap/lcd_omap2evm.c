@@ -25,10 +25,11 @@
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
 #include <linux/i2c/twl4030.h>
-#include <linux/omapfb.h>
 
-#include <mach/mux.h>
+#include <plat/mux.h>
 #include <asm/mach-types.h>
+
+#include "omapfb.h"
 
 #define LCD_PANEL_ENABLE_GPIO	154
 #define LCD_PANEL_LR		128
@@ -36,10 +37,6 @@
 #define LCD_PANEL_INI		152
 #define LCD_PANEL_QVGA		148
 #define LCD_PANEL_RESB		153
-
-#define LCD_XRES		480
-#define LCD_YRES		640
-#define LCD_PIXCLOCK_MAX	20000 /* in kHz */
 
 #define TWL_LED_LEDEN		0x00
 #define TWL_PWMA_PWMAON		0x00
@@ -74,6 +71,12 @@ static int omap2evm_panel_init(struct lcd_panel *panel,
 
 static void omap2evm_panel_cleanup(struct lcd_panel *panel)
 {
+	gpio_free(LCD_PANEL_RESB);
+	gpio_free(LCD_PANEL_QVGA);
+	gpio_free(LCD_PANEL_INI);
+	gpio_free(LCD_PANEL_UD);
+	gpio_free(LCD_PANEL_LR);
+	gpio_free(LCD_PANEL_ENABLE_GPIO);
 }
 
 static int omap2evm_panel_enable(struct lcd_panel *panel)
@@ -121,8 +124,8 @@ struct lcd_panel omap2evm_panel = {
 
 	.bpp		= 16,
 	.data_lines	= 18,
-	.x_res		= LCD_XRES,
-	.y_res		= LCD_YRES,
+	.x_res		= 480,
+	.y_res		= 640,
 	.hsw		= 3,
 	.hfp		= 0,
 	.hbp		= 28,
@@ -130,7 +133,7 @@ struct lcd_panel omap2evm_panel = {
 	.vfp		= 1,
 	.vbp		= 0,
 
-	.pixel_clock	= LCD_PIXCLOCK_MAX,
+	.pixel_clock	= 20000,
 
 	.init		= omap2evm_panel_init,
 	.cleanup	= omap2evm_panel_cleanup,

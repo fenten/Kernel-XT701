@@ -22,14 +22,16 @@
 #include <linux/io.h>
 #include <linux/kernel.h>
 
-#include <mach/hardware.h>
+#include <plat/hardware.h>
+#include <plat/board-mapphone-padconf.h>
 #ifdef CONFIG_ARM_OF
 #include <mach/dt_path.h>
 #include <asm/prom.h>
 #endif
 #ifdef CONFIG_EMU_UART_DEBUG
-#include <mach/board-mapphone-emu_uart.h>
+#include <plat/board-mapphone-emu_uart.h>
 #endif
+#include <asm/bootinfo.h>
 
 struct iomux_range {
 	unsigned int start;
@@ -41,7 +43,8 @@ static struct iomux_range iomux_range_base[] = {
 	{OMAP343X_PADCONF_CORE_ETK_BASE, OMAP343X_PADCONF_CORE_ETK_TOP},
 	{OMAP343X_PADCONF_CORE_D2D_BASE, OMAP343X_PADCONF_CORE_D2D_TOP},
 	{OMAP343X_PADCONF_WKUP_BASE, OMAP343X_PADCONF_WKUP_TOP},
-	{OMAP343X_PADCONF_WKUP_D2D_BASE, OMAP343X_PADCONF_WKUP_D2D_TOP}
+	{OMAP343X_PADCONF_WKUP_D2D_BASE, OMAP343X_PADCONF_WKUP_D2D_TOP},
+	{OMAP343X_PADCONF_3630_GPIO_BASE, OMAP343X_PADCONF_3630_GPIO_TOP}
 };
 
 inline bool is_omap343x_padconf_register(uint16_t offset)
@@ -1686,7 +1689,28 @@ static __initdata struct {
 	0x0A4E, OMAP343X_PADCONF_MUXMODE0},
 	    /* JTAG_TDO */
 	{
-	0x0A50, OMAP343X_PADCONF_MUXMODE0},};
+	0x0A50, OMAP343X_PADCONF_MUXMODE0},
+	    /* SIM_CLK */
+	{
+	0x0A54, OMAP343X_PADCONF_MUXMODE0},
+	    /* SIM_IO */
+	{
+	0x0A56,
+		    OMAP343X_PADCONF_INPUT_ENABLED |
+		    OMAP343X_PADCONF_PULL_UP |
+		    OMAP343X_PADCONF_PUD_ENABLED | OMAP343X_PADCONF_MUXMODE0},
+	    /* SIM_PWRCTRL */
+	{
+	0x0A58,
+		    OMAP343X_PADCONF_INPUT_ENABLED |
+		    OMAP343X_PADCONF_PULL_UP |
+		    OMAP343X_PADCONF_PUD_ENABLED | OMAP343X_PADCONF_MUXMODE0},
+	    /* SIM_RST */
+	{
+	0x0A5A,
+		    OMAP343X_PADCONF_INPUT_ENABLED |
+		    OMAP343X_PADCONF_PULL_UP |
+		    OMAP343X_PADCONF_PUD_ENABLED | OMAP343X_PADCONF_MUXMODE0},};
 
 #ifdef CONFIG_ARM_OF
 static void __init mux_pad_callback(const void *p_data)
@@ -1701,7 +1725,6 @@ static void __init mux_pad_callback(const void *p_data)
 			padconf_settings[i].setting |=
 			    (MAKE_OMAP343X_PAD_VALUE
 			     (p->mode, p->input_en, p->pull_type));
-
 			return;
 		}
 	}
@@ -1761,6 +1784,17 @@ void dt_prop_or_init(struct dt_operation *op)
 	printk(KERN_INFO "Device tree prop %s override done\n", op->prop);
 }
 
+
+// by Steve Kim (w21521) only support MS1 Froyo product
+// MS1 froyo should not be changed device tree hence I added this function to meet Stable-2 dev branch
+void dt_prop_or_init_except(struct dt_operation *op)
+{
+  struct mux_conf_entry p_data[] = {{0x264, 7,  1,    1}};
+  (*op->callback) (p_data);
+  printk(KERN_INFO "Steve : dt_prop_or_init_except \n");
+}
+
+
 void __init mux_setting_init(void)
 {
 	struct dt_operation op;
@@ -1772,6 +1806,7 @@ void __init mux_setting_init(void)
 	op.callback = mux_pad_callback;
 	op.name_size = 2;
 	dt_prop_or_init(&op);
+	dt_prop_or_init_except(&op); // by Steve Kim (w21521) to support MS1 Froyo
 
 	/* Read and implement MUX pad setting for pad wakeups registers */
 	op.path = DT_PATH_MUX;
@@ -1799,6 +1834,20 @@ void __init mux_setting_init(void)
 }
 #endif
 
+/* 	touch_int_fix: prevent spurious touch interrupt in charging mode
+	by turning on pullup resistor on CAM_D10
+ */
+void touch_int_fix(void)
+{
+	int i;
+
+	if (bi_powerup_reason() == PU_REASON_CHARGER)
+		for (i = 0; i < ARRAY_SIZE(padconf_settings); i++)
+			if (padconf_settings[i].offset == 0x012A)
+				padconf_settings[i].setting |= OMAP343X_PADCONF_PULL_UP |
+					OMAP343X_PADCONF_PUD_ENABLED;
+}
+
 void __init mapphone_padconf_init(void)
 {
 	int i;
@@ -1807,10 +1856,14 @@ void __init mapphone_padconf_init(void)
 	mux_setting_init();
 #endif
 
+	touch_int_fix();
+
 	for (i = 0; i < ARRAY_SIZE(padconf_settings); i++) {
 		if (is_omap343x_padconf_register(padconf_settings[i].offset)) {
 			unsigned long addr = padconf_settings[i].offset
 			    + OMAP343X_CTRL_BASE;
+
+
 			/*
 			   despite the w, omap_readw actual reads a short which
 			   is a half word on this architecture
@@ -1825,6 +1878,30 @@ void __init mapphone_padconf_init(void)
 #endif
 			val &= ~(OMAP343X_PADCONF_SETTING_MASK);
 			val |= padconf_settings[i].setting;
+
+			/* Errata i548: Safe mode does not work on GPMC_A11 pad.
+			 * Revisions impacted: OMAP3630 ES1.0 only. */
+			if ((padconf_settings[i].offset == 0x266) &&
+				(omap_rev() != OMAP3630_REV_ES1_0))
+				continue;
+
+			/* the SIM mux settings are for OMAP3430 */
+			if ((padconf_settings[i].offset == 0x150) ||
+				(padconf_settings[i].offset == 0x152) ||
+				(padconf_settings[i].offset == 0x154) ||
+				(padconf_settings[i].offset == 0x156))	{
+					if (cpu_is_omap3630())
+						continue;
+			}
+
+			/* the SIM mux settings are for OMAP3630 */
+			if ((padconf_settings[i].offset == 0xa54) ||
+				(padconf_settings[i].offset == 0xa56) ||
+				(padconf_settings[i].offset == 0xa58) ||
+				(padconf_settings[i].offset == 0xa5a))	{
+					if (cpu_is_omap3430())
+						continue;
+			}
 
 			omap_writew(val, addr);
 		} else {

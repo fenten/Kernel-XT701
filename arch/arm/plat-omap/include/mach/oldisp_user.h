@@ -45,13 +45,6 @@
    _IOWR('V', BASE_VIDIOC_PRIVATE + 12, struct isprsz_coef)
 #define VIDIOC_PRIVATE_ISP_RSZ_CFG \
    _IOWR('V', BASE_VIDIOC_PRIVATE + 13, struct isprsz_coef)
-#define VIDIOC_PRIVATE_ISP_HARDPIPE_CLEAR \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 14, struct ispprv_run_hardpipe)
-#define VIDIOC_PRIVATE_ISP_CCDC_BAYER_CFG \
-   _IOWR('V', BASE_VIDIOC_PRIVATE + 15, struct ispccdc_color_offset)
-#define VIDIOC_PRIVATE_ISP_LSC_WORKAROUND_CFG \
-   _IOW('V', BASE_VIDIOC_PRIVATE + 16, int)
-
 
 /* AE/AWB related structures and flags*/
 
@@ -706,8 +699,5 @@ struct ispprv_run_hardpipe {
 	__u32 crop_height;
 };
 
-struct ispccdc_color_offset{
-	__u16 offsetcode;
-};
 
 #endif /* OMAP_ISP_USER_H */

@@ -6,6 +6,9 @@
  * Copyright (C) 2005 Nokia Corporation
  * Written by Tony Lindgren <tony@atomide.com>
  *
+ * Copyright (C) 2009 Texas Instruments
+ * Added OMAP4 support - Santosh Shilimkar <santosh.shilimkar@ti.com>
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
@@ -18,19 +21,27 @@
 
 #include <asm/cputype.h>
 
-#include <mach/common.h>
-#include <mach/control.h>
-#include <mach/cpu.h>
+#include <plat/common.h>
+#include <plat/control.h>
+#include <plat/cpu.h>
 
 static struct omap_chip_id omap_chip;
-static unsigned int omap_revision;
 
+static unsigned int omap_revision, omap_revision_id;
+static char *rev_name = "ES1.0                         ";
+u32 omap3_features;
 
 unsigned int omap_rev(void)
 {
 	return omap_revision;
 }
 EXPORT_SYMBOL(omap_rev);
+
+unsigned int omap_rev_id(void)
+{
+	return omap_revision_id;
+}
+EXPORT_SYMBOL(omap_rev_id);
 
 /**
  * omap_chip_is - test whether currently running OMAP matches a chip type
@@ -152,12 +163,37 @@ void __init omap24xx_check_revision(void)
 	pr_info("\n");
 }
 
-void __init omap34xx_check_revision(void)
+#define OMAP3_CHECK_FEATURE(status,feat)				\
+	if (((status & OMAP3_ ##feat## _MASK) 				\
+		>> OMAP3_ ##feat## _SHIFT) != FEAT_ ##feat## _NONE) { 	\
+		omap3_features |= OMAP3_HAS_ ##feat;			\
+	}
+
+void __init omap3_check_features(void)
+{
+	u32 status;
+
+	omap3_features = 0;
+
+	status = omap_ctrl_readl(OMAP3_CONTROL_OMAP_STATUS);
+
+	OMAP3_CHECK_FEATURE(status, L2CACHE);
+	OMAP3_CHECK_FEATURE(status, IVA);
+	OMAP3_CHECK_FEATURE(status, SGX);
+	OMAP3_CHECK_FEATURE(status, NEON);
+	OMAP3_CHECK_FEATURE(status, ISP);
+
+	/*
+	 * TODO: Get additional info (where applicable)
+	 *       e.g. Size of L2 cache.
+	 */
+}
+
+void __init omap3_check_revision(void)
 {
 	u32 cpuid, idcode;
 	u16 hawkeye;
 	u8 rev;
-	char *rev_name = "ES1.0";
 
 	/*
 	 * We cannot access revision registers on ES1.0.
@@ -167,7 +203,7 @@ void __init omap34xx_check_revision(void)
 	cpuid = read_cpuid(CPUID_ID);
 	if ((((cpuid >> 4) & 0xfff) == 0xc08) && ((cpuid & 0xf) == 0x0)) {
 		omap_revision = OMAP3430_REV_ES1_0;
-		goto out;
+		return;
 	}
 
 	/*
@@ -180,33 +216,129 @@ void __init omap34xx_check_revision(void)
 	hawkeye = (idcode >> 12) & 0xffff;
 	rev = (idcode >> 28) & 0xff;
 
-	if (hawkeye == 0xb7ae) {
+	switch (hawkeye) {
+	case 0xb7ae:
+		/* Handle 34xx/35xx devices */
 		switch (rev) {
-		case 0:
+		case 0: /* Take care of early samples */
+		case 1:
 			omap_revision = OMAP3430_REV_ES2_0;
-			rev_name = "ES2.0";
 			break;
 		case 2:
 			omap_revision = OMAP3430_REV_ES2_1;
-			rev_name = "ES2.1";
 			break;
 		case 3:
 			omap_revision = OMAP3430_REV_ES3_0;
-			rev_name = "ES3.0";
 			break;
 		case 4:
-			omap_revision = OMAP3430_REV_ES3_1;
-			rev_name = "ES3.1";
-			break;
+		/* FALLTHROUGH */
 		default:
 			/* Use the latest known revision as default */
 			omap_revision = OMAP3430_REV_ES3_1;
-			rev_name = "Unknown revision\n";
 		}
+		break;
+	case 0xb868:
+		/* Handle OMAP35xx/AM35xx devices
+		 *
+		 * Set the device to be OMAP3505 here. Actual device
+		 * is identified later based on the features.
+		 */
+		omap_revision = OMAP3505_REV(rev);
+		break;
+	case 0xb891:
+		/* Handle 36xx devices */
+		switch (rev) {
+		case 0:
+			omap_revision = OMAP3630_REV_ES1_0;
+			rev_name = "ES1.0";
+			break;
+		case 1:
+			omap_revision = OMAP3630_REV_ES1_1;
+			rev_name = "ES1.1";
+			break;
+		default:
+			/* Use the latest known revision as default */
+			omap_revision = OMAP3630_REV_ES1_0;
+		}
+		break;
+	default:
+		/* Unknown default to latest silicon rev as default*/
+		omap_revision = OMAP3630_REV_ES1_0;
+	}
+}
+
+#define OMAP3_SHOW_FEATURE(feat)		\
+	if (omap3_has_ ##feat())		\
+		printk(#feat" ");
+
+void __init omap3_cpuinfo(void)
+{
+	u8 rev = GET_OMAP_REVISION();
+	char cpu_name[16], cpu_rev[16];
+
+	/* OMAP3430 and OMAP3530 are assumed to be same.
+	 *
+	 * OMAP3525, OMAP3515 and OMAP3503 can be detected only based
+	 * on available features. Upon detection, update the CPU id
+	 * and CPU class bits.
+	 */
+	if (cpu_is_omap3630()) {
+		strcpy(cpu_name, "OMAP3630");
+	} else if (cpu_is_omap3505()) {
+		/*
+		 * AM35xx devices
+		 */
+		if (omap3_has_sgx()) {
+			omap_revision = OMAP3517_REV(rev);
+			strcpy(cpu_name, "AM3517");
+		} else {
+			/* Already set in omap3_check_revision() */
+			strcpy(cpu_name, "AM3505");
+		}
+	} else if (omap3_has_iva() && omap3_has_sgx()) {
+		/* OMAP3430, OMAP3525, OMAP3515, OMAP3503 devices */
+		strcpy(cpu_name, "OMAP3430/3530");
+	} else if (omap3_has_iva()) {
+		omap_revision = OMAP3525_REV(rev);
+		strcpy(cpu_name, "OMAP3525");
+	} else if (omap3_has_sgx()) {
+		omap_revision = OMAP3515_REV(rev);
+		strcpy(cpu_name, "OMAP3515");
+	} else {
+		omap_revision = OMAP3503_REV(rev);
+		strcpy(cpu_name, "OMAP3503");
 	}
 
-out:
-	pr_info("OMAP%04x %s\n", omap_rev() >> 16, rev_name);
+	switch (rev) {
+	case OMAP_REVBITS_00:
+		strcpy(cpu_rev, "1.0");
+		break;
+	case OMAP_REVBITS_10:
+		strcpy(cpu_rev, "2.0");
+		break;
+	case OMAP_REVBITS_20:
+		strcpy(cpu_rev, "2.1");
+		break;
+	case OMAP_REVBITS_30:
+		strcpy(cpu_rev, "3.0");
+		break;
+	case OMAP_REVBITS_40:
+	/* FALLTHROUGH */
+	default:
+		/* Use the latest known revision as default */
+		strcpy(cpu_rev, "3.1");
+	}
+
+	/* Print verbose information */
+	pr_info("%s ES%s (", cpu_name, cpu_rev);
+
+	OMAP3_SHOW_FEATURE(l2cache);
+	OMAP3_SHOW_FEATURE(iva);
+	OMAP3_SHOW_FEATURE(sgx);
+	OMAP3_SHOW_FEATURE(neon);
+	OMAP3_SHOW_FEATURE(isp);
+
+	printk(")\n");
 }
 
 /*
@@ -218,12 +350,18 @@ void __init omap2_check_revision(void)
 	 * At this point we have an idea about the processor revision set
 	 * earlier with omap2_set_globals_tap().
 	 */
-	if (cpu_is_omap24xx())
+	if (cpu_is_omap24xx()) {
 		omap24xx_check_revision();
-	else if (cpu_is_omap34xx())
-		omap34xx_check_revision();
-	else
+	} else if (cpu_is_omap34xx()) {
+		omap3_check_revision();
+		omap3_check_features();
+		omap3_cpuinfo();
+	} else if (cpu_is_omap44xx()) {
+		printk(KERN_INFO "FIXME: CPU revision = OMAP4430\n");
+		return;
+	} else {
 		pr_err("OMAP revision unknown, please fix!\n");
+	}
 
 	/*
 	 * OK, now we know the exact revision. Initialize omap_chip bits
@@ -235,6 +373,8 @@ void __init omap2_check_revision(void)
 	} else if (cpu_is_omap242x()) {
 		/* Currently only supports 2420ES2.1.1 and 2420-all */
 		omap_chip.oc |= CHIP_IS_OMAP2420;
+	} else if (cpu_is_omap3505() || cpu_is_omap3517()) {
+		omap_chip.oc = CHIP_IS_OMAP3430 | CHIP_IS_OMAP3430ES3_1;
 	} else if (cpu_is_omap343x()) {
 		omap_chip.oc = CHIP_IS_OMAP3430;
 		if (omap_rev() == OMAP3430_REV_ES1_0)
@@ -246,6 +386,10 @@ void __init omap2_check_revision(void)
 			omap_chip.oc |= CHIP_IS_OMAP3430ES3_0;
 		else if (omap_rev() == OMAP3430_REV_ES3_1)
 			omap_chip.oc |= CHIP_IS_OMAP3430ES3_1;
+		else if (omap_rev() == OMAP3630_REV_ES1_0)
+			omap_chip.oc |= CHIP_IS_OMAP3630ES1;
+		else if (omap_rev() == OMAP3630_REV_ES1_1)
+			omap_chip.oc |= CHIP_IS_OMAP3630ES1;
 	} else {
 		pr_err("Uninitialized omap_chip, please fix!\n");
 	}
@@ -268,3 +412,58 @@ void __init omap2_set_globals_tap(struct omap_globals *omap2_globals)
 	else
 		tap_prod_id = 0x0208;
 }
+
+/*
+ * Get OMAP chip version details from bootargs
+ */
+int  omap34xx_get_omap_version(char *str)
+{
+	unsigned int rev_id;
+	if (get_option(&str, &rev_id) == 1) {
+		switch (rev_id) {
+		case 3420:
+			omap_revision_id = OMAP_3420;
+			omap_revision = OMAP3430_REV_ES3_1;
+			omap_chip.oc |= CHIP_IS_OMAP3430ES3_1;
+			rev_name = "ES3.1";
+			break;
+		case 3430:
+			omap_revision_id = OMAP_3430;
+			omap_revision = OMAP3430_REV_ES3_1;
+			omap_chip.oc |= CHIP_IS_OMAP3430ES3_1;
+			rev_name = "ES3.1";
+			break;
+		case 3440:
+			omap_revision_id = OMAP_3440;
+			omap_revision = OMAP3430_REV_ES3_1_1;
+			omap_chip.oc |= CHIP_IS_OMAP3430ES3_1_1;
+			rev_name = "ES3.1.1";
+			break;
+		case 3630:
+			omap_revision_id = OMAP_3630;
+			omap_chip.oc |= CHIP_IS_OMAP3630ES1;
+			omap_revision = OMAP3630_REV_ES1_0;
+			break;
+		case 3630800:
+			omap_revision_id = OMAP_3630_800;
+			omap_chip.oc |= CHIP_IS_OMAP3630ES1;
+			omap_revision = OMAP3630_REV_ES1_0;
+			break;
+		case 36301000:
+			omap_revision_id = OMAP_3630_1000;
+			omap_chip.oc |= CHIP_IS_OMAP3630ES1;
+			omap_revision = OMAP3630_REV_ES1_0;
+			break;
+		default:
+			pr_err("OMAP revision unknown, please fix!\n");
+			return 1;
+		}
+		pr_info("OMAP%04x %s\n", omap_rev() >> 16, rev_name);
+		pr_info("OMAP Version is OMAP%04d\n", rev_id);
+	}
+
+	return 1;
+}
+
+__setup("omap_version=", omap34xx_get_omap_version);
+

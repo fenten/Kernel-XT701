@@ -23,10 +23,11 @@
 
 #include <linux/module.h>
 #include <linux/platform_device.h>
-#include <linux/omapfb.h>
 
 #include <mach/gpio.h>
-#include <mach/mux.h>
+#include <plat/mux.h>
+
+#include "omapfb.h"
 
 /* #define USE_35INCH_LCD 1 */
 
@@ -102,7 +103,8 @@ static int apollon_panel_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static int apollon_panel_suspend(struct platform_device *pdev, pm_message_t mesg)
+static int apollon_panel_suspend(struct platform_device *pdev,
+				  pm_message_t mesg)
 {
 	return 0;
 }

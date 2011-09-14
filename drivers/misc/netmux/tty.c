@@ -1,7 +1,7 @@
 /******************************************************************************
  * NetMUX tty.c                                                               *
  *                                                                            *
- * Copyright (C) 2006-2007 Motorola, Inc.                                     *
+ * Copyright (C) 2006-2010 Motorola, Inc.                                     *
  *                                                                            *
  * Redistribution and use in source and binary forms, with or without         *
  * modification, are permitted provided that the following conditions are     *
@@ -39,6 +39,7 @@
  *                           while atomic bug                                 *
  *   2007/12/05  Motorola    change code as kernel upgrade                    *
  *   2007/10/25  Motorola    change code as kernel upgrade                    *
+ *   2010/04/28  Motorola    Format cleanup                                   *
  ******************************************************************************/
 
 /* tty.c is responsible for setting up a method of communication between the  */
@@ -64,9 +65,9 @@ static const struct tty_operations tty_ops = {
 /*
  * TTYInform is called by the mux (and sometimes the
  * config interface) to inform the interface that something
- * important has happened. The tty interface listens for 
+ * important has happened. The tty interface listens for
  * several things of importance.
- * 
+ *
  * First, it listens for config packets. If a config packet
  * is recieved it processes it and sets up the appropriate
  * channel and entries in /dev/netmux.
@@ -75,10 +76,10 @@ static const struct tty_operations tty_ops = {
  * event happens all channels are forced closed and no
  * application can perform any operation on the channel until
  * all application accessing that device perform a close().
- * 
+ *
  * Third, it waits for enable channel messages. If such a
  * message is ever received it immediately responds with a
- * failure because the direct interface does not support 
+ * failure because the direct interface does not support
  * external open requests.
  *
  * Fourth, it waits for a disable channel message. If
@@ -86,7 +87,7 @@ static const struct tty_operations tty_ops = {
  * state until all applications accessing the device recognize
  * the closure by performing a close().
  *
- * Fifth, it waits for a data message, which signifies that the 
+ * Fifth, it waits for a data message, which signifies that the
  * channel has successfuly delivered data. The tty interface
  * uses this information to wakeup any event waiting to write
  * data to the channel. Also the mux send task is scheduled if
@@ -95,7 +96,7 @@ static const struct tty_operations tty_ops = {
  * Sixth, it waits for a channel signal message. This signifies
  * a change to the modem flags and the signal will be processed
  * accordingly.
- * 
+ *
  * Seventh, it waits for a prepare to send message. If one is received
  * the tty interface will attempt to send any data contained in any
  * of the tty channel queues.
@@ -108,230 +109,299 @@ static const struct tty_operations tty_ops = {
  * param1 -- a custom pointer, in this case an INTERFACEINFORM struct
  * param2 -- a custom pointer, in this case a TTYINTERFACE struct
  */
-int32 TTYInform (void* param1, void* param2)
+int32 TTYInform(void *param1, void *param2)
 {
-    TTYINTERFACE*         ttyif;
-    struct tty_struct*    tty;
-    TTY_CHANNELDATA*      chdat;
-    CONFIGPACKET*         configpacket;
-    ENABLECHANNEL_PACKET* enablechannel;
-    CHANNELSIGNAL_PACKET* channelsignal;
-    INTERFACEINFORM*      informdata;
-    COMMBUFF*             transmit;
-    COMMBUFF*             split;
-    int32                 channel;
-    int32                 type;
-    int32                 result;
-    int16                 xormask;
-    int16                 maskbase;
-    int16                 signal_maskbase;
-    int16                 signal_xormask;
+	TTYINTERFACE *ttyif;
+	struct tty_struct *tty;
+	TTY_CHANNELDATA *chdat;
+	CONFIGPACKET *configpacket;
+	ENABLECHANNEL_PACKET *enablechannel;
+	CHANNELSIGNAL_PACKET *channelsignal;
+	INTERFACEINFORM *informdata;
+	COMMBUFF *transmit;
+	COMMBUFF *split;
+	int32 channel;
+	int32 type;
+	int32 result;
+	int16 xormask;
+	int16 maskbase;
+	int16 signal_maskbase;
+	int16 signal_xormask;
 
-    DEBUG("TTYInform(0x%p, 0x%p)\n", param1, param2);
+	DEBUG("TTYInform(0x%p, 0x%p)\n", param1, param2);
 
-    informdata = (INTERFACEINFORM*)param1;
-    ttyif      = (TTYINTERFACE*)param2;
+	informdata = (INTERFACEINFORM *) param1;
+	ttyif = (TTYINTERFACE *) param2;
 
-    switch(informdata->inform_type)
-    {
-        case INFORM_INTERFACE_CONFIGPACKET:
-        {
-            channel = ((CONFIGPACKET*)informdata->data)->channel;
+	switch (informdata->inform_type) {
+	case INFORM_INTERFACE_CONFIGPACKET:
+		{
+			channel =
+			    ((CONFIGPACKET *) informdata->data)->channel;
 
-            if(channel > ttyif->channel_max || channel < ttyif->channel_min)
-                return DEBUGERROR(ERROR_INVALIDPARAMETER);
+			if (channel > ttyif->channel_max
+			    || channel < ttyif->channel_min)
+				return DEBUGERROR(ERROR_INVALIDPARAMETER);
 
-            chdat        = &ttyif->channel_data[channel-ttyif->channel_min];
-            configpacket = (CONFIGPACKET*)informdata->data;
+			chdat =
+			    &ttyif->channel_data[channel -
+						 ttyif->channel_min];
+			configpacket = (CONFIGPACKET *) informdata->data;
 
-            chdat->commbuff         = 0;
-            chdat->client_interface = configpacket->host_interface;
-            chdat->burstsize        = configpacket->client_burstsize;
-            chdat->maxdata          = configpacket->client_maxdata;
-            chdat->host_byte_credit = configpacket->client_byte_credit;
-            chdat->host_send_credit = configpacket->client_send_credit;
-            chdat->modem_flags      = TTY_DEFAULT_MODEM_FLAGS;
-            chdat->data_amount      = 0;
-            chdat->mux_channel_queue_space = configpacket->client_maxdata;
+			chdat->commbuff = 0;
+			chdat->client_interface =
+			    configpacket->host_interface;
+			chdat->burstsize = configpacket->client_burstsize;
+			chdat->maxdata = configpacket->client_maxdata;
+			chdat->host_byte_credit =
+			    configpacket->client_byte_credit;
+			chdat->host_send_credit =
+			    configpacket->client_send_credit;
+			chdat->modem_flags = TTY_DEFAULT_MODEM_FLAGS;
+			chdat->data_amount = 0;
+			chdat->mux_channel_queue_space =
+			    configpacket->client_maxdata;
 
-            initialize_commbuff_queue(&chdat->process_queue);
+			initialize_commbuff_queue(&chdat->process_queue);
 
-            memcpy(chdat->device_file, configpacket->channel_name, PACKET_MAXNAME_LENGTH);
+			memcpy(chdat->device_file,
+			       configpacket->channel_name,
+			       PACKET_MAXNAME_LENGTH);
 
-            init_waitqueue_head(&chdat->event_wait);
-            init_waitqueue_head(&chdat->close_wait);
+			init_waitqueue_head(&chdat->event_wait);
+			init_waitqueue_head(&chdat->close_wait);
 
-            if(netmux_class)
-            {
-                if(IS_ERR(device_create(netmux_class, NULL,
-                          MKDEV(ttyif->driver.major, channel), NULL, 
-			  "%s", 
-			  chdat->device_file)))
-                    return DEBUGERROR(ERROR_OPERATIONFAILED);
-            }
-            else
-            {
-                DEBUGERROR(ERROR_INVALIDPARAMETER);
-            }
+			if (netmux_class) {
+				if (IS_ERR
+				    (device_create
+				     (netmux_class, NULL,
+				      MKDEV(ttyif->driver.major, channel),
+				      NULL, "%s", chdat->device_file)))
+					return
+					    DEBUGERROR
+					    (ERROR_OPERATIONFAILED);
+			} else {
+				DEBUGERROR(ERROR_INVALIDPARAMETER);
+			}
 
-            if(chdat->refcount == 0)
-                chdat->state = TTY_STATE_READY;
-        }break;
+			if (chdat->refcount == 0)
+				chdat->state = TTY_STATE_READY;
+		}
+		break;
 
-        case INFORM_INTERFACE_DISABLEMUX:
-        {
-            for(channel = 0; channel < ttyif->channel_max-ttyif->channel_min+1; channel++)
-            {
-                wake_up_interruptible(&ttyif->channel_data[channel].event_wait);
+	case INFORM_INTERFACE_DISABLEMUX:
+		{
+			for (channel = 0;
+			     channel <
+			     ttyif->channel_max - ttyif->channel_min + 1;
+			     channel++) {
+				wake_up_interruptible(&ttyif->
+						      channel_data
+						      [channel].
+						      event_wait);
 
-                ttyif->channel_data[channel].state = TTY_STATE_DEFAULT;
-            }
-        }break;
+				ttyif->channel_data[channel].state =
+				    TTY_STATE_DEFAULT;
+			}
+		}
+		break;
 
-        case INFORM_INTERFACE_ENABLECHANNEL:
-        {
-            enablechannel = (ENABLECHANNEL_PACKET*)informdata->data;
-            type          = strip_end(enablechannel->acktype);
+	case INFORM_INTERFACE_ENABLECHANNEL:
+		{
+			enablechannel =
+			    (ENABLECHANNEL_PACKET *) informdata->data;
+			type = strip_end(enablechannel->acktype);
 
-            if(type == COMMAND)
-            {
-                EnableChannel(
-                              client_end(FAILURE),
-                              enablechannel->channel,
-                              0,
-                              0,
-                              enablechannel->host_interface,
-                              enablechannel->client_interface,
-                              0,
-                              0,
-                              0,
-                              0,
-                              ttyif->mux
-                             );
-            }
-            else if(type == SUCCESS)
-            {
-                channel = enablechannel->channel;
-                chdat   = &ttyif->channel_data[channel-ttyif->channel_min];
+			if (type == COMMAND) {
+				EnableChannel(client_end(FAILURE),
+					      enablechannel->channel,
+					      0,
+					      0,
+					      enablechannel->
+					      host_interface,
+					      enablechannel->
+					      client_interface, 0, 0, 0, 0,
+					      ttyif->mux);
+			} else if (type == SUCCESS) {
+				channel = enablechannel->channel;
+				chdat =
+				    &ttyif->channel_data[channel -
+							 ttyif->
+							 channel_min];
 
-                chdat->refcount++;
-                chdat->state |= TTY_STATE_EVENT|TTY_STATE_EVENT_SUCCESS;
+				chdat->refcount++;
+				chdat->state |=
+				    TTY_STATE_EVENT |
+				    TTY_STATE_EVENT_SUCCESS;
 
-                wake_up_interruptible(&chdat->event_wait);
-            }
-            else if(type == FAILURE)
-            {
-                channel = enablechannel->channel;
-                chdat   = &ttyif->channel_data[channel-ttyif->channel_min];
+				wake_up_interruptible(&chdat->event_wait);
+			} else if (type == FAILURE) {
+				channel = enablechannel->channel;
+				chdat =
+				    &ttyif->channel_data[channel -
+							 ttyif->
+							 channel_min];
 
-                chdat->state |= TTY_STATE_EVENT;
+				chdat->state |= TTY_STATE_EVENT;
 
-                wake_up_interruptible(&chdat->event_wait);
-            }
-        }break;
+				wake_up_interruptible(&chdat->event_wait);
+			}
+		}
+		break;
 
-        case INFORM_INTERFACE_DISABLECHANNEL:
-        {
-            channel = ((DISABLECHANNEL_PACKET*)informdata->data)->channel;
-            chdat   = &ttyif->channel_data[channel-ttyif->channel_min];
+	case INFORM_INTERFACE_DISABLECHANNEL:
+		{
+			channel =
+			    ((DISABLECHANNEL_PACKET *) informdata->data)->
+			    channel;
+			chdat =
+			    &ttyif->channel_data[channel -
+						 ttyif->channel_min];
 
-            chdat->refcount--;
-            wake_up_interruptible(&chdat->close_wait);
-        }break;
+			chdat->refcount--;
+			wake_up_interruptible(&chdat->close_wait);
+		}
+		break;
 
-        case INFORM_INTERFACE_CHANNELSIGNAL:
-        {
-            channelsignal = (CHANNELSIGNAL_PACKET*)informdata->data;
-            channel       = channelsignal->channel;
+	case INFORM_INTERFACE_CHANNELSIGNAL:
+		{
+			channelsignal =
+			    (CHANNELSIGNAL_PACKET *) informdata->data;
+			channel = channelsignal->channel;
 
-            enter_write_criticalsection(&ttyif->lock);
+			enter_write_criticalsection(&ttyif->lock);
 
-            chdat = &ttyif->channel_data[channel-ttyif->channel_min];
-            
-            signal_maskbase = channelsignal->signal>>16;
-            signal_xormask  = channelsignal->signal&0xFFFF;
-            maskbase        = chdat->modem_flags&0xFFFF;
-            xormask         = maskbase^signal_maskbase;
-            xormask         = xormask^signal_xormask;
+			chdat =
+			    &ttyif->channel_data[channel -
+						 ttyif->channel_min];
 
-            chdat->modem_flags =  maskbase^xormask;
+			signal_maskbase = channelsignal->signal >> 16;
+			signal_xormask = channelsignal->signal & 0xFFFF;
+			maskbase = chdat->modem_flags & 0xFFFF;
+			xormask = maskbase ^ signal_maskbase;
+			xormask = xormask ^ signal_xormask;
 
-            exit_write_criticalsection(&ttyif->lock);
+			chdat->modem_flags = maskbase ^ xormask;
 
-            wake_up_interruptible(&chdat->event_wait);
-        }break;
+			exit_write_criticalsection(&ttyif->lock);
 
-        case INFORM_INTERFACE_PREPSEND:
-        {
-            for(channel = 0; channel < ttyif->channel_max - 
-                ttyif->channel_min + 1; channel++)
-            {
-                chdat = &ttyif->channel_data[channel];
-                enter_write_criticalsection(&ttyif->lock);
+			wake_up_interruptible(&chdat->event_wait);
+		}
+		break;
 
-                if(chdat->refcount && queue_length(&chdat->process_queue))
-                {
-                    do
-                    {
-                        transmit = dequeue_commbuff(&chdat->process_queue);
-			chdat->data_amount -= commbuff_length(transmit);
-			chdat->mux_channel_queue_space -= commbuff_length(transmit);
+	case INFORM_INTERFACE_PREPSEND:
+		{
+			for (channel = 0; channel < ttyif->channel_max -
+			     ttyif->channel_min + 1; channel++) {
+				chdat = &ttyif->channel_data[channel];
+				enter_write_criticalsection(&ttyif->lock);
 
-                        result = SendData(channel + ttyif->channel_min,
-                                          transmit, &split, ttyif->mux);
+				if (chdat->refcount
+				    && queue_length(&chdat->
+						    process_queue)) {
+					do {
+						transmit =
+						    dequeue_commbuff
+						    (&chdat->
+						     process_queue);
+						chdat->data_amount -=
+						    commbuff_length
+						    (transmit);
+						chdat->
+						    mux_channel_queue_space
+						    -=
+						    commbuff_length
+						    (transmit);
 
-                        if(result == ERROR_INCOMPLETE)
-                        {
-                            queuefront_commbuff(split, &chdat->process_queue);
-			    chdat->data_amount += commbuff_length(split);
-			    chdat->mux_channel_queue_space += commbuff_length(split);
-                        }
-                    } while(((result == ERROR_NONE) ||
-                            (result == ERROR_INCOMPLETE)) && 
-                            queue_length(&chdat->process_queue));
+						result =
+						    SendData(channel +
+							     ttyif->
+							     channel_min,
+							     transmit,
+							     &split,
+							     ttyif->mux);
 
-                    if((result != ERROR_NONE) && (result != ERROR_INCOMPLETE))
-                    {
-                        queuefront_commbuff(transmit, &chdat->process_queue);
-			chdat->data_amount += commbuff_length(transmit);
-			chdat->mux_channel_queue_space += commbuff_length(transmit);
-                    }
-                }
+						if (result ==
+						    ERROR_INCOMPLETE) {
+							queuefront_commbuff
+							    (split,
+							     &chdat->
+							     process_queue);
+							chdat->
+							    data_amount +=
+							    commbuff_length
+							    (split);
+							chdat->
+							mux_channel_queue_space
+							 +=
+							 commbuff_length
+							 (split);
+						}
+					} while (((result == ERROR_NONE) ||
+						  (result ==
+						   ERROR_INCOMPLETE))
+						 && queue_length(&chdat->
+							 process_queue));
 
-                exit_write_criticalsection(&ttyif->lock);
-            }
-        }break;
+					if ((result != ERROR_NONE)
+					    && (result !=
+						ERROR_INCOMPLETE)) {
+						queuefront_commbuff
+						    (transmit,
+						     &chdat->
+						     process_queue);
+						chdat->data_amount +=
+						    commbuff_length
+						    (transmit);
+						chdat->
+						    mux_channel_queue_space
+						    +=
+						    commbuff_length
+						    (transmit);
+					}
+				}
 
-        case INFORM_INTERFACE_DATA:
-        {
-            channel = (int32)(informdata->data);
+				exit_write_criticalsection(&ttyif->lock);
+			}
+		}
+		break;
 
-            result = SendDataAvailable(channel, ttyif->mux);
+	case INFORM_INTERFACE_DATA:
+		{
+			channel = (int32) (informdata->data);
 
-            enter_write_criticalsection(&ttyif->lock);
+			result = SendDataAvailable(channel, ttyif->mux);
 
-            chdat = &ttyif->channel_data[channel-ttyif->channel_min];
-            chdat->mux_channel_queue_space = result;
+			enter_write_criticalsection(&ttyif->lock);
 
-            exit_write_criticalsection(&ttyif->lock);
+			chdat =
+			    &ttyif->channel_data[channel -
+						 ttyif->channel_min];
+			chdat->mux_channel_queue_space = result;
 
-            tty     = ttyif->driver.ttys[channel - ttyif->channel_min];
-            if (tty->ldisc.ops->flags & TTY_DO_WRITE_WAKEUP)
-                tty->ldisc.ops->write_wakeup(tty);
+			exit_write_criticalsection(&ttyif->lock);
 
-            if(queue_length(&chdat->process_queue))
-                RunSend(ttyif->mux);
-        }break;
+			tty =
+			    ttyif->driver.ttys[channel -
+					       ttyif->channel_min];
+			if (tty->ldisc->ops->flags & TTY_DO_WRITE_WAKEUP)
+				tty->ldisc->ops->write_wakeup(tty);
 
-        default:break;
-    }
+			if (queue_length(&chdat->process_queue))
+				RunSend(ttyif->mux);
+		}
+		break;
 
-    return DEBUGERROR(ERROR_NONE);
+	default:
+		break;
+	}
+
+	return DEBUGERROR(ERROR_NONE);
 }
 
 /*
  * TTYReceive is called when a buffer is available for
- * delivery to an application. The tty interface will 
+ * delivery to an application. The tty interface will
  * attempt to deliver the buffer to the tty layer,
  * however, if that is not possible the interface will
  * poll and try to deliver it again later.
@@ -340,34 +410,37 @@ int32 TTYInform (void* param1, void* param2)
  * commbuff -- a pointer to the received data
  * param -- a custom pointer, in this case an INTERFACEINFORM struct
  */
-int32 TTYReceive (COMMBUFF* commbuff, void* param)
+int32 TTYReceive(COMMBUFF *commbuff, void *param)
 {
-    struct tty_struct* tty;
-    TTYINTERFACE*      ttyif;
-    INTERFACEINFORM*   inform_data;
-    int32              channel;
+	struct tty_struct *tty;
+	TTYINTERFACE *ttyif;
+	INTERFACEINFORM *inform_data;
+	int32 channel;
 
-    DEBUG("TTYReceive(0x%p, 0x%p)\n", commbuff, param);
+	DEBUG("TTYReceive(0x%p, 0x%p)\n", commbuff, param);
 
-    inform_data = (INTERFACEINFORM*)param;
-    ttyif       = (TTYINTERFACE*)inform_data->inform_type;
-    channel     = (int32)inform_data->data;
-    tty         = ttyif->driver.ttys[channel-ttyif->channel_min];
+	inform_data = (INTERFACEINFORM *) param;
+	ttyif = (TTYINTERFACE *) inform_data->inform_type;
+	channel = (int32) inform_data->data;
+	tty = ttyif->driver.ttys[channel - ttyif->channel_min];
 
-    if (commbuff_length(commbuff) <= tty->receive_room)
-	(tty->ldisc.ops->receive_buf)(tty, commbuff_data(commbuff), 0, commbuff_length(commbuff));
-    else
-	return DEBUGERROR(ERROR_INCOMPLETE);
+	if (commbuff_length(commbuff) <= tty->receive_room)
+		(tty->ldisc->ops->receive_buf) (tty,
+						commbuff_data(commbuff), 0,
+						commbuff_length(commbuff));
+	else
+		return DEBUGERROR(ERROR_INCOMPLETE);
 
-    LOGCOMMBUFF_CH(channel, "TTYReceive()-->", commbuff, commbuff_length(commbuff));
+	LOGCOMMBUFF_CH(channel, "TTYReceive()-->", commbuff,
+		       commbuff_length(commbuff));
 
-    free_commbuff(commbuff);
+	free_commbuff(commbuff);
 
-    return DEBUGERROR(ERROR_NONE);
+	return DEBUGERROR(ERROR_NONE);
 }
 
 /*
- * CreateTTYInterface will create an interface object to be used by 
+ * CreateTTYInterface will create an interface object to be used by
  * a NetMUX. This object will keep track of all settings required to
  * communicate with the tty layer. As such, any tty operation
  * will make reference to this interface object.
@@ -376,99 +449,109 @@ int32 TTYReceive (COMMBUFF* commbuff, void* param)
  * name -- the name of the interface
  * path -- the path to create device entries in
  * major -- the major number for the driver, 0 if it's to be dynamic
- * channel_min -- the inclusive lower bound of channel numbers assigned to the interface
- * channel_max -- the inclusive upper bound of channel numbers assigned to the interface
+ * channel_min -- the inclusive lower bound of channel numbers
+ * 		assigned to the interface
+ * channel_max -- the inclusive upper bound of channel numbers
+ * 		assigned to the interface
  * mux -- the mux object this interface is associated with
  * tty -- a pointer to a pointer to receive the newly created object
  */
-int32 CreateTTYInterface (sint8* name, sint8* path, int32 major, int32 channel_min, int32 channel_max, MUX* mux, TTYINTERFACE** tty)
+int32 CreateTTYInterface(sint8 *name, sint8 *path, int32 major,
+			 int32 channel_min, int32 channel_max, MUX *mux,
+			 TTYINTERFACE **tty)
 {
-    TTYINTERFACE*    newtty;
-    TTY_CHANNELDATA* channel_data;
-    int32            result;
-    int32            namesize;
-    int32            pathsize;
-    int32            size;
+	TTYINTERFACE *newtty;
+	TTY_CHANNELDATA *channel_data;
+	int32 result;
+	int32 namesize;
+	int32 pathsize;
+	int32 size;
 
-    DEBUG("CreateTTYInterface(0x%p, 0x%p, %lu, %lu, %lu, 0x%p, 0x%p)\n", name, path, major, channel_min, channel_max, mux, tty);
+	DEBUG
+	    ("CreateTTYInterface(0x%p, 0x%p, %lu, %lu, %lu, 0x%p, 0x%p)\n",
+	     name, path, major, channel_min, channel_max, mux, tty);
 
-    if(!tty || !name || !path || !mux)
-        return DEBUGERROR(ERROR_INVALIDPARAMETER);
+	if (!tty || !name || !path || !mux)
+		return DEBUGERROR(ERROR_INVALIDPARAMETER);
 
-    if(channel_min > channel_max)
-        return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
+	if (channel_min > channel_max)
+		return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
 
-    if(channel_max >= mux->maxchannels)
-        return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
+	if (channel_max >= mux->maxchannels)
+		return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
 
-    size = (channel_max-channel_min+1)*sizeof(TTY_CHANNELDATA);
+	size = (channel_max - channel_min + 1) * sizeof(TTY_CHANNELDATA);
 
-    namesize = strlen(name)+1;
-    if(namesize > PACKET_MAXNAME_LENGTH)
-        return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
+	namesize = strlen(name) + 1;
+	if (namesize > PACKET_MAXNAME_LENGTH)
+		return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
 
-    pathsize = strlen(path)+1;
-    if(pathsize > PACKET_MAXNAME_LENGTH)
-        return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
+	pathsize = strlen(path) + 1;
+	if (pathsize > PACKET_MAXNAME_LENGTH)
+		return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
 
-    channel_data = (TTY_CHANNELDATA*)alloc_mem(size);
-    newtty       = (TTYINTERFACE*)alloc_mem(sizeof(TTYINTERFACE));
+	channel_data = (TTY_CHANNELDATA *) alloc_mem(size);
+	newtty = (TTYINTERFACE *) alloc_mem(sizeof(TTYINTERFACE));
 
-    memset(newtty, 0, sizeof(TTYINTERFACE));
+	memset(newtty, 0, sizeof(TTYINTERFACE));
 
-    result = RegisterInterface(name, &TTYInform, &TTYReceive, (int32)newtty, mux->interface_lib);
-    if(result != ERROR_NONE)
-    {
-        free_mem(newtty);
-        free_mem(channel_data);
+	result =
+	    RegisterInterface(name, &TTYInform, &TTYReceive,
+			      (int32) newtty, mux->interface_lib);
+	if (result != ERROR_NONE) {
+		free_mem(newtty);
+		free_mem(channel_data);
 
-        return DEBUGERROR(result);
-    }
+		return DEBUGERROR(result);
+	}
 
-    QueryInterfaceIndex(name, mux->interface_lib, &newtty->host_interface);
+	QueryInterfaceIndex(name, mux->interface_lib,
+			    &newtty->host_interface);
 
-    newtty->driver.magic                = TTY_DRIVER_MAGIC;
-    newtty->driver.driver_name          = "netmux";
-    newtty->driver.name                 = "netmux";
-    newtty->driver.major                = TTY_DYNAMIC_MAJOR_ASSIGNMENT;
-    newtty->driver.minor_start          = channel_min;
-    newtty->driver.num                  = channel_max-channel_min+1;
-    newtty->driver.type                 = TTY_DRIVER_TYPE_SERIAL;
-    newtty->driver.subtype              = SERIAL_TYPE_NORMAL;
-    newtty->driver.init_termios         = tty_std_termios;
-    newtty->driver.init_termios.c_iflag = 0;
-    newtty->driver.init_termios.c_oflag = 0;
-    newtty->driver.init_termios.c_cflag = B38400 | CS8 | CREAD;
-    newtty->driver.init_termios.c_lflag = 0;
-    newtty->driver.flags                = TTY_DRIVER_RESET_TERMIOS | TTY_DRIVER_REAL_RAW | TTY_DRIVER_DYNAMIC_DEV;
-    newtty->driver.driver_state         = (struct tty_driver*)newtty;
+	newtty->driver.magic = TTY_DRIVER_MAGIC;
+	newtty->driver.driver_name = "netmux";
+	newtty->driver.name = "netmux";
+	newtty->driver.major = TTY_DYNAMIC_MAJOR_ASSIGNMENT;
+	newtty->driver.minor_start = channel_min;
+	newtty->driver.num = channel_max - channel_min + 1;
+	newtty->driver.type = TTY_DRIVER_TYPE_SERIAL;
+	newtty->driver.subtype = SERIAL_TYPE_NORMAL;
+	newtty->driver.init_termios = tty_std_termios;
+	newtty->driver.init_termios.c_iflag = 0;
+	newtty->driver.init_termios.c_oflag = 0;
+	newtty->driver.init_termios.c_cflag = B38400 | CS8 | CREAD;
+	newtty->driver.init_termios.c_lflag = 0;
+	newtty->driver.flags =
+	    TTY_DRIVER_RESET_TERMIOS | TTY_DRIVER_REAL_RAW |
+	    TTY_DRIVER_DYNAMIC_DEV;
+	newtty->driver.driver_state = (struct tty_driver *) newtty;
 
-    tty_set_operations(&newtty->driver, &tty_ops);
-    result = tty_register_driver(&newtty->driver);
-    if(result < 0)
-    {
-        UnregisterInterface(newtty->host_interface, mux->interface_lib);
+	tty_set_operations(&newtty->driver, &tty_ops);
+	result = tty_register_driver(&newtty->driver);
+	if (result < 0) {
+		UnregisterInterface(newtty->host_interface,
+				    mux->interface_lib);
 
-        free_mem(channel_data);
-        free_mem(newtty);
+		free_mem(channel_data);
+		free_mem(newtty);
 
-        return DEBUGERROR(ERROR_OPERATIONFAILED);
-    }
+		return DEBUGERROR(ERROR_OPERATIONFAILED);
+	}
 
-    newtty->mux          = mux;
-    newtty->channel_min  = channel_min;
-    newtty->channel_max  = channel_max; 
-    newtty->channel_data = channel_data;
+	newtty->mux = mux;
+	newtty->channel_min = channel_min;
+	newtty->channel_max = channel_max;
+	newtty->channel_data = channel_data;
 
-    memcpy(newtty->device_directory, path, pathsize);
-    memcpy(newtty->interface_name, name, namesize);
-    memset(channel_data, 0, size);
+	memcpy(newtty->device_directory, path, pathsize);
+	memcpy(newtty->interface_name, name, namesize);
+	memset(channel_data, 0, size);
 
-    initialize_criticalsection_lock(&newtty->lock);
+	initialize_criticalsection_lock(&newtty->lock);
 
-    *tty = newtty;
+	*tty = newtty;
 
-    return DEBUGERROR(ERROR_NONE);
+	return DEBUGERROR(ERROR_NONE);
 }
 
 /*
@@ -478,49 +561,49 @@ int32 CreateTTYInterface (sint8* name, sint8* path, int32 major, int32 channel_m
  * Params:
  * tty -- the interface to be destroyed
  */
-int32 DestroyTTYInterface (TTYINTERFACE* tty)
+int32 DestroyTTYInterface(TTYINTERFACE *tty)
 {
-    TTY_CHANNELDATA* chdat;
-    int32            channels;
-    int32            index;
+	TTY_CHANNELDATA *chdat;
+	int32 channels;
+	int32 index;
 
-    DEBUG("DestroyTTYInterface(0x%p)\n", tty);
+	DEBUG("DestroyTTYInterface(0x%p)\n", tty);
 
-    chdat    = tty->channel_data;
-    channels = tty->channel_max-tty->channel_min+1;
+	chdat = tty->channel_data;
+	channels = tty->channel_max - tty->channel_min + 1;
 
-    for(index = 0; index < channels; index++)
-    {
-        if(chdat[index].state&TTY_STATE_READY)
-        {
-            DisableChannel(
-                           host_end(COMMAND), 
-                           index+tty->channel_min, 
-                           tty->host_interface, 
-                           chdat[index].client_interface, 
-                           tty->mux
-                          );
+	for (index = 0; index < channels; index++) {
+		if (chdat[index].state & TTY_STATE_READY) {
+			DisableChannel(host_end(COMMAND),
+				       index + tty->channel_min,
+				       tty->host_interface,
+				       chdat[index].client_interface,
+				       tty->mux);
 
-            if(chdat[index].refcount)
-                wait_event_interruptible(chdat[index].close_wait, !(chdat[index].refcount));
+			if (chdat[index].refcount)
+				wait_event_interruptible(chdat[index].
+							 close_wait,
+							 !(chdat[index].
+							   refcount));
 
-            device_destroy(netmux_class, MKDEV(tty->driver.major, index));
-        }
-    }
+			device_destroy(netmux_class,
+				       MKDEV(tty->driver.major, index));
+		}
+	}
 
-    tty_unregister_driver(&tty->driver);
-    UnregisterInterface(tty->host_interface, tty->mux->interface_lib);
-    destroy_criticalsection_lock(&tty->lock);
+	tty_unregister_driver(&tty->driver);
+	UnregisterInterface(tty->host_interface, tty->mux->interface_lib);
+	destroy_criticalsection_lock(&tty->lock);
 
-    free_mem(tty->channel_data);
-    free_mem(tty);
+	free_mem(tty->channel_data);
+	free_mem(tty);
 
-    return DEBUGERROR(ERROR_NONE);
+	return DEBUGERROR(ERROR_NONE);
 }
 
 /*
  * TTYOpen is called by the linux file system whenever an open
- * is performed on a device belonging to this interface. The open 
+ * is performed on a device belonging to this interface. The open
  * will send an enable request to a client netmux and wait for a
  * reply. If any errors occurr the device will not be open.
  *
@@ -528,63 +611,58 @@ int32 DestroyTTYInterface (TTYINTERFACE* tty)
  * tty-- used to let us fetch the major/minor of the device
  * filp -- some private data is set within this structure
  */
-int TTYOpen (struct tty_struct* tty, struct file* filp)
+int TTYOpen(struct tty_struct *tty, struct file *filp)
 {
-    TTYINTERFACE*      ttyif;
-    TTY_CHANNELDATA*   chdat;
-    int32              minor;    
-    int32              result;
+	TTYINTERFACE *ttyif;
+	TTY_CHANNELDATA *chdat;
+	int32 minor;
+	int32 result;
 
-    DEBUG("TTYOpen(0x%p, 0x%p)\n", tty, filp);
+	DEBUG("TTYOpen(0x%p, 0x%p)\n", tty, filp);
 
-    ttyif = (TTYINTERFACE*)tty->driver->driver_state;
-    minor = tty->index+ttyif->channel_min;
+	ttyif = (TTYINTERFACE *) tty->driver->driver_state;
+	minor = tty->index + ttyif->channel_min;
 
-    if(minor < ttyif->channel_min || minor > ttyif->channel_max)
-        return -EADDRNOTAVAIL;
+	if (minor < ttyif->channel_min || minor > ttyif->channel_max)
+		return -EADDRNOTAVAIL;
 
-    chdat = &ttyif->channel_data[minor-ttyif->channel_min];
-    if(!(chdat->state&TTY_STATE_READY))
-        return -EADDRNOTAVAIL;
+	chdat = &ttyif->channel_data[minor - ttyif->channel_min];
+	if (!(chdat->state & TTY_STATE_READY))
+		return -EADDRNOTAVAIL;
 
-    if(chdat->refcount > 0)
-        return -EBUSY;
+	if (chdat->refcount > 0)
+		return -EBUSY;
 
-    result = EnableChannel(
-                           host_end(COMMAND), 
-                           minor, 
-                           chdat->burstsize, 
-                           chdat->maxdata, 
-                           ttyif->host_interface, 
-                           chdat->client_interface, 
-                           chdat->host_byte_credit, 
-                           chdat->host_send_credit, 
-                           0, 
-                           0, 
-                           ttyif->mux
-                          );
+	result = EnableChannel(host_end(COMMAND),
+			       minor,
+			       chdat->burstsize,
+			       chdat->maxdata,
+			       ttyif->host_interface,
+			       chdat->client_interface,
+			       chdat->host_byte_credit,
+			       chdat->host_send_credit, 0, 0, ttyif->mux);
 
-    if(result != ERROR_NONE)
-        return -ECONNABORTED;
+	if (result != ERROR_NONE)
+		return -ECONNABORTED;
 
-    /* Wake up when either one of two conditions occur:
-       1 - A response is received from the BP for our open request.
-       2 - The channel is not configured and running properly.
-       In case the latter is true an error will be returned eventually. */
-    wait_event_interruptible(chdat->event_wait,
-                            (chdat->state&TTY_STATE_EVENT) ||
-                            !(chdat->state&TTY_STATE_READY));
-                
-    chdat->state &= ~TTY_STATE_EVENT;
+	/* Wake up when either one of two conditions occur:
+	   1 - A response is received from the BP for our open request.
+	   2 - The channel is not configured and running properly.
+	   In case the latter is true an error will be returned eventually. */
+	wait_event_interruptible(chdat->event_wait,
+				 (chdat->state & TTY_STATE_EVENT) ||
+				 !(chdat->state & TTY_STATE_READY));
 
-    if(!(chdat->state&TTY_STATE_EVENT_SUCCESS))
-        return -ECONNREFUSED;
+	chdat->state &= ~TTY_STATE_EVENT;
 
-    chdat->state &= ~TTY_STATE_EVENT_SUCCESS;
+	if (!(chdat->state & TTY_STATE_EVENT_SUCCESS))
+		return -ECONNREFUSED;
 
-    ttyif->driver.ttys[minor-ttyif->channel_min] = tty;
+	chdat->state &= ~TTY_STATE_EVENT_SUCCESS;
 
-    return 0;
+	ttyif->driver.ttys[minor - ttyif->channel_min] = tty;
+
+	return 0;
 }
 
 /*
@@ -593,48 +671,50 @@ int TTYOpen (struct tty_struct* tty, struct file* filp)
  * NetMUX but no response is expected or required. If there is
  * an error with the device being closed an error will be
  * returned.
- * 
+ *
  * Params:
  * tty -- used to fetch the minor number of the device
  * filp -- stores some private data which we use to fetch the tty
  *         interface structure
  */
-void TTYClose (struct tty_struct* tty, struct file* filp)
+void TTYClose(struct tty_struct *tty, struct file *filp)
 {
-    TTYINTERFACE*    ttyif;
-    TTY_CHANNELDATA* chdat;
-    int32            minor;
-    int32            result;
+	TTYINTERFACE *ttyif;
+	TTY_CHANNELDATA *chdat;
+	int32 minor;
+	int32 result;
 
-    DEBUG("TTYClose(0x%p, 0x%p)\n", tty, filp);
+	DEBUG("TTYClose(0x%p, 0x%p)\n", tty, filp);
 
-    ttyif = (TTYINTERFACE*)tty->driver->driver_state;
-    minor = tty->index+ttyif->channel_min;
+	ttyif = (TTYINTERFACE *) tty->driver->driver_state;
+	minor = tty->index + ttyif->channel_min;
 
-    if(minor < ttyif->channel_min || minor > ttyif->channel_max)
-        return;
+	if (minor < ttyif->channel_min || minor > ttyif->channel_max)
+		return;
 
-    chdat = &ttyif->channel_data[minor-ttyif->channel_min];
+	chdat = &ttyif->channel_data[minor - ttyif->channel_min];
 
-    if(chdat->refcount)
-    {
-        result = DisableChannel(host_end(COMMAND), minor, ttyif->host_interface, chdat->client_interface, ttyif->mux);
-        if(result != ERROR_NONE)
-        {
-            ttyif->driver.ttys[minor-ttyif->channel_min] = 0;
+	if (chdat->refcount) {
+		result =
+		    DisableChannel(host_end(COMMAND), minor,
+				   ttyif->host_interface,
+				   chdat->client_interface, ttyif->mux);
+		if (result != ERROR_NONE) {
+			ttyif->driver.ttys[minor - ttyif->channel_min] = 0;
 
-            return;
-        }
+			return;
+		}
 
-        chdat->state = TTY_STATE_READY;
-        wait_event_interruptible(chdat->close_wait, !chdat->refcount);
-    }
-    else
-    {
-        (void)DisableChannel(host_end(COMMAND), minor, ttyif->host_interface, chdat->client_interface, ttyif->mux);
-    }
+		chdat->state = TTY_STATE_READY;
+		wait_event_interruptible(chdat->close_wait,
+					 !chdat->refcount);
+	} else {
+		(void) DisableChannel(host_end(COMMAND), minor,
+				      ttyif->host_interface,
+				      chdat->client_interface, ttyif->mux);
+	}
 
-    return;
+	return;
 }
 
 /*
@@ -649,48 +729,50 @@ void TTYClose (struct tty_struct* tty, struct file* filp)
  * buf -- a pointer to the data to be copied
  * count -- the number of bytes to be copied
  */
-ssize_t TTYWrite (struct tty_struct* tty, const unsigned char* buf, int count)
+ssize_t TTYWrite(struct tty_struct *tty, const unsigned char *buf,
+		 int count)
 {
-    COMMBUFF*        commbuff;
-    TTYINTERFACE*    ttyif;
-    TTY_CHANNELDATA* chdat;
-    int32            minor;
-    sint32	     amount_written;
+	COMMBUFF *commbuff;
+	TTYINTERFACE *ttyif;
+	TTY_CHANNELDATA *chdat;
+	int32 minor;
+	sint32 amount_written;
 
-    DEBUG("TTYWrite(0x%p, 0x%p, %d)\n", tty, buf, count);
+	DEBUG("TTYWrite(0x%p, 0x%p, %d)\n", tty, buf, count);
 
-    /* This function can be called in an atomic context so we shouldn't call
-       any APIs that can sleep */
+	/* This function can be called in an atomic context so we shouldn't call
+	   any APIs that can sleep */
 
-    ttyif = (TTYINTERFACE*)tty->driver->driver_state;
-    minor = tty->index+ttyif->channel_min;
+	ttyif = (TTYINTERFACE *) tty->driver->driver_state;
+	minor = tty->index + ttyif->channel_min;
 
-    chdat = &ttyif->channel_data[minor-ttyif->channel_min];
-    if(!(chdat->state&TTY_STATE_READY) || chdat->refcount == 0)
-        return -ENOTCONN;
+	chdat = &ttyif->channel_data[minor - ttyif->channel_min];
+	if (!(chdat->state & TTY_STATE_READY) || chdat->refcount == 0)
+		return -ENOTCONN;
 
-    /* In some instances, we might add more data to the NetMUX queue than the
-     * burst size for the channel. Also, the amount of combined data in the two
-     * queues may surpass the channel queue size. */
-    amount_written = chdat->mux_channel_queue_space - chdat->data_amount;
+	/* In some instances, we might add more data to the NetMUX
+	 * queue than the burst size for the channel. Also,
+	 * the amount of combined data in the two queues
+	 * may surpass the channel queue size. */
+	amount_written =
+	    chdat->mux_channel_queue_space - chdat->data_amount;
 
-    if (count < amount_written)
-        amount_written = count;
+	if (count < amount_written)
+		amount_written = count;
 
-    if (amount_written > 0)
-    {
-        commbuff = alloc_commbuff(amount_written, sizeof(DATA_PACKET_HDR));
-        memcpy(commbuff_data(commbuff), buf, amount_written);
-        queue_commbuff(commbuff, &chdat->process_queue);
-	chdat->data_amount += commbuff_length(commbuff);
-        RunSend(ttyif->mux);
-    }
-    else
-    {
-        amount_written = 0;
-    }
+	if (amount_written > 0) {
+		commbuff =
+		    alloc_commbuff(amount_written,
+				   sizeof(DATA_PACKET_HDR));
+		memcpy(commbuff_data(commbuff), buf, amount_written);
+		queue_commbuff(commbuff, &chdat->process_queue);
+		chdat->data_amount += commbuff_length(commbuff);
+		RunSend(ttyif->mux);
+	} else {
+		amount_written = 0;
+	}
 
-    return amount_written;
+	return amount_written;
 }
 
 /*
@@ -701,59 +783,59 @@ ssize_t TTYWrite (struct tty_struct* tty, const unsigned char* buf, int count)
  * Params:
  * tty -- used to get the devices minor number
  */
-int TTYWriteRoom (struct tty_struct* tty)
+int TTYWriteRoom(struct tty_struct *tty)
 {
-    TTYINTERFACE*    ttyif;
-    TTY_CHANNELDATA* chdat;
-    int32            minor;
-    sint32           result;
+	TTYINTERFACE *ttyif;
+	TTY_CHANNELDATA *chdat;
+	int32 minor;
+	sint32 result;
 
-    DEBUG("TTYWriteRoom(0x%p)\n", tty);
+	DEBUG("TTYWriteRoom(0x%p)\n", tty);
 
-    ttyif = (TTYINTERFACE*)tty->driver->driver_state;
-    minor = tty->index+ttyif->channel_min;
+	ttyif = (TTYINTERFACE *) tty->driver->driver_state;
+	minor = tty->index + ttyif->channel_min;
 
-    chdat = &ttyif->channel_data[minor-ttyif->channel_min];
-    if(!(chdat->state&TTY_STATE_READY) || chdat->refcount == 0)
-        return -ENOTCONN;
+	chdat = &ttyif->channel_data[minor - ttyif->channel_min];
+	if (!(chdat->state & TTY_STATE_READY) || chdat->refcount == 0)
+		return -ENOTCONN;
 
-    result = chdat->mux_channel_queue_space - chdat->data_amount;
+	result = chdat->mux_channel_queue_space - chdat->data_amount;
 
-    return (result < 0 ? 0 : result);
+	return (result < 0 ? 0 : result);
 }
 
 /*
- * TTYDataInBuffer is used to determine if there is any 
+ * TTYDataInBuffer is used to determine if there is any
  * data available in the read buffers to be read by a
  * device.
  *
  * Params:
  * tty -- used to get the devices minor number
  */
-int TTYDataInBuffer (struct tty_struct* tty)
+int TTYDataInBuffer(struct tty_struct *tty)
 {
-    TTYINTERFACE*    ttyif;
-    TTY_CHANNELDATA* chdat;
-    int32            minor;
-    int32            result;
+	TTYINTERFACE *ttyif;
+	TTY_CHANNELDATA *chdat;
+	int32 minor;
+	int32 result;
 
-    DEBUG("TTYDataInBuffer(0x%p)\n", tty);
+	DEBUG("TTYDataInBuffer(0x%p)\n", tty);
 
-    ttyif = (TTYINTERFACE*)tty->driver->driver_state;
-    minor = tty->index+ttyif->channel_min;
+	ttyif = (TTYINTERFACE *) tty->driver->driver_state;
+	minor = tty->index + ttyif->channel_min;
 
-    chdat = &ttyif->channel_data[minor-ttyif->channel_min];
-    if(!(chdat->state&TTY_STATE_READY) || chdat->refcount == 0)
-        return -ENOTCONN;    
+	chdat = &ttyif->channel_data[minor - ttyif->channel_min];
+	if (!(chdat->state & TTY_STATE_READY) || chdat->refcount == 0)
+		return -ENOTCONN;
 
-    result = ReadDataAvailable(minor, ttyif->mux);
+	result = ReadDataAvailable(minor, ttyif->mux);
 
-    return result;
+	return result;
 }
 
 /*
  * TTYIOCtl is used to get and set the modem flags of a
- * particular device. Any application can modify the 
+ * particular device. Any application can modify the
  * modem flags and expect the result to be delivered to
  * the client NetMUX. The user can also tell the function
  * to block until a certain modem signal changed.
@@ -763,80 +845,90 @@ int TTYDataInBuffer (struct tty_struct* tty)
  * cmd -- the IOCtl type
  * arg -- the argument to the IOCtl
  */
-int TTYIOCtl (struct tty_struct* tty, struct file* file, unsigned int cmd, unsigned long arg)
+int TTYIOCtl(struct tty_struct *tty, struct file *file, unsigned int cmd,
+	     unsigned long arg)
 {
-    wait_queue_head_t* queue;
-    TTYINTERFACE*      ttyif;
-    TTY_CHANNELDATA*   chdat;
-    int32              minor;
-    int16              newflags;
-    int16              xormask;
-    int32              signal;
-    int32              change;
-    int32              original_flags;
-    int32              wait_flags;
+	wait_queue_head_t *queue;
+	TTYINTERFACE *ttyif;
+	TTY_CHANNELDATA *chdat;
+	int32 minor;
+	int16 newflags;
+	int16 xormask;
+	int32 signal;
+	int32 change;
+	int32 original_flags;
+	int32 wait_flags;
 
-    DEBUG("TTYIOCtl(0x%p, 0x%p, %d, %lu)\n", tty, file, cmd, arg);
+	DEBUG("TTYIOCtl(0x%p, 0x%p, %d, %lu)\n", tty, file, cmd, arg);
 
-    ttyif = (TTYINTERFACE*)tty->driver->driver_state;
-    minor = tty->index+ttyif->channel_min;
+	ttyif = (TTYINTERFACE *) tty->driver->driver_state;
+	minor = tty->index + ttyif->channel_min;
 
-    chdat = &ttyif->channel_data[minor-ttyif->channel_min];
-    if(!(chdat->state&TTY_STATE_READY) || chdat->refcount == 0)
-        return -ENOTCONN;
+	chdat = &ttyif->channel_data[minor - ttyif->channel_min];
+	if (!(chdat->state & TTY_STATE_READY) || chdat->refcount == 0)
+		return -ENOTCONN;
 
-    switch(cmd)
-    {
-        case TIOCMGET:
-        {
-            original_flags = chdat->modem_flags;
+	switch (cmd) {
+	case TIOCMGET:
+		{
+			original_flags = chdat->modem_flags;
 
-            if(copy_to_user((unsigned int*)arg, &original_flags, sizeof(int16)))
-                return -EFAULT; 
+			if (copy_to_user
+			    ((unsigned int *) arg, &original_flags,
+			     sizeof(int16)))
+				return -EFAULT;
 
-            return 0;
-        }break;
+			return 0;
+		}
+		break;
 
-        case TIOCMSET:
-        {
-            if(copy_from_user(&newflags, (unsigned int*)arg, sizeof(int16)))
-                return -EFAULT;
+	case TIOCMSET:
+		{
+			if (copy_from_user
+			    (&newflags, (unsigned int *) arg,
+			     sizeof(int16)))
+				return -EFAULT;
 
-            enter_write_criticalsection(&ttyif->lock);
+			enter_write_criticalsection(&ttyif->lock);
 
-            xormask             = newflags^chdat->modem_flags;
-            signal              = (chdat->modem_flags<<16)|(xormask);
-            chdat->modem_flags ^= xormask;
+			xormask = newflags ^ chdat->modem_flags;
+			signal = (chdat->modem_flags << 16) | (xormask);
+			chdat->modem_flags ^= xormask;
 
-            exit_write_criticalsection(&ttyif->lock);
+			exit_write_criticalsection(&ttyif->lock);
 
-            ChannelSignal(host_end(COMMAND), signal, minor, ttyif->mux);
+			ChannelSignal(host_end(COMMAND), signal, minor,
+				      ttyif->mux);
 
-            return 0;
-        }break;
+			return 0;
+		}
+		break;
 
-        case TIOCMIWAIT:
-        {
-            change         = 0;
-            original_flags = chdat->modem_flags;
-            queue          = &chdat->event_wait;
+	case TIOCMIWAIT:
+		{
+			change = 0;
+			original_flags = chdat->modem_flags;
+			queue = &chdat->event_wait;
 
-            if(copy_from_user(&wait_flags, (unsigned int*)arg, sizeof(unsigned int)))
-                return -EFAULT;
+			if (copy_from_user
+			    (&wait_flags, (unsigned int *) arg,
+			     sizeof(unsigned int)))
+				return -EFAULT;
 
-            if(!wait_flags)
-                return 0;
+			if (!wait_flags)
+				return 0;
 
-            while(!(wait_flags&change))
-            {
-                interruptible_sleep_on(queue);
+			while (!(wait_flags & change)) {
+				interruptible_sleep_on(queue);
 
-                change = chdat->modem_flags^original_flags;
-            }
+				change =
+				    chdat->modem_flags ^ original_flags;
+			}
 
-            return 0;
-        }break;
-    }
+			return 0;
+		}
+		break;
+	}
 
-    return -ENOIOCTLCMD;
+	return -ENOIOCTLCMD;
 }

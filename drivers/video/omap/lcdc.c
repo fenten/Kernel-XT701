@@ -28,11 +28,12 @@
 #include <linux/dma-mapping.h>
 #include <linux/vmalloc.h>
 #include <linux/clk.h>
-#include <linux/omapfb.h>
 
-#include <mach/dma.h>
+#include <plat/dma.h>
 
 #include <asm/mach-types.h>
+
+#include "omapfb.h"
 
 #include "lcdc.h"
 

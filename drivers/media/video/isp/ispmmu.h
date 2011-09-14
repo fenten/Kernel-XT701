@@ -22,11 +22,13 @@
 #include <linux/err.h>
 #include <linux/scatterlist.h>
 
+void *ispmmu_da_to_va(dma_addr_t da);
 dma_addr_t ispmmu_vmalloc(size_t bytes);
 void ispmmu_vfree(const dma_addr_t da);
 dma_addr_t ispmmu_kmap(u32 pa, int size);
 void ispmmu_kunmap(dma_addr_t da);
 dma_addr_t ispmmu_vmap(const struct scatterlist *sglist, int sglen);
+dma_addr_t ispmmu_vmap_pages(struct page **pages, int sglen);
 void ispmmu_vunmap(dma_addr_t da);
 void ispmmu_save_context(void);
 void ispmmu_restore_context(void);

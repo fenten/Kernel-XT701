@@ -144,31 +144,15 @@
 #define MAX_STREAMS     16
 #define MAX_BUFS	64
 
-/* Following two macros should ideally have do{}while(0) */
+#define cp_fm_usr(to, from, err, n)				\
+	__cp_fm_usr(to, from, &(err), (n) * sizeof(*(to)))
 
-#define cp_fm_usr(dest, src, status, elements)    \
-    if (DSP_SUCCEEDED(status)) {\
-	    if (unlikely(src == NULL) ||				\
-		unlikely(copy_from_user(dest, src, elements * sizeof(*(dest))))) { \
-		GT_1trace(WCD_debugMask, GT_7CLASS, \
-		"copy_from_user failed, src=0x%x\n", src);  \
-		status = DSP_EPOINTER ; \
-	} \
-    }
-
-#define cp_to_usr(dest, src, status, elements)    \
-    if (DSP_SUCCEEDED(status)) {\
-	    if (unlikely(dest == NULL) ||				\
-		unlikely(copy_to_user(dest, src, elements * sizeof(*(src))))) { \
-		GT_1trace(WCD_debugMask, GT_7CLASS, \
-		"copy_to_user failed, dest=0x%x\n", dest); \
-		status = DSP_EPOINTER ;\
-	} \
-    }
+#define cp_to_usr(to, from, err, n)				\
+	__cp_to_usr(to, from, &(err), (n) * sizeof(*(from)))
 
 /* Device IOCtl function pointer */
 struct WCD_Cmd {
-	u32(*fxn)(union Trapped_Args *args);
+	u32(*fxn)(union Trapped_Args *args, void *pr_ctxt);
 	u32 dwIndex;
 } ;
 
@@ -247,21 +231,58 @@ static struct WCD_Cmd WCD_cmdTable[] = {
 	{CMMWRAP_GetInfo, CMD_CMM_GETINFO_OFFSET}
 };
 
+static inline void __cp_fm_usr(void *to, const void __user *from,
+			       DSP_STATUS *err, unsigned long bytes)
+{
+	if (DSP_FAILED(*err))
+		return;
+
+	if (unlikely(!from)) {
+		*err = DSP_EPOINTER;
+		return;
+	}
+
+	if (unlikely(copy_from_user(to, from, bytes))) {
+		GT_2trace(WCD_debugMask, GT_7CLASS,
+			  "%s failed, from=0x%08x\n", __func__, from);
+		*err = DSP_EPOINTER;
+	}
+}
+
+
+static inline void __cp_to_usr(void __user *to, const void *from,
+			       DSP_STATUS *err, unsigned long bytes)
+{
+	if (DSP_FAILED(*err))
+		return;
+
+	if (unlikely(!to)) {
+		*err = DSP_EPOINTER;
+		return;
+	}
+
+	if (unlikely(copy_to_user(to, from, bytes))) {
+		GT_2trace(WCD_debugMask, GT_7CLASS,
+			  "%s failed, to=0x%08x\n", __func__, to);
+		*err = DSP_EPOINTER;
+	}
+}
+
 /*
  *  ======== WCD_CallDevIOCtl ========
  *  Purpose:
  *      Call the (wrapper) function for the corresponding WCD IOCTL.
  */
 inline DSP_STATUS WCD_CallDevIOCtl(u32 cmd, union Trapped_Args *args,
-				    u32 *pResult)
+				    u32 *pResult, void *pr_ctxt)
 {
-	if ((cmd < (sizeof(WCD_cmdTable) / sizeof(struct WCD_Cmd)))) {
+	if (cmd < ARRAY_SIZE(WCD_cmdTable)) {
 		/* make the fxn call via the cmd table */
-		*pResult = (*WCD_cmdTable[cmd].fxn) (args);
+		*pResult = (*WCD_cmdTable[cmd].fxn) (args, pr_ctxt);
 		return DSP_SOK;
-	} else {
-		return DSP_EINVALIDARG;
 	}
+
+	return DSP_EINVALIDARG;
 }
 
 /*
@@ -306,7 +327,9 @@ bool WCD_Init(void)
 #ifdef DEBUG
 	/* runtime check of Device IOCtl array. */
 	u32 i;
-	for (i = 1; i < (sizeof(WCD_cmdTable) / sizeof(struct WCD_Cmd)); i++)
+	int cmdtable = ARRAY_SIZE(WCD_cmdTable);
+
+	for (i = 1; i < cmdtable; i++)
 		DBC_Assert(WCD_cmdTable[i - 1].dwIndex == i);
 
 #endif
@@ -441,7 +464,7 @@ DSP_STATUS WCD_InitComplete2(void)
 /*
  * ======== MGRWRAP_EnumNode_Info ========
  */
-u32 MGRWRAP_EnumNode_Info(union Trapped_Args *args)
+u32 MGRWRAP_EnumNode_Info(union Trapped_Args *args, void *pr_ctxt)
 {
 	u8 *pNDBProps;
 	u32 uNumNodes;
@@ -477,7 +500,7 @@ u32 MGRWRAP_EnumNode_Info(union Trapped_Args *args)
 /*
  * ======== MGRWRAP_EnumProc_Info ========
  */
-u32 MGRWRAP_EnumProc_Info(union Trapped_Args *args)
+u32 MGRWRAP_EnumProc_Info(union Trapped_Args *args, void *pr_ctxt)
 {
 	u8 *pProcessorInfo;
 	u32 uNumProcs;
@@ -516,7 +539,7 @@ u32 MGRWRAP_EnumProc_Info(union Trapped_Args *args)
 /*
  * ======== MGRWRAP_RegisterObject ========
  */
-u32 MGRWRAP_RegisterObject(union Trapped_Args *args)
+u32 MGRWRAP_RegisterObject(union Trapped_Args *args, void *pr_ctxt)
 {
 	u32 retVal;
 	struct DSP_UUID pUuid;
@@ -527,8 +550,9 @@ u32 MGRWRAP_RegisterObject(union Trapped_Args *args)
 	cp_fm_usr(&pUuid, args->ARGS_MGR_REGISTEROBJECT.pUuid, status, 1);
 	if (DSP_FAILED(status))
 		goto func_end;
+	/* pathSize is increased by 1 to accommodate NULL */
 	pathSize = strlen_user((char *)
-				args->ARGS_MGR_REGISTEROBJECT.pszPathName) + 1;
+			args->ARGS_MGR_REGISTEROBJECT.pszPathName) + 1;
 	pszPathName = MEM_Alloc(pathSize, MEM_NONPAGED);
 	if (!pszPathName)
 		goto func_end;
@@ -555,7 +579,7 @@ func_end:
 /*
  * ======== MGRWRAP_UnregisterObject ========
  */
-u32 MGRWRAP_UnregisterObject(union Trapped_Args *args)
+u32 MGRWRAP_UnregisterObject(union Trapped_Args *args, void *pr_ctxt)
 {
 	/* This API is deprecated */
 	return DSP_SOK;
@@ -565,7 +589,7 @@ u32 MGRWRAP_UnregisterObject(union Trapped_Args *args)
 /*
  * ======== MGRWRAP_WaitForBridgeEvents ========
  */
-u32 MGRWRAP_WaitForBridgeEvents(union Trapped_Args *args)
+u32 MGRWRAP_WaitForBridgeEvents(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	struct DSP_NOTIFICATION *aNotifications[MAX_EVENTS];
@@ -603,12 +627,11 @@ u32 MGRWRAP_WaitForBridgeEvents(union Trapped_Args *args)
 /*
  * ======== MGRWRAP_GetProcessResourceInfo ========
  */
-u32 MGRWRAP_GetProcessResourcesInfo(union Trapped_Args *args)
+u32 MGRWRAP_GetProcessResourcesInfo(union Trapped_Args *args, void *pr_ctxt)
 {
     DSP_STATUS status = DSP_SOK;
     u32 uSize = 0;
     u8 *pBuf = MEM_Alloc(8092, MEM_NONPAGED);
-    status = DRV_ProcDisplayResInfo(pBuf, &uSize);
     GT_1trace(WCD_debugMask, GT_ENTER,
 	     "MGRWRAP_GetProcessResourcesInfo:uSize=%d :\n", uSize);
     cp_to_usr(args->ARGS_PROC_GETTRACE.pBuf, pBuf, status, uSize);
@@ -626,7 +649,7 @@ u32 MGRWRAP_GetProcessResourcesInfo(union Trapped_Args *args)
 /*
  * ======== PROCWRAP_Attach ========
  */
-u32 PROCWRAP_Attach(union Trapped_Args *args)
+u32 PROCWRAP_Attach(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_HPROCESSOR processor;
 	DSP_STATUS status = DSP_SOK;
@@ -649,7 +672,7 @@ u32 PROCWRAP_Attach(union Trapped_Args *args)
 
 	}
 	status = PROC_Attach(args->ARGS_PROC_ATTACH.uProcessor, pAttrIn,
-			    &processor);
+			    &processor, pr_ctxt);
 	cp_to_usr(args->ARGS_PROC_ATTACH.phProcessor, &processor, status, 1);
 func_end:
 	return status;
@@ -658,7 +681,7 @@ func_end:
 /*
  * ======== PROCWRAP_Ctrl ========
  */
-u32 PROCWRAP_Ctrl(union Trapped_Args *args)
+u32 PROCWRAP_Ctrl(union Trapped_Args *args, void *pr_ctxt)
 {
 	u32 cbDataSize, __user *pSize = (u32 __user *)
 			args->ARGS_PROC_CTRL.pArgs;
@@ -705,22 +728,21 @@ func_end:
 /*
  * ======== PROCWRAP_Detach ========
  */
-u32 PROCWRAP_Detach(union Trapped_Args *args)
+u32 PROCWRAP_Detach(union Trapped_Args *args, void *pr_ctxt)
 {
-	u32 retVal;
-
 	GT_1trace(WCD_debugMask, GT_ENTER,
 		 "PROCWRAP_Detach: entered args\n0x%x "
 		 "hProceesor \n", args->ARGS_PROC_DETACH.hProcessor);
-	retVal = PROC_Detach(args->ARGS_PROC_DETACH.hProcessor);
 
-	return retVal;
+	/* PROC_Detach called at bridge_release only */
+
+	return DSP_SOK;
 }
 
 /*
  * ======== PROCWRAP_EnumNode_Info ========
  */
-u32 PROCWRAP_EnumNode_Info(union Trapped_Args *args)
+u32 PROCWRAP_EnumNode_Info(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status;
 	DSP_HNODE aNodeTab[MAX_NODES];
@@ -753,7 +775,7 @@ u32 PROCWRAP_EnumNode_Info(union Trapped_Args *args)
 /*
  * ======== PROCWRAP_FlushMemory ========
  */
-u32 PROCWRAP_FlushMemory(union Trapped_Args *args)
+u32 PROCWRAP_FlushMemory(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status;
 
@@ -770,7 +792,7 @@ u32 PROCWRAP_FlushMemory(union Trapped_Args *args)
 /*
  * ======== PROCWRAP_InvalidateMemory ========
  */
-u32 PROCWRAP_InvalidateMemory(union Trapped_Args *args)
+u32 PROCWRAP_InvalidateMemory(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status;
 
@@ -788,7 +810,7 @@ u32 PROCWRAP_InvalidateMemory(union Trapped_Args *args)
 /*
  * ======== PROCWRAP_EnumResources ========
  */
-u32 PROCWRAP_EnumResources(union Trapped_Args *args)
+u32 PROCWRAP_EnumResources(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	struct DSP_RESOURCEINFO pResourceInfo;
@@ -820,7 +842,7 @@ func_end:
 /*
  * ======== PROCWRAP_GetState ========
  */
-u32 PROCWRAP_GetState(union Trapped_Args *args)
+u32 PROCWRAP_GetState(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status;
 	struct DSP_PROCESSORSTATE procStatus;
@@ -835,7 +857,7 @@ u32 PROCWRAP_GetState(union Trapped_Args *args)
 /*
  * ======== PROCWRAP_GetTrace ========
  */
-u32 PROCWRAP_GetTrace(union Trapped_Args *args)
+u32 PROCWRAP_GetTrace(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status;
 	u8 *pBuf;
@@ -862,119 +884,138 @@ u32 PROCWRAP_GetTrace(union Trapped_Args *args)
 /*
  * ======== PROCWRAP_Load ========
  */
-u32 PROCWRAP_Load(union Trapped_Args *args)
+u32 PROCWRAP_Load(union Trapped_Args *args, void *pr_ctxt)
 {
 	s32 i, len;
 	DSP_STATUS status = DSP_SOK;
-       char *temp;
-	s32 argc = args->ARGS_PROC_LOAD.iArgc;
+	char *temp;
+	s32 count = args->ARGS_PROC_LOAD.iArgc;
 	u8 **argv, **envp = NULL;
 
+	DBC_Require(count > 0);
+	DBC_Require(count <= MAX_LOADARGS);
 
-	DBC_Require(argc > 0);
-	DBC_Require(argc <= MAX_LOADARGS);
-
-	argv = MEM_Alloc(argc * sizeof(u8 *), MEM_NONPAGED);
-	if (argv == NULL)
+	argv = MEM_Alloc(count * sizeof(u8 *), MEM_NONPAGED);
+	if (!argv) {
 		status = DSP_EMEMORY;
-
-	cp_fm_usr(argv, args->ARGS_PROC_LOAD.aArgv, status, argc);
-	if (DSP_FAILED(status))
 		goto func_cont;
+	}
 
-	for (i = 0; DSP_SUCCEEDED(status) && (i < argc); i++) {
-		if (argv[i] != NULL) {
+	cp_fm_usr(argv, args->ARGS_PROC_LOAD.aArgv, status, count);
+	if (DSP_FAILED(status)) {
+		MEM_Free(argv);
+		argv = NULL;
+		goto func_cont;
+	}
+
+	for (i = 0; i < count; i++) {
+		if (argv[i]) {
 			/* User space pointer to argument */
 			temp = (char *) argv[i];
-			len = strlen_user((char *)temp);
+			/* len is increased by 1 to accommodate NULL */
+			len = strlen_user((char *)temp) + 1;
 			/* Kernel space pointer to argument */
 			argv[i] = MEM_Alloc(len, MEM_NONPAGED);
-			if (argv[i] == NULL) {
+			if (argv[i]) {
+				cp_fm_usr(argv[i], temp, status, len);
+				if (DSP_FAILED(status)) {
+					MEM_Free(argv[i]);
+					argv[i] = NULL;
+					goto func_cont;
+				}
+			} else {
 				status = DSP_EMEMORY;
-				break;
-			}
-			cp_fm_usr(argv[i], temp, status, len);
-			if (DSP_FAILED(status))
 				goto func_cont;
-
+			}
 		}
 	}
 	/* TODO: validate this */
-	if (args->ARGS_PROC_LOAD.aEnvp != NULL) {
+	if (args->ARGS_PROC_LOAD.aEnvp) {
 		/* number of elements in the envp array including NULL */
-		len = 0;
+		count = 0;
 		do {
-			len++;
-			get_user(temp, args->ARGS_PROC_LOAD.aEnvp);
+			get_user(temp, args->ARGS_PROC_LOAD.aEnvp + count);
+			count++;
 		} while (temp);
-		envp = MEM_Alloc(len * sizeof(u8 *), MEM_NONPAGED);
-		if (envp == NULL) {
+		envp = MEM_Alloc(count * sizeof(u8 *), MEM_NONPAGED);
+		if (!envp) {
 			status = DSP_EMEMORY;
 			goto func_cont;
 		}
 
-		cp_fm_usr(envp, args->ARGS_PROC_LOAD.aEnvp, status, len);
-		if (DSP_FAILED(status))
+		cp_fm_usr(envp, args->ARGS_PROC_LOAD.aEnvp, status, count);
+		if (DSP_FAILED(status)) {
+			MEM_Free(envp);
+			envp = NULL;
 			goto func_cont;
-		for (i = 0; DSP_SUCCEEDED(status) && (envp[i] != NULL); i++) {
+		}
+		for (i = 0; envp[i]; i++) {
 			/* User space pointer to argument */
 			temp = (char *)envp[i];
-			len = strlen_user((char *)temp);
+			/* len is increased by 1 to accommodate NULL */
+			len = strlen_user((char *)temp) + 1;
 			/* Kernel space pointer to argument */
 			envp[i] = MEM_Alloc(len, MEM_NONPAGED);
-			if (envp[i] == NULL) {
+			if (envp[i]) {
+				cp_fm_usr(envp[i], temp, status, len);
+				if (DSP_FAILED(status)) {
+					MEM_Free(envp[i]);
+					envp[i] = NULL;
+					goto func_cont;
+				}
+			} else {
 				status = DSP_EMEMORY;
-				break;
-			}
-			cp_fm_usr(envp[i], temp, status, len);
-			if (DSP_FAILED(status))
 				goto func_cont;
+			}
 		}
 	}
 	GT_5trace(WCD_debugMask, GT_ENTER,
-		 "PROCWRAP_Load, hProcessor: 0x%x\n\tiArgc:"
-		 "0x%x\n\taArgv: 0x%x\n\taArgv[0]: %s\n\taEnvp: 0x%0x\n",
-		 args->ARGS_PROC_LOAD.hProcessor,
-		 args->ARGS_PROC_LOAD.iArgc, args->ARGS_PROC_LOAD.aArgv,
-		 argv[0], args->ARGS_PROC_LOAD.aEnvp);
+		"PROCWRAP_Load, hProcessor: 0x%x\n\tiArgc:"
+		"0x%x\n\taArgv: 0x%x\n\taArgv[0]: %s\n\taEnvp: 0x%0x\n",
+		args->ARGS_PROC_LOAD.hProcessor,
+		args->ARGS_PROC_LOAD.iArgc, args->ARGS_PROC_LOAD.aArgv,
+		argv[0], args->ARGS_PROC_LOAD.aEnvp);
 	if (DSP_SUCCEEDED(status)) {
 		status = PROC_Load(args->ARGS_PROC_LOAD.hProcessor,
-				  args->ARGS_PROC_LOAD.iArgc,
-				  (CONST char **)argv, (CONST char **)envp);
+				args->ARGS_PROC_LOAD.iArgc,
+				(CONST char **)argv, (CONST char **)envp);
 	}
 func_cont:
-	if (envp != NULL) {
+	if (envp) {
 		i = 0;
-		while (envp[i] != NULL)
+		while (envp[i])
 			MEM_Free(envp[i++]);
 
 		MEM_Free(envp);
 	}
-	if (argv != NULL) {
-		for (i = 0; i < argc; i++) {
-			if (argv[i] != NULL)
-				MEM_Free(argv[i]);
 
-		}
+	if (argv) {
+		count = args->ARGS_PROC_LOAD.iArgc;
+		for (i = 0; (i < count) && argv[i]; i++)
+			MEM_Free(argv[i]);
+
 		MEM_Free(argv);
 	}
+
 	return status;
 }
 
 /*
  * ======== PROCWRAP_Map ========
  */
-u32 PROCWRAP_Map(union Trapped_Args *args)
+u32 PROCWRAP_Map(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status;
 	void *pMapAddr;
 
 	GT_0trace(WCD_debugMask, GT_ENTER, "PROCWRAP_Map: entered\n");
+	mutex_lock(&((struct PROCESS_CONTEXT *)pr_ctxt)->dmm_lock);
 	status = PROC_Map(args->ARGS_PROC_MAPMEM.hProcessor,
 			 args->ARGS_PROC_MAPMEM.pMpuAddr,
 			 args->ARGS_PROC_MAPMEM.ulSize,
 			 args->ARGS_PROC_MAPMEM.pReqAddr, &pMapAddr,
-			 args->ARGS_PROC_MAPMEM.ulMapAttr);
+			 args->ARGS_PROC_MAPMEM.ulMapAttr, pr_ctxt);
+	mutex_unlock(&((struct PROCESS_CONTEXT *)pr_ctxt)->dmm_lock);
 	if (DSP_SUCCEEDED(status)) {
 		if (put_user(pMapAddr, args->ARGS_PROC_MAPMEM.ppMapAddr))
 			status = DSP_EINVALIDARG;
@@ -986,7 +1027,7 @@ u32 PROCWRAP_Map(union Trapped_Args *args)
 /*
  * ======== PROCWRAP_RegisterNotify ========
  */
-u32 PROCWRAP_RegisterNotify(union Trapped_Args *args)
+u32 PROCWRAP_RegisterNotify(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status;
 	struct DSP_NOTIFICATION notification;
@@ -1010,7 +1051,7 @@ u32 PROCWRAP_RegisterNotify(union Trapped_Args *args)
 /*
  * ======== PROCWRAP_ReserveMemory ========
  */
-u32 PROCWRAP_ReserveMemory(union Trapped_Args *args)
+u32 PROCWRAP_ReserveMemory(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status;
 	void *pRsvAddr;
@@ -1027,7 +1068,7 @@ u32 PROCWRAP_ReserveMemory(union Trapped_Args *args)
 /*
  * ======== PROCWRAP_Start ========
  */
-u32 PROCWRAP_Start(union Trapped_Args *args)
+u32 PROCWRAP_Start(union Trapped_Args *args, void *pr_ctxt)
 {
 	u32 retVal;
 
@@ -1039,20 +1080,22 @@ u32 PROCWRAP_Start(union Trapped_Args *args)
 /*
  * ======== PROCWRAP_UnMap ========
  */
-u32 PROCWRAP_UnMap(union Trapped_Args *args)
+u32 PROCWRAP_UnMap(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status;
 
 	GT_0trace(WCD_debugMask, GT_ENTER, "PROCWRAP_UnMap: entered\n");
+	mutex_lock(&((struct PROCESS_CONTEXT *)pr_ctxt)->dmm_lock);
 	status = PROC_UnMap(args->ARGS_PROC_UNMAPMEM.hProcessor,
-			   args->ARGS_PROC_UNMAPMEM.pMapAddr);
+			   args->ARGS_PROC_UNMAPMEM.pMapAddr, pr_ctxt);
+	mutex_unlock(&((struct PROCESS_CONTEXT *)pr_ctxt)->dmm_lock);
 	return status;
 }
 
 /*
  * ======== PROCWRAP_UnReserveMemory ========
  */
-u32 PROCWRAP_UnReserveMemory(union Trapped_Args *args)
+u32 PROCWRAP_UnReserveMemory(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status;
 
@@ -1066,7 +1109,7 @@ u32 PROCWRAP_UnReserveMemory(union Trapped_Args *args)
 /*
  * ======== PROCWRAP_Stop ========
  */
-u32 PROCWRAP_Stop(union Trapped_Args *args)
+u32 PROCWRAP_Stop(union Trapped_Args *args, void *pr_ctxt)
 {
 	u32 retVal;
 
@@ -1079,7 +1122,7 @@ u32 PROCWRAP_Stop(union Trapped_Args *args)
 /*
  * ======== NODEWRAP_Allocate ========
  */
-u32 NODEWRAP_Allocate(union Trapped_Args *args)
+u32 NODEWRAP_Allocate(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	struct DSP_UUID nodeId;
@@ -1119,9 +1162,11 @@ u32 NODEWRAP_Allocate(union Trapped_Args *args)
 
 	}
 	if (DSP_SUCCEEDED(status)) {
+		mutex_lock(&((struct PROCESS_CONTEXT *)pr_ctxt)->node_lock);
 		status = NODE_Allocate(args->ARGS_NODE_ALLOCATE.hProcessor,
 				      &nodeId, (struct DSP_CBDATA *)pArgs,
-				      pAttrIn, &hNode);
+				      pAttrIn, &hNode, pr_ctxt);
+		mutex_unlock(&((struct PROCESS_CONTEXT *)pr_ctxt)->node_lock);
 	}
 	cp_to_usr(args->ARGS_NODE_ALLOCATE.phNode, &hNode, status, 1);
 func_cont:
@@ -1134,7 +1179,7 @@ func_cont:
 /*
  *  ======== NODEWRAP_AllocMsgBuf ========
  */
-u32 NODEWRAP_AllocMsgBuf(union Trapped_Args *args)
+u32 NODEWRAP_AllocMsgBuf(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	struct DSP_BUFFERATTR *pAttr = NULL;
@@ -1161,7 +1206,7 @@ u32 NODEWRAP_AllocMsgBuf(union Trapped_Args *args)
 /*
  * ======== NODEWRAP_ChangePriority ========
  */
-u32 NODEWRAP_ChangePriority(union Trapped_Args *args)
+u32 NODEWRAP_ChangePriority(union Trapped_Args *args, void *pr_ctxt)
 {
 	u32 retVal;
 
@@ -1176,7 +1221,7 @@ u32 NODEWRAP_ChangePriority(union Trapped_Args *args)
 /*
  * ======== NODEWRAP_Connect ========
  */
-u32 NODEWRAP_Connect(union Trapped_Args *args)
+u32 NODEWRAP_Connect(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	struct DSP_STRMATTR attrs;
@@ -1229,7 +1274,7 @@ func_cont:
 /*
  * ======== NODEWRAP_Create ========
  */
-u32 NODEWRAP_Create(union Trapped_Args *args)
+u32 NODEWRAP_Create(union Trapped_Args *args, void *pr_ctxt)
 {
 	u32 retVal;
 
@@ -1242,12 +1287,14 @@ u32 NODEWRAP_Create(union Trapped_Args *args)
 /*
  * ======== NODEWRAP_Delete ========
  */
-u32 NODEWRAP_Delete(union Trapped_Args *args)
+u32 NODEWRAP_Delete(union Trapped_Args *args, void *pr_ctxt)
 {
 	u32 retVal;
 
 	GT_0trace(WCD_debugMask, GT_ENTER, "NODEWRAP_Delete: entered\n");
-	retVal = NODE_Delete(args->ARGS_NODE_DELETE.hNode);
+	mutex_lock(&((struct PROCESS_CONTEXT *)pr_ctxt)->node_lock);
+	retVal = NODE_Delete(args->ARGS_NODE_DELETE.hNode, pr_ctxt);
+	mutex_unlock(&((struct PROCESS_CONTEXT *)pr_ctxt)->node_lock);
 
 	return retVal;
 }
@@ -1255,7 +1302,7 @@ u32 NODEWRAP_Delete(union Trapped_Args *args)
 /*
  *  ======== NODEWRAP_FreeMsgBuf ========
  */
-u32 NODEWRAP_FreeMsgBuf(union Trapped_Args *args)
+u32 NODEWRAP_FreeMsgBuf(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	struct DSP_BUFFERATTR *pAttr = NULL;
@@ -1278,7 +1325,7 @@ u32 NODEWRAP_FreeMsgBuf(union Trapped_Args *args)
 /*
  * ======== NODEWRAP_GetAttr ========
  */
-u32 NODEWRAP_GetAttr(union Trapped_Args *args)
+u32 NODEWRAP_GetAttr(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	struct DSP_NODEATTR attr;
@@ -1295,7 +1342,7 @@ u32 NODEWRAP_GetAttr(union Trapped_Args *args)
 /*
  * ======== NODEWRAP_GetMessage ========
  */
-u32 NODEWRAP_GetMessage(union Trapped_Args *args)
+u32 NODEWRAP_GetMessage(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status;
 	struct DSP_MSG msg;
@@ -1313,7 +1360,7 @@ u32 NODEWRAP_GetMessage(union Trapped_Args *args)
 /*
  * ======== NODEWRAP_Pause ========
  */
-u32 NODEWRAP_Pause(union Trapped_Args *args)
+u32 NODEWRAP_Pause(union Trapped_Args *args, void *pr_ctxt)
 {
 	u32 retVal;
 
@@ -1326,7 +1373,7 @@ u32 NODEWRAP_Pause(union Trapped_Args *args)
 /*
  * ======== NODEWRAP_PutMessage ========
  */
-u32 NODEWRAP_PutMessage(union Trapped_Args *args)
+u32 NODEWRAP_PutMessage(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	struct DSP_MSG msg;
@@ -1346,7 +1393,7 @@ u32 NODEWRAP_PutMessage(union Trapped_Args *args)
 /*
  * ======== NODEWRAP_RegisterNotify ========
  */
-u32 NODEWRAP_RegisterNotify(union Trapped_Args *args)
+u32 NODEWRAP_RegisterNotify(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	struct DSP_NOTIFICATION notification;
@@ -1375,7 +1422,7 @@ u32 NODEWRAP_RegisterNotify(union Trapped_Args *args)
 /*
  * ======== NODEWRAP_Run ========
  */
-u32 NODEWRAP_Run(union Trapped_Args *args)
+u32 NODEWRAP_Run(union Trapped_Args *args, void *pr_ctxt)
 {
 	u32 retVal;
 
@@ -1388,7 +1435,7 @@ u32 NODEWRAP_Run(union Trapped_Args *args)
 /*
  * ======== NODEWRAP_Terminate ========
  */
-u32 NODEWRAP_Terminate(union Trapped_Args *args)
+u32 NODEWRAP_Terminate(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status;
 	DSP_STATUS tempstatus;
@@ -1406,7 +1453,7 @@ u32 NODEWRAP_Terminate(union Trapped_Args *args)
 /*
  * ======== NODEWRAP_GetUUIDProps ========
  */
-u32 NODEWRAP_GetUUIDProps(union Trapped_Args *args)
+u32 NODEWRAP_GetUUIDProps(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	struct DSP_UUID nodeId;
@@ -1437,7 +1484,7 @@ func_cont:
 /*
  * ======== STRMWRAP_AllocateBuffer ========
  */
-u32 STRMWRAP_AllocateBuffer(union Trapped_Args *args)
+u32 STRMWRAP_AllocateBuffer(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status;
 	u8 **apBuffer = NULL;
@@ -1447,9 +1494,11 @@ u32 STRMWRAP_AllocateBuffer(union Trapped_Args *args)
 
 	apBuffer = MEM_Alloc((uNumBufs * sizeof(u8 *)), MEM_NONPAGED);
 
+	mutex_lock(&((struct PROCESS_CONTEXT *)pr_ctxt)->strm_lock);
 	status = STRM_AllocateBuffer(args->ARGS_STRM_ALLOCATEBUFFER.hStream,
 				     args->ARGS_STRM_ALLOCATEBUFFER.uSize,
-				     apBuffer, uNumBufs);
+				     apBuffer, uNumBufs, pr_ctxt);
+	mutex_unlock(&((struct PROCESS_CONTEXT *)pr_ctxt)->strm_lock);
 	cp_to_usr(args->ARGS_STRM_ALLOCATEBUFFER.apBuffer, apBuffer, status,
 		 uNumBufs);
 	if (apBuffer)
@@ -1461,19 +1510,21 @@ u32 STRMWRAP_AllocateBuffer(union Trapped_Args *args)
 /*
  * ======== STRMWRAP_Close ========
  */
-u32 STRMWRAP_Close(union Trapped_Args *args)
+u32 STRMWRAP_Close(union Trapped_Args *args, void *pr_ctxt)
 {
-	u32 retVal;
+	DSP_STATUS status;
 
-	retVal = STRM_Close(args->ARGS_STRM_CLOSE.hStream);
+	mutex_lock(&((struct PROCESS_CONTEXT *)pr_ctxt)->strm_lock);
+	status = STRM_Close(args->ARGS_STRM_CLOSE.hStream, pr_ctxt);
+	mutex_unlock(&((struct PROCESS_CONTEXT *)pr_ctxt)->strm_lock);
 
-	return retVal;
+	return status;
 }
 
 /*
  * ======== STRMWRAP_FreeBuffer ========
  */
-u32 STRMWRAP_FreeBuffer(union Trapped_Args *args)
+u32 STRMWRAP_FreeBuffer(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	u8 **apBuffer = NULL;
@@ -1487,8 +1538,10 @@ u32 STRMWRAP_FreeBuffer(union Trapped_Args *args)
 		 uNumBufs);
 
 	if (DSP_SUCCEEDED(status)) {
+		mutex_lock(&((struct PROCESS_CONTEXT *)pr_ctxt)->strm_lock);
 		status = STRM_FreeBuffer(args->ARGS_STRM_FREEBUFFER.hStream,
-					 apBuffer, uNumBufs);
+					 apBuffer, uNumBufs, pr_ctxt);
+		mutex_unlock(&((struct PROCESS_CONTEXT *)pr_ctxt)->strm_lock);
 	}
 	cp_to_usr(args->ARGS_STRM_FREEBUFFER.apBuffer, apBuffer, status,
 		 uNumBufs);
@@ -1501,7 +1554,7 @@ u32 STRMWRAP_FreeBuffer(union Trapped_Args *args)
 /*
  * ======== STRMWRAP_GetEventHandle ========
  */
-u32 STRMWRAP_GetEventHandle(union Trapped_Args *args)
+u32 STRMWRAP_GetEventHandle(union Trapped_Args *args, void *pr_ctxt)
 {
 	return DSP_ENOTIMPL;
 }
@@ -1509,7 +1562,7 @@ u32 STRMWRAP_GetEventHandle(union Trapped_Args *args)
 /*
  * ======== STRMWRAP_GetInfo ========
  */
-u32 STRMWRAP_GetInfo(union Trapped_Args *args)
+u32 STRMWRAP_GetInfo(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	struct STRM_INFO strmInfo;
@@ -1534,7 +1587,7 @@ u32 STRMWRAP_GetInfo(union Trapped_Args *args)
 /*
  * ======== STRMWRAP_Idle ========
  */
-u32 STRMWRAP_Idle(union Trapped_Args *args)
+u32 STRMWRAP_Idle(union Trapped_Args *args, void *pr_ctxt)
 {
 	u32 retVal;
 
@@ -1547,7 +1600,7 @@ u32 STRMWRAP_Idle(union Trapped_Args *args)
 /*
  * ======== STRMWRAP_Issue ========
  */
-u32 STRMWRAP_Issue(union Trapped_Args *args)
+u32 STRMWRAP_Issue(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	/* No need of doing cp_fm_usr for the user buffer (pBuffer)
@@ -1565,7 +1618,7 @@ u32 STRMWRAP_Issue(union Trapped_Args *args)
 /*
  * ======== STRMWRAP_Open ========
  */
-u32 STRMWRAP_Open(union Trapped_Args *args)
+u32 STRMWRAP_Open(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	struct STRM_ATTR attr;
@@ -1580,9 +1633,12 @@ u32 STRMWRAP_Open(union Trapped_Args *args)
 			attr.pStreamAttrIn = &strmAttrIn;
 
 	}
+	mutex_lock(&((struct PROCESS_CONTEXT *)pr_ctxt)->strm_lock);
 	status = STRM_Open(args->ARGS_STRM_OPEN.hNode,
 			  args->ARGS_STRM_OPEN.uDirection,
-			  args->ARGS_STRM_OPEN.uIndex, &attr, &pStrm);
+			  args->ARGS_STRM_OPEN.uIndex, &attr, &pStrm,
+			  pr_ctxt);
+	mutex_unlock(&((struct PROCESS_CONTEXT *)pr_ctxt)->strm_lock);
 	cp_to_usr(args->ARGS_STRM_OPEN.phStream, &pStrm, status, 1);
 	return status;
 }
@@ -1590,7 +1646,7 @@ u32 STRMWRAP_Open(union Trapped_Args *args)
 /*
  * ======== STRMWRAP_Reclaim ========
  */
-u32 STRMWRAP_Reclaim(union Trapped_Args *args)
+u32 STRMWRAP_Reclaim(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	u8 *pBufPtr;
@@ -1615,7 +1671,7 @@ u32 STRMWRAP_Reclaim(union Trapped_Args *args)
 /*
  * ======== STRMWRAP_RegisterNotify ========
  */
-u32 STRMWRAP_RegisterNotify(union Trapped_Args *args)
+u32 STRMWRAP_RegisterNotify(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	struct DSP_NOTIFICATION notification;
@@ -1640,7 +1696,7 @@ u32 STRMWRAP_RegisterNotify(union Trapped_Args *args)
 /*
  * ======== STRMWRAP_Select ========
  */
-u32 STRMWRAP_Select(union Trapped_Args *args)
+u32 STRMWRAP_Select(union Trapped_Args *args, void *pr_ctxt)
 {
 	u32 mask;
 	struct STRM_OBJECT *aStrmTab[MAX_STREAMS];
@@ -1663,7 +1719,7 @@ u32 STRMWRAP_Select(union Trapped_Args *args)
 /*
  * ======== CMMWRAP_CallocBuf ========
  */
-u32 CMMWRAP_CallocBuf(union Trapped_Args *args)
+u32 CMMWRAP_CallocBuf(union Trapped_Args *args, void *pr_ctxt)
 {
 	/* This operation is done in kernel */
 	return DSP_ENOTIMPL;
@@ -1672,7 +1728,7 @@ u32 CMMWRAP_CallocBuf(union Trapped_Args *args)
 /*
  * ======== CMMWRAP_FreeBuf ========
  */
-u32 CMMWRAP_FreeBuf(union Trapped_Args *args)
+u32 CMMWRAP_FreeBuf(union Trapped_Args *args, void *pr_ctxt)
 {
 	/* This operation is done in kernel */
 	return DSP_ENOTIMPL;
@@ -1681,7 +1737,7 @@ u32 CMMWRAP_FreeBuf(union Trapped_Args *args)
 /*
  * ======== CMMWRAP_GetHandle ========
  */
-u32 CMMWRAP_GetHandle(union Trapped_Args *args)
+u32 CMMWRAP_GetHandle(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	struct CMM_OBJECT *hCmmMgr;
@@ -1696,7 +1752,7 @@ u32 CMMWRAP_GetHandle(union Trapped_Args *args)
 /*
  * ======== CMMWRAP_GetInfo ========
  */
-u32 CMMWRAP_GetInfo(union Trapped_Args *args)
+u32 CMMWRAP_GetInfo(union Trapped_Args *args, void *pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
 	struct CMM_INFO cmmInfo;

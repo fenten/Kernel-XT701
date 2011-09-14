@@ -13,9 +13,6 @@
 
 #include <linux/decompress/generic.h>
 
-#include <linux/decompress/bunzip2.h>
-#include <linux/decompress/unlzma.h>
-#include <linux/decompress/inflate.h>
 
 int __initdata rd_prompt = 1;/* 1 = prompt for RAM disk, 0 = don't prompt */
 
@@ -44,32 +41,14 @@ static int __init crd_load(int in_fd, int out_fd, decompress_fn deco);
  * numbers could not be found.
  *
  * We currently check for the following magic numbers:
- * 	minix
- * 	ext2
+ *	minix
+ *	ext2
  *	romfs
  *	cramfs
  *	squashfs
- * 	gzip
+ *	gzip
  */
-static const struct compress_format {
-	unsigned char magic[2];
-	const char *name;
-	decompress_fn decompressor;
-} compressed_formats[] = {
-#ifdef CONFIG_RD_GZIP
-	{ {037, 0213}, "gzip", gunzip },
-	{ {037, 0236}, "gzip", gunzip },
-#endif
-#ifdef CONFIG_RD_BZIP2
-	{ {0x42, 0x5a}, "bzip2", bunzip2 },
-#endif
-#ifdef CONFIG_RD_LZMA
-	{ {0x5d, 0x00}, "lzma", unlzma },
-#endif
-	{ {0, 0}, NULL, NULL }
-};
-
-static int __init 
+static int __init
 identify_ramdisk_image(int fd, int start_block, decompress_fn *decompressor)
 {
 	const int size = 512;
@@ -80,7 +59,7 @@ identify_ramdisk_image(int fd, int start_block, decompress_fn *decompressor)
 	struct squashfs_super_block *squashfsb;
 	int nblocks = -1;
 	unsigned char *buf;
-	const struct compress_format *cf;
+	const char *compress_name;
 
 	buf = kmalloc(size, GFP_KERNEL);
 	if (!buf)
@@ -99,15 +78,16 @@ identify_ramdisk_image(int fd, int start_block, decompress_fn *decompressor)
 	sys_lseek(fd, start_block * BLOCK_SIZE, 0);
 	sys_read(fd, buf, size);
 
-	for (cf = compressed_formats; cf->decompressor; cf++) {
-		if (buf[0] == cf->magic[0] && buf[1] == cf->magic[1]) {
-			printk(KERN_NOTICE
-			       "RAMDISK: %s image found at block %d\n",
-			       cf->name, start_block);
-			*decompressor = cf->decompressor;
-			nblocks = 0;
-			goto done;
-		}
+	*decompressor = decompress_method(buf, size, &compress_name);
+	if (compress_name) {
+		printk(KERN_NOTICE "RAMDISK: %s image found at block %d\n",
+		       compress_name, start_block);
+		if (!*decompressor)
+			printk(KERN_EMERG
+			       "RAMDISK: %s decompressor not configured!\n",
+			       compress_name);
+		nblocks = 0;
+		goto done;
 	}
 
 	/* romfs is at block zero too */
@@ -167,7 +147,7 @@ identify_ramdisk_image(int fd, int start_block, decompress_fn *decompressor)
 	printk(KERN_NOTICE
 	       "RAMDISK: Couldn't find valid RAM disk image starting at %d.\n",
 	       start_block);
-	
+
 done:
 	sys_lseek(fd, start_block * BLOCK_SIZE, 0);
 	kfree(buf);
@@ -226,7 +206,7 @@ int __init rd_load_image(char *from)
 		       nblocks, rd_blocks);
 		goto done;
 	}
-		
+
 	/*
 	 * OK, time to copy in the data
 	 */
@@ -307,7 +287,7 @@ static int __init compr_fill(void *buf, unsigned int len)
 {
 	int r = sys_read(crd_infd, buf, len);
 	if (r < 0)
-		 printk(KERN_ERR "RAMDISK: error while reading compressed data");
+		printk(KERN_ERR "RAMDISK: error while reading compressed data");
 	else if (r == 0)
 		printk(KERN_ERR "RAMDISK: EOF while reading compressed data");
 	return r;
@@ -317,11 +297,11 @@ static int __init compr_flush(void *window, unsigned int outcnt)
 {
 	int written = sys_write(crd_outfd, window, outcnt);
 	if (written != outcnt) {
-	if (decompress_error == 0)
-		printk(KERN_ERR
-		       "RAMDISK: incomplete write (%d != %d)\n",
-		       written, outcnt);
-		 decompress_error = 1;
+		if (decompress_error == 0)
+			printk(KERN_ERR
+			       "RAMDISK: incomplete write (%d != %d)\n",
+			       written, outcnt);
+		decompress_error = 1;
 		return -1;
 	}
 	return outcnt;

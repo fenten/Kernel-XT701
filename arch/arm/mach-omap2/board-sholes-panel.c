@@ -16,10 +16,10 @@
 #include <linux/err.h>
 #include <linux/omapfb.h>
 
-#include <mach/display.h>
-#include <mach/gpio.h>
-#include <mach/mux.h>
-#include <mach/resource.h>
+#include <plat/display.h>
+#include <plat/gpio.h>
+#include <plat/mux.h>
+#include <plat/resource.h>
 
 #define SHOLES_DISPLAY_RESET_GPIO	136
 
@@ -80,8 +80,13 @@ static struct omap_dss_device sholes_lcd_device = {
 	.phy.dsi.data1_pol = 0,
 	.phy.dsi.data2_lane = 3,
 	.phy.dsi.data2_pol = 0,
-	.phy.dsi.ddr_clk_hz = 160000000,
-	.phy.dsi.lp_clk_hz = 10000000,
+	.phy.dsi.div.regn = 13,
+	.phy.dsi.div.regm = 160,
+	.phy.dsi.div.regm3 = 7,
+	.phy.dsi.div.regm4 = 7,
+	.phy.dsi.div.lck_div = 1,
+	.phy.dsi.div.pck_div = 4,
+	.phy.dsi.div.lp_clk_div = 5,
 	.reset_gpio = SHOLES_DISPLAY_RESET_GPIO,
 	.platform_enable = sholes_panel_enable,
 	.platform_disable = sholes_panel_disable,

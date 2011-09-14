@@ -76,11 +76,13 @@ struct sms_board {
 	char *name, *fw[DEVICE_MODE_MAX];
 	struct sms_board_gpio_cfg board_cfg;
 	enum ir_kb_type ir_kb_type;
+
+	/* gpios */
+	int led_power, led_hi, led_lo, lna_ctrl, rf_switch;
 };
 
 struct sms_board *sms_get_board(int id);
 
-extern struct usb_device_id smsusb_id_table[];
 extern struct smscore_device_t *coredev;
 
 enum SMS_BOARD_EVENTS {
@@ -106,5 +108,16 @@ enum SMS_BOARD_EVENTS {
 
 int sms_board_event(struct smscore_device_t *coredev,
 		enum SMS_BOARD_EVENTS gevent);
+
+int sms_board_setup(struct smscore_device_t *coredev);
+
+#define SMS_LED_OFF 0
+#define SMS_LED_LO  1
+#define SMS_LED_HI  2
+int sms_board_led_feedback(struct smscore_device_t *coredev, int led);
+int sms_board_power(struct smscore_device_t *coredev, int onoff);
+int sms_board_lna_control(struct smscore_device_t *coredev, int onoff);
+
+extern int sms_board_load_modules(int id);
 
 #endif /* __SMS_CARDS_H__ */

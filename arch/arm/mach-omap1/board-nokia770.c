@@ -14,11 +14,11 @@
 #include <linux/platform_device.h>
 #include <linux/input.h>
 #include <linux/clk.h>
+#include <linux/omapfb.h>
 
 #include <linux/spi/spi.h>
 #include <linux/spi/ads7846.h>
 #include <linux/workqueue.h>
-#include <linux/omapfb.h>
 #include <linux/delay.h>
 
 #include <mach/hardware.h>
@@ -27,15 +27,17 @@
 #include <asm/mach/map.h>
 
 #include <mach/gpio.h>
-#include <mach/mux.h>
-#include <mach/usb.h>
-#include <mach/board.h>
-#include <mach/keypad.h>
-#include <mach/common.h>
-#include <mach/dsp_common.h>
-#include <mach/lcd_mipid.h>
-#include <mach/mmc.h>
-#include <mach/usb.h>
+#include <plat/mux.h>
+#include <plat/usb.h>
+#include <plat/board.h>
+#include <plat/keypad.h>
+#include <plat/common.h>
+#include <plat/dsp_common.h>
+#include <plat/omapfb.h>
+#include <plat/hwa742.h>
+#include <plat/lcd_mipid.h>
+#include <plat/mmc.h>
+#include <plat/clock.h>
 
 #define ADS7846_PENDOWN_GPIO	15
 
@@ -163,6 +165,15 @@ static struct spi_board_info nokia770_spi_board_info[] __initdata = {
 	},
 };
 
+static struct hwa742_platform_data nokia770_hwa742_platform_data = {
+	.te_connected		= 1,
+};
+
+static void hwa742_dev_init(void)
+{
+	clk_add_alias("hwa_sys_ck", NULL, "bclk", NULL);
+	omapfb_set_ctrl_platform_data(&nokia770_hwa742_platform_data);
+}
 
 /* assume no Mini-AB port */
 
@@ -194,9 +205,11 @@ static int nokia770_mmc_get_cover_state(struct device *dev, int slot)
 static struct omap_mmc_platform_data nokia770_mmc2_data = {
 	.nr_slots                       = 1,
 	.dma_mask			= 0xffffffff,
+	.max_freq                       = 12000000,
 	.slots[0]       = {
 		.set_power		= nokia770_mmc_set_power,
 		.get_cover_state	= nokia770_mmc_get_cover_state,
+		.ocr_mask               = MMC_VDD_32_33|MMC_VDD_33_34,
 		.name                   = "mmcblk",
 	},
 };
@@ -371,6 +384,7 @@ static void __init omap_nokia770_init(void)
 	omap_serial_init();
 	omap_register_i2c_bus(1, 100, NULL, 0);
 	omap_dsp_init();
+	hwa742_dev_init();
 	ads7846_dev_init();
 	mipid_dev_init();
 	omap_usb_init(&nokia770_usb_config);

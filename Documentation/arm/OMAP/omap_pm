@@ -8,72 +8,6 @@ throughput constraints to the kernel power management code.
 Over time, the intention is to merge features from the OMAP PM
 interface into the Linux PM QoS code.
 
-This document is divided into two parts:
-
-     - Rationale
-     - Overview
-
-
-Rationale: existing PM interfaces are currently not ideal for OMAP
-------------------------------------------------------------------
-
-There are two PM interfaces in use with publicly-distributed OMAP
-Linux code: the TI Shared Resource Framework (SRF) and the Linux PM
-QoS parameters code.  Neither interface is currently ideal for Linux
-OMAP code.
-
-TI Shared Resource Framework:
-
-The TI CDP tree drivers use the TI Shared Resource Framework (SRF) to
-control chip power management.  TI got their "CDP" drivers up and
-running quickly with considerable power savings using the SRF.
-However, the SRF has some problems.  Many parameters are specified in
-OMAP-specific terms, such as target OPPs (operating performance
-points), rather than in terms of actual latency or throughput
-requirements.  OPPs change depending on OMAP silicon revisions or OMAP
-types, and are meaningless for other architectures, so drivers shared
-between OMAP and other architectures would have to #ifdef out the SRF
-constraints.
-
-Linux PM QoS parameters:
-
-In February 2008, the mainline Linux kernel added the Linux PM QoS
-parameters code, located in kernel/pm_qos_params.c.  (This code
-replaced the latency management code that was present in earlier
-kernels.)  Ideally, OMAP drivers would be able to use this Linux PM
-QoS code directly, but the PM QoS code has some drawbacks:
-
-- It combines some power management parameters that should be kept
-  separate for maximum power savings on OMAP3.  For example, in the PM
-  QoS code, CPU and system DMA wakeup latency are combined into one
-  parameter; but on OMAP3, these are distinct parameters.  The Linux
-  PM QoS code also combines all network power management knobs into
-  two non-device-specific parameters.  OMAP2/3 systems can have
-  different network devices with different power management
-  requirements - for example, a wired Ethernet interface may have
-  different latency and throughput constraints than a WiFi interface.
-
-- It does not yet cover all of the power management capabilities of
-  the OMAP3 architecture.  It does not express latency constraints on
-  a per-device or per-powerdomain basis; it only covers
-  cpu_dma_latency and network throughput and latency, which would not
-  cover most of the OMAP3 devices.
-
-The result: drivers using the current Linux PM QoS layer directly are
-unlikely to reach the same level of power efficiency as driver code
-using the SRF.
-
-So, the SRF provides significant power savings, but expresses power
-constraints in an OMAP- and silicon-revision-specific way; and the PM
-QoS layer expresses PM constraints in a cross-platform manner (in
-terms of fundamental physical units), but does not support
-per-powerdomain constraints and does not support many of the OMAP power
-management features.
-
-
-Overview:  A medium-term alternative: the OMAP PM interface
------------------------------------------------------------
-
 Drivers need to express PM parameters which:
 
 - support the range of power management parameters present in the TI SRF;
@@ -193,12 +127,3 @@ implementation needs:
 10. (*pdata->cpu_set_freq)(unsigned long f)
 
 11. (*pdata->cpu_get_freq)(void)
-
-
-There are also functions for use by the clockdomain layer to indicate
-that a powerdomain should wake up or be put to sleep.  These are not called
-via .platform_data.
-
-12. omap_pm_pwrdm_active(struct powerdomain *pwrdm)
-
-13. omap_pm_pwrdm_inactive(struct powerdomain *pwrdm)

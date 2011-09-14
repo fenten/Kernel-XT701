@@ -33,7 +33,9 @@
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
 #include <linux/usb/composite.h>
+#include <linux/usb/android_composite.h>
 #include <asm/cacheflush.h>
+#include <linux/miscdevice.h>
 #include "f_usbnet.h"
 
 #include "f_mot_android.h"
@@ -91,13 +93,6 @@ static struct usbnet_device             g_usbnet_device;
 static struct usbnet_context 		*g_usbnet_context;
 static struct net_device     		*g_net_dev;
 static struct usbnet_if_configuration 	g_usbnet_ifc;
-
-#ifdef CONFIG_USB_MOT_ANDROID
-/* used when eth function is disabled */
-static struct usb_descriptor_header *null_function[] = {
-	NULL,
-};
-#endif
 
 /*
  * USB descriptors
@@ -204,6 +199,43 @@ static struct usb_descriptor_header *hs_function[] = {
 	if (context && context->gadget)					\
 		dev_dbg(&(context->gadget->dev) , fmt , ## args)
 
+static int usbnet_enable_open(struct inode *ip, struct file *fp)
+{
+	/* Empty Function For Now */
+	return 0;
+}
+
+static int usbnet_enable_release(struct inode *ip, struct file *fp)
+{
+	/* Empty function for now */
+	return 0;
+}
+
+static const struct file_operations usbnet_enable_fops = {
+	.owner = THIS_MODULE,
+	.open = usbnet_enable_open,
+	.release = usbnet_enable_release,
+};
+
+static struct miscdevice usbnet_enable_device = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "usbnet_enable",
+	.fops = &usbnet_enable_fops,
+};
+
+static void usbnet_send_uevent(int config)
+{
+	char event_string[20];
+	char *envp[] = {event_string, NULL};
+
+	printk(KERN_INFO "Sending USBLAN %s uevent \n",
+			 config ? "enabled" : "disabled");
+	snprintf(event_string, sizeof(event_string), "USB_CONNECT=%d", config);
+	kobject_uevent_env(&usbnet_enable_device.this_device->kobj,
+		KOBJ_CHANGE, envp);
+}
+
+
 
 static inline struct usbnet_device *func_to_dev(struct usb_function *f)
 {
@@ -216,14 +248,12 @@ static int ether_queue_out(struct usb_request *req)
 	struct sk_buff *skb;
 	int ret;
 
-	skb = alloc_skb(USB_MTU + NET_IP_ALIGN, GFP_ATOMIC);
+	skb = alloc_skb(USB_MTU, GFP_ATOMIC);
 	if (!skb) {
 		printk(KERN_INFO "%s: failed to alloc skb\n", __func__);
 		ret = -ENOMEM;
 		goto fail;
 	}
-
-	skb_reserve(skb, NET_IP_ALIGN);
 
 	req->buf = skb->data;
 	req->length = USB_MTU;
@@ -351,15 +381,21 @@ static void usbnet_if_config(struct work_struct *work)
 
 	set_fs(saved_fs);
 
-	if (g_usbnet_ifc.iff_flag == IFF_UP)
-		usb_interface_enum_cb(ETH_TYPE_FLAG);
-	else {
-		g_usbnet_ifc.subnet_mask = 0;
-		g_usbnet_ifc.router_ip   = 0;
-	}
+	usbnet_send_uevent(g_usbnet_context->config);
 }
 
+static const struct net_device_ops eth_netdev_ops = {
+	.ndo_open               = usb_ether_open,
+	.ndo_stop               = usb_ether_stop,
+	.ndo_start_xmit         = usb_ether_xmit,
+	.ndo_get_stats          = usb_ether_get_stats,
+};
+
+#ifdef CONFIG_USB_MOT_ANDROID
+static void usb_ether_setup(struct net_device *dev)
+#else
 static void __init usb_ether_setup(struct net_device *dev)
+#endif
 {
 	g_usbnet_context = netdev_priv(dev);
 	INIT_LIST_HEAD(&g_usbnet_context->rx_reqs);
@@ -368,10 +404,8 @@ static void __init usb_ether_setup(struct net_device *dev)
 	spin_lock_init(&g_usbnet_context->lock);
 	g_usbnet_context->dev = dev;
 
-	dev->open = usb_ether_open;
-	dev->stop = usb_ether_stop;
-	dev->hard_start_xmit = usb_ether_xmit;
-	dev->get_stats = usb_ether_get_stats;
+	dev->netdev_ops = &eth_netdev_ops;
+
 	dev->watchdog_timeo = 20;
 
 	ether_setup(dev);
@@ -436,6 +470,7 @@ static void usbnet_unbind(struct usb_configuration *c, struct usb_function *f)
 
 	g_usbnet_context->config = 0;
 
+	misc_deregister(&usbnet_enable_device);
 	usbnet_cleanup();
 }
 
@@ -490,8 +525,13 @@ static void ether_in_complete(struct usb_ep *ep, struct usb_request *req)
 	spin_unlock_irqrestore(&g_usbnet_context->lock, flags);
 }
 
+#ifdef CONFIG_USB_MOT_ANDROID
+static int usbnet_bind(struct usb_configuration *c,
+			struct usb_function *f)
+#else
 static int __init usbnet_bind(struct usb_configuration *c,
 			struct usb_function *f)
+#endif
 {
 	struct usb_composite_dev *cdev = c->cdev;
 	struct usbnet_device  *dev = func_to_dev(f);
@@ -579,7 +619,8 @@ static int __init usbnet_bind(struct usb_configuration *c,
 		spin_unlock_irqrestore(&g_usbnet_context->lock, flags);
 	}
 
-	usb_gadget_set_selfpowered(cdev->gadget);
+	/*Do Not report Self Powered as WHQL tests fail on Win 7 */
+	/* usb_gadget_set_selfpowered(cdev->gadget); */
 	return 0;
 
 autoconf_fail:
@@ -670,6 +711,8 @@ static void do_set_config(u16 new_config)
 	} else {
 		netif_stop_queue(g_net_dev);
 		g_usbnet_ifc.ip_addr = 0;
+		g_usbnet_ifc.subnet_mask = 0;
+		g_usbnet_ifc.router_ip = 0;
 		g_usbnet_ifc.iff_flag = 0;
 		g_usbnet_ifc.usbnet_config_dev = g_usbnet_context->dev;
 		schedule_work(&g_usbnet_ifc.usbnet_config_wq);
@@ -689,6 +732,7 @@ static int usbnet_set_alt(struct usb_function *f,
 {
 	printk(KERN_INFO "usbnet_set_alt intf: %d alt: %d\n", intf, alt);
 	do_set_config(1);
+	usb_interface_enum_cb(ETH_TYPE_FLAG);
 	return 0;
 }
 
@@ -760,14 +804,12 @@ static void usbnet_resume(struct usb_function *f)
 }
 
 
-int __init usbnet_function_add(struct usb_composite_dev *cdev,
-		struct usb_configuration *c)
+int usbnet_bind_config(struct usb_configuration *c)
 {
 	struct usbnet_device *dev;
 	int ret, status;
 
-	printk(KERN_INFO "usbnet_function_add\n");
-
+	printk(KERN_INFO "Gadget USB: usbnet_bind_config\n");
 	status = usb_string_id(c->cdev);
 	if (status >= 0) {
 		usbnet_string_defs[STRING_INTERFACE].id = status;
@@ -795,16 +837,11 @@ int __init usbnet_function_add(struct usb_composite_dev *cdev,
 
 	dev = &g_usbnet_device;
 	dev->net_ctxt = g_usbnet_context;
-	dev->cdev = cdev;
+	dev->cdev = c->cdev;
 	dev->function.name = "usbnet";
 
-#ifdef CONFIG_USB_MOT_ANDROID
-	dev->function.descriptors = null_function;
-	dev->function.hs_descriptors = null_function;
-#else
 	dev->function.descriptors = fs_function;
 	dev->function.hs_descriptors = hs_function;
-#endif
 	dev->function.strings = usbnet_strings;
 	dev->function.bind = usbnet_bind;
 	dev->function.unbind = usbnet_unbind;
@@ -814,9 +851,20 @@ int __init usbnet_function_add(struct usb_composite_dev *cdev,
 	dev->function.suspend = usbnet_suspend;
 	dev->function.resume = usbnet_resume;
 
+	/* start disabled */
+	dev->function.hidden = 1;
+
 	ret = usb_add_function(c, &dev->function);
 	if (ret)
 		goto err1;
+
+	ret = misc_register(&usbnet_enable_device);
+	if (ret) {
+		printk(KERN_ERR "USBNET -  Can't register misc enable device %d \n",
+			MISC_DYNAMIC_MINOR);
+		goto err1;
+	}
+
 
 	return 0;
 
@@ -826,22 +874,16 @@ err1:
 	return ret;
 }
 
-#ifdef CONFIG_USB_MOT_ANDROID
-struct usb_function *usbnet_function_enable(int enable, int id)
+static struct android_usb_function usbnet_function = {
+	.name = "usbnet",
+	.bind_config = usbnet_bind_config,
+};
+
+static int __init init(void)
 {
-	printk(KERN_DEBUG "%s enable=%d id = %d\n", __func__, enable, id);
-	if (g_usbnet_context) {
-		if (enable) {
-			g_usbnet_device.function.descriptors = fs_function;
-			g_usbnet_device.function.hs_descriptors = hs_function;
-			intf_desc.bInterfaceNumber = id;
-		} else {
-			g_usbnet_device.function.descriptors = null_function;
-			g_usbnet_device.function.hs_descriptors = null_function;
-		}
-		return &g_usbnet_device.function;
-	}
-	return NULL;
+	printk(KERN_INFO "f_usbnet init\n");
+	android_register_function(&usbnet_function);
+	return 0;
 }
-#endif
+module_init(init);
 

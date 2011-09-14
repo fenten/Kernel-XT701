@@ -1,7 +1,7 @@
 /*
- * f_mtp.c -- USB MTP gadget driver
+* f_mtp.c -- USB MTP gadget driver
  *
- * Copyright (C) 2009 Motorola Corporation
+ * Copyright (C) 2010 Motorola Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -36,6 +36,7 @@
 #include <linux/usb/ch9.h>
 #include <linux/usb/composite.h>
 #include <linux/usb/gadget.h>
+#include <linux/usb/android_composite.h>
 
 #include "gadget_chips.h"
 
@@ -59,33 +60,22 @@
  *
  */
 #define STRING_INTERFACE	0
-#define STRING_MTP      	0
+#define STRING_MTP      	1
 
 /* static strings, in UTF-8 */
-static struct usb_string mtp_string_defs1[] = {
+static struct usb_string mtp_string_defs[] = {
 	[STRING_INTERFACE].s = "Motorola MTP Interface",
+	[STRING_MTP].s = "MSFT100\034",
 	{  /* ZEROES END LIST */ },
 };
 
-static struct usb_string mtp_string_defs2[] = {
-     [STRING_MTP].s = "MSFT100\034",
-     {  /* ZEROES END LIST */ },
-};
-
-
-static struct usb_gadget_strings mtp_string_table1 = {
+static struct usb_gadget_strings mtp_string_table = {
 	.language =		0x0409,	/* en-us */
-	.strings =		mtp_string_defs1,
-};
-
-static struct usb_gadget_strings mtp_string_table2 = {
-     .language =     0x0, /* en-us */
-     .strings =      mtp_string_defs2,
+	.strings =		mtp_string_defs,
 };
 
 static struct usb_gadget_strings *mtp_strings[] = {
-	&mtp_string_table1,
-	&mtp_string_table2,
+	&mtp_string_table,
 	NULL,
 };
 
@@ -160,11 +150,6 @@ static struct usb_descriptor_header *hs_mtp_descs[] = {
 	(struct usb_descriptor_header *) &hs_bulk_out_desc,
 	(struct usb_descriptor_header *) &hs_bulk_in_desc,
 	(struct usb_descriptor_header *) &hs_intr_in_desc,
-	NULL,
-};
-
-/* used when MTP function is disabled */
-static struct usb_descriptor_header *null_mtp_descs[] = {
 	NULL,
 };
 
@@ -365,9 +350,9 @@ static ssize_t mtp_read(struct file *fp, char __user *buf,
 
 	while (count > 0) {
 		mtp_debug("count=%d\n", count);
-		if (g_usb_mtp_context.error) {
+		if (g_usb_mtp_context.error)
 			return -EIO;
-		}
+
 		/* we will block until we're online */
 		ret = wait_event_interruptible(g_usb_mtp_context.rx_wq,
 			(g_usb_mtp_context.online || g_usb_mtp_context.cancel));
@@ -475,9 +460,9 @@ static ssize_t mtp_write(struct file *fp, const char __user *buf,
 
 	while (count > 0) {
 		mtp_debug("count=%d\n", count);
-		if (g_usb_mtp_context.error) {
+		if (g_usb_mtp_context.error)
 			return -EIO;
-		}
+
 		/* get an idle tx request to use */
 		ret = wait_event_interruptible(g_usb_mtp_context.tx_wq,
 			(g_usb_mtp_context.online || g_usb_mtp_context.cancel));
@@ -594,9 +579,11 @@ static int mtp_ioctl(struct inode *inode, struct file *file,
 		memcpy(req->buf, event.data, count);
 		req->length = count;
 		req->zero = 0;
-		if (usb_ep_queue(g_usb_mtp_context.intr_in, req, GFP_ATOMIC))
-			return -EINVAL;
 		g_usb_mtp_context.intr_in_busy = 1;
+		if (usb_ep_queue(g_usb_mtp_context.intr_in, req, GFP_ATOMIC)) {
+			g_usb_mtp_context.intr_in_busy = 0;
+			return -EINVAL;
+		}
 		break;
 	case MTP_IOC_SEND_ZLP:
 		req = req_get(&g_usb_mtp_context.tx_reqs);
@@ -859,14 +846,15 @@ mtp_function_unbind(struct usb_configuration *c, struct usb_function *f)
     remove_proc_entry("mtpctl", NULL);
 }
 
-static int __init
+static int
 mtp_function_bind(struct usb_configuration *c, struct usb_function *f)
 {
 	int n, rc, id;
 	struct usb_ep *ep;
 	struct usb_request *req;
-    struct proc_dir_entry *mtp_proc = NULL;
+	struct proc_dir_entry *mtp_proc = NULL;
 
+	spin_lock_init(&g_usb_mtp_context.lock);
 	g_usb_mtp_context.cdev = c->cdev;
 	/* allocate interface ID(s) */
 	id = usb_interface_id(c, f);
@@ -967,6 +955,8 @@ autoconf_fail:
 
 static void mtp_function_disable(struct usb_function *f)
 {
+	struct usb_request *req = NULL;
+
 	printk(KERN_DEBUG "%s(): disabled\n", __func__);
 	g_usb_mtp_context.online = 0;
 	g_usb_mtp_context.cancel = 1;
@@ -980,6 +970,11 @@ static void mtp_function_disable(struct usb_function *f)
 	g_usb_mtp_context.cur_read_req = 0;
 	g_usb_mtp_context.read_buf = 0;
 	g_usb_mtp_context.data_len = 0;
+
+	/* drop finished requests */
+	while ((req = req_get(&g_usb_mtp_context.rx_done_reqs)))
+		req_put(&g_usb_mtp_context.rx_reqs, req);
+
 	/* readers may be blocked waiting for us to go online */
 	wake_up(&g_usb_mtp_context.rx_wq);
 	wake_up(&g_usb_mtp_context.tx_wq);
@@ -1145,12 +1140,12 @@ static int mtp_function_setup(struct usb_function *f,
 	return value;
 }
 
-int __init mtp_function_add(struct usb_composite_dev *cdev,
-	struct usb_configuration *c)
+int mtp_bind_config(struct usb_configuration *c)
 {
 	int ret = 0;
 	int status;
 
+	printk(KERN_INFO "Gadget Usb: mtp_bind_config\n");
 	init_waitqueue_head(&g_usb_mtp_context.rx_wq);
 	init_waitqueue_head(&g_usb_mtp_context.tx_wq);
 	init_waitqueue_head(&g_usb_mtp_context.ctl_rx_wq);
@@ -1164,22 +1159,25 @@ int __init mtp_function_add(struct usb_composite_dev *cdev,
 
 	status = usb_string_id(c->cdev);
 	if (status >= 0) {
-		mtp_string_defs1[STRING_INTERFACE].id = status;
+		mtp_string_defs[STRING_INTERFACE].id = status;
 		intf_desc.iInterface = status;
 	}
 
-	mtp_string_defs2[STRING_MTP].id = mtp_ext_str_idx;
+	mtp_string_defs[STRING_MTP].id = mtp_ext_str_idx;
 
-	g_usb_mtp_context.cdev = cdev;
+	g_usb_mtp_context.cdev = c->cdev;
 	g_usb_mtp_context.function.name = "mtp";
-	g_usb_mtp_context.function.descriptors = null_mtp_descs;
-	g_usb_mtp_context.function.hs_descriptors = null_mtp_descs;
+	g_usb_mtp_context.function.descriptors = fs_mtp_descs;
+	g_usb_mtp_context.function.hs_descriptors = hs_mtp_descs;
 	g_usb_mtp_context.function.strings = mtp_strings;
 	g_usb_mtp_context.function.bind = mtp_function_bind;
 	g_usb_mtp_context.function.unbind = mtp_function_unbind;
 	g_usb_mtp_context.function.setup = mtp_function_setup;
 	g_usb_mtp_context.function.set_alt = mtp_function_set_alt;
 	g_usb_mtp_context.function.disable = mtp_function_disable;
+
+	/* start disabled */
+	g_usb_mtp_context.function.hidden = 1;
 
 	ret = usb_add_function(c, &g_usb_mtp_context.function);
 	if (ret) {
@@ -1190,16 +1188,16 @@ int __init mtp_function_add(struct usb_composite_dev *cdev,
 	return 0;
 }
 
-struct usb_function *mtp_function_enable(int enable, int id)
+static struct android_usb_function mtp_function = {
+	.name = "mtp",
+	.bind_config = mtp_bind_config,
+};
+
+static int __init init(void)
 {
-	printk(KERN_DEBUG "%s enable=%d id=%d\n", __func__, enable, id);
-	if (enable) {
-		g_usb_mtp_context.function.descriptors = fs_mtp_descs;
-		g_usb_mtp_context.function.hs_descriptors = hs_mtp_descs;
-		intf_desc.bInterfaceNumber = id;
-	} else {
-		g_usb_mtp_context.function.descriptors = null_mtp_descs;
-		g_usb_mtp_context.function.hs_descriptors = null_mtp_descs;
-	}
-	return &g_usb_mtp_context.function;
+	printk(KERN_INFO "f_mtp init\n");
+	android_register_function(&mtp_function);
+	return 0;
 }
+module_init(init);
+

@@ -24,9 +24,9 @@
 #include <linux/usb.h>
 #include <linux/usb/serial.h>
 #include <linux/irq.h>
-#include <mach/irqs.h>
-#include <mach/gpio.h>
-#include <mach/usb.h>
+#include <plat/irqs.h>
+#include <plat/gpio.h>
+#include <plat/usb.h>
 #include <linux/gpio.h>
 #include <linux/wakelock.h>
 
@@ -473,8 +473,7 @@ static irqreturn_t gpio_wkup_interrupt_handler (int irq, void *data_ptr)
 }
 
 static int modem_open(struct tty_struct *tty,
-		struct usb_serial_port *port,
-		struct file *filp)
+		struct usb_serial_port *port)
 {
 	struct modem_port *modem_port_ptr =
 	    usb_get_serial_data(port->serial);
@@ -483,16 +482,9 @@ static int modem_open(struct tty_struct *tty,
 	int i;
 	unsigned long flags;
 
-	printk("%s\n", __func__);
 	if (cdma_modem_debug)
 		dev_info(&port->dev, "%s: Enter. Open Port %d\n",
 				 __func__, port->number);
-
-	/*
-	 * Force low_latency on
-	 */
-	if (tty)
-		tty->low_latency = 1;
 
 	/* clear the throttle flags */
 	port->throttled = 0;
@@ -723,13 +715,10 @@ urbs:
 
 }
 
-static void modem_close(struct tty_struct *tty,
-				  struct usb_serial_port *port,
-				  struct file *filp)
+static void modem_close(struct usb_serial_port *port)
 {
 	struct modem_port *modem_port_ptr;
 
-	printk("%s\n", __func__);
 	if (cdma_modem_debug)
 		dev_info(&port->dev, "%s: Enter. Close Port %d  \n",
 			 __func__, port->number);
@@ -1329,9 +1318,8 @@ alloc_write_buf_fail:
 	return -ENOMEM;
 }
 
-static void modem_shutdown(struct usb_serial *serial)
+static void modem_disconnect(struct usb_serial *serial)
 {
-	int i;
 	struct modem_port *modem_port_ptr =
 	    usb_get_serial_data(serial);
 
@@ -1345,6 +1333,14 @@ static void modem_shutdown(struct usb_serial *serial)
 
 	stop_data_traffic(modem_port_ptr);
 	cancel_work_sync(&modem_port_ptr->wake_and_write);
+}
+
+static void modem_release(struct usb_serial *serial)
+{
+	struct modem_port *modem_port_ptr =
+	    usb_get_serial_data(serial);
+	int i;
+
 	modem_write_buffers_free(modem_port_ptr, serial);
 	modem_read_buffers_free(modem_port_ptr, serial);
 
@@ -1394,7 +1390,8 @@ static struct usb_serial_driver modem_device = {
 	.open = modem_open,
 	.close = modem_close,
 	.attach = modem_startup,
-	.shutdown = modem_shutdown,
+	.disconnect = modem_disconnect,
+	.release = modem_release,
 };
 
 static void __exit modem_exit(void)

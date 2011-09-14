@@ -34,8 +34,8 @@
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
 
-#include <mach/display.h>
-#include <mach/cpu.h>
+#include <plat/display.h>
+#include <plat/cpu.h>
 
 #include "dss.h"
 
@@ -263,28 +263,28 @@ static const struct venc_config venc_config_pal_bdghi = {
 };
 
 const struct omap_video_timings omap_dss_pal_timings = {
-	.x_res = 720,
-	.y_res = 574,
-	.pixel_clock = 13500,
-	.hsw = 64,
-	.hfp = 12,
-	.hbp = 68,
-	.vsw = 5,
-	.vfp = 5,
-	.vbp = 41,
+	.x_res		= 720,
+	.y_res		= 574,
+	.pixel_clock	= 13500,
+	.hsw		= 64,
+	.hfp		= 12,
+	.hbp		= 68,
+	.vsw		= 5,
+	.vfp		= 5,
+	.vbp		= 41,
 };
 EXPORT_SYMBOL(omap_dss_pal_timings);
 
 const struct omap_video_timings omap_dss_ntsc_timings = {
-	.x_res = 720,
-	.y_res = 482,
-	.pixel_clock = 13500,
-	.hsw = 64,
-	.hfp = 16,
-	.hbp = 58,
-	.vsw = 6,
-	.vfp = 6,
-	.vbp = 31,
+	.x_res		= 720,
+	.y_res		= 482,
+	.pixel_clock	= 13500,
+	.hsw		= 64,
+	.hfp		= 16,
+	.hbp		= 58,
+	.vsw		= 6,
+	.vfp		= 6,
+	.vbp		= 31,
 };
 EXPORT_SYMBOL(omap_dss_ntsc_timings);
 
@@ -510,6 +510,8 @@ void venc_exit(void)
 
 static void venc_power_on(struct omap_dss_device *dssdev)
 {
+	u32 l;
+
 	venc_enable_clocks(1);
 
 	venc_reset();
@@ -518,14 +520,17 @@ static void venc_power_on(struct omap_dss_device *dssdev)
 	dss_set_venc_output(dssdev->phy.venc.type);
 	dss_set_dac_pwrdn_bgz(1);
 
-	if (dssdev->phy.venc.type == OMAP_DSS_VENC_TYPE_COMPOSITE) {
-		if (cpu_is_omap24xx())
-			venc_write_reg(VENC_OUTPUT_CONTROL, 0x2);
-		else
-			venc_write_reg(VENC_OUTPUT_CONTROL, 0xa);
-	} else { /* S-Video */
-		venc_write_reg(VENC_OUTPUT_CONTROL, 0xd);
-	}
+	l = 0;
+
+	if (dssdev->phy.venc.type == OMAP_DSS_VENC_TYPE_COMPOSITE)
+		l |= 1 << 1;
+	else /* S-Video */
+		l |= (1 << 0) | (1 << 2);
+
+	if (dssdev->phy.venc.invert_polarity == false)
+		l |= 1 << 3;
+
+	venc_write_reg(VENC_OUTPUT_CONTROL, l);
 
 	dispc_set_digit_size(dssdev->panel.timings.x_res,
 			dssdev->panel.timings.y_res/2);

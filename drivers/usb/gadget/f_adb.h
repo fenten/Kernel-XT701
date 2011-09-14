@@ -24,6 +24,7 @@ void adb_function_enable(int enable);
 
 #ifdef CONFIG_USB_MOT_ANDROID
 struct usb_function *adb_function_enable_id(int enable, int id);
+int adb_enable_access(void);
 #endif
 
 #endif /* __F_ADB_H */

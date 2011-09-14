@@ -13,7 +13,9 @@
 
 #include <linux/platform_device.h>
 
-#include <mach/omap-pm.h>
+#ifdef CONFIG_BRIDGE_DVFS
+#include <plat/omap-pm.h>
+#endif
 
 #include <dspbridge/host_os.h>
 
@@ -25,6 +27,8 @@ static struct dspbridge_platform_data dspbridge_pdata __initdata = {
 	.dsp_get_opp	 = omap_pm_dsp_get_opp,
 	.cpu_set_freq	 = omap_pm_cpu_set_freq,
 	.cpu_get_freq	 = omap_pm_cpu_get_freq,
+	.dsp_get_rate_table = omap_get_dsp_rate_table,
+	.mpu_get_rate_table = omap_get_mpu_rate_table,
 #endif
 };
 

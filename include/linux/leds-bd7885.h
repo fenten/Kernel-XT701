@@ -71,15 +71,12 @@
 #define BD7885_STATUS_FULL_CHG_MASK 0x1
 #define BD7885_STATUS_QMON_MASK 0x2
 
-#define    BD7885_STROBE_OFF         0
-#define    BD7885_STROBE_QUENCH_MODE 1
-#define    BD7885_STROBE_MANUAL_MODE 2
+#define BD7885_STROBE_OFF         0
+#define BD7885_STROBE_QUENCH_MODE 1
+#define BD7885_STROBE_MANUAL_MODE 2
 
-
-typedef enum {
-    BD7885_CHARGE_DISABLE = 0,
-    BD7885_CHARGE_ENABLE,
-} bd7885_charge_mode;
+#define BD7885_CHARGE_DISABLE     0
+#define BD7885_CHARGE_ENABLE      1
 
 typedef struct {
 	unsigned char reg;

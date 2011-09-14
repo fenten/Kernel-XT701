@@ -101,6 +101,7 @@ enum {
 /* HCI timeouts */
 #define HCI_CONNECT_TIMEOUT	(40000)	/* 40 seconds */
 #define HCI_DISCONN_TIMEOUT	(2000)	/* 2 seconds */
+#define HCI_PAIRING_TIMEOUT	(60000)	/* 60 seconds */
 #define HCI_IDLE_TIMEOUT	(6000)	/* 6 seconds */
 #define HCI_INIT_TIMEOUT	(10000)	/* 10 seconds */
 
@@ -144,13 +145,13 @@ enum {
 			EDR_ESCO_MASK)
 
 /* ACL flags */
-#define ACL_START		0x00
+#define ACL_START_NO_FLUSH	0x00
 #define ACL_CONT		0x01
-#define ACL_START_FLUSHABLE	0x02
+#define ACL_START		0x02
 #define ACL_ACTIVE_BCAST	0x04
 #define ACL_PICO_BCAST		0x08
 
-#define ACL_PB_MASK	(ACL_CONT | ACL_START | ACL_START_FLUSHABLE)
+#define ACL_PB_MASK	(ACL_CONT | ACL_START)
 
 /* Baseband links */
 #define SCO_LINK	0x00
@@ -190,6 +191,7 @@ enum {
 #define LMP_EDR_ESCO_3M	0x40
 #define LMP_EDR_3S_ESCO	0x80
 
+#define LMP_NO_FLUSH	0x01
 #define LMP_SIMPLE_PAIR	0x08
 
 /* Connection modes */
@@ -532,12 +534,6 @@ struct hci_cp_host_buffer_size {
 	__u8     sco_mtu;
 	__le16   acl_max_pkt;
 	__le16   sco_max_pkt;
-} __attribute__ ((packed));
-
-#define HCI_OP_WRITE_LINK_SUPERVISION_TIMEOUT	0x0c37
-struct hci_cp_write_link_supervision_timeout {
-	__le16   handle;
-	__le16   link_supervision_timeout;
 } __attribute__ ((packed));
 
 #define HCI_OP_READ_SSP_MODE		0x0c55

@@ -24,12 +24,12 @@
 #include <linux/mmc/sdio_ids.h>
 #include <linux/regulator/consumer.h>
 
-#include <mach/hardware.h>
-#include <mach/control.h>
-#include <mach/mmc.h>
-#include <mach/board.h>
-#include <mach/gpio.h>
-#include <mach/mux.h>
+#include <plat/hardware.h>
+#include <plat/control.h>
+#include <plat/mmc.h>
+#include <plat/board.h>
+#include <plat/gpio.h>
+#include <plat/mux.h>
 
 #define GPIO_SIGNAL_MMC_DET 163
 

@@ -25,7 +25,7 @@
 
 #ifndef OMAP_ISP_TOP_H
 #define OMAP_ISP_TOP_H
-#include <mach/cpu.h>
+#include <plat/cpu.h>
 #include <media/videobuf-dma-sg.h>
 #include <linux/videodev2.h>
 #define OMAP_ISP_CCDC		(1 << 0)
@@ -41,19 +41,18 @@
 						 */
 #define NUM_BUFS		VIDEO_MAX_FRAME
 
-#ifndef CONFIG_ARCH_OMAP3410
-#define USE_ISP_PREVIEW
-#define USE_ISP_RESZ
-#define is_isppreview_enabled()		1
-#define is_ispresizer_enabled()		1
-#else
-#define is_isppreview_enabled()		0
-#define is_ispresizer_enabled()		0
-#endif
-
 #define ISP_BYTES_PER_PIXEL		2
 #define NUM_ISP_CAPTURE_FORMATS 	(sizeof(isp_formats) /		\
 					 sizeof(isp_formats[0]))
+
+#define NR_PAGES(x, y)		((((y + x - 1) & PAGE_MASK) >> PAGE_SHIFT) - \
+					((x & PAGE_MASK) >> PAGE_SHIFT) + 1)
+
+#define ALIGN_TO(x, b)		(((unsigned long)x + (b - 1)) & ~(b - 1))
+#define ALIGN_NEAR(x, b)	((unsigned long)x & ~(b-1))
+
+#define ISP_LSC_MEMORY	(16*1024*1024)	/* 16MB LSC workaround memory */
+
 typedef int (*isp_vbq_callback_ptr) (struct videobuf_buffer *vb);
 typedef void (*isp_callback_t) (unsigned long status,
 				isp_vbq_callback_ptr arg1, void *arg2);
@@ -72,8 +71,16 @@ enum isp_mem_resources {
 	OMAP3_ISP_IOMEM_CSI2PHY
 };
 
+enum isp_running {
+	ISP_STOPPED,
+	ISP_RUNNING,
+	ISP_STOPPING,
+	ISP_FREERUNNING
+};
+
 struct isp_device {
 	struct device *dev;
+	u32 revision;
 
 	/*** platform HW resources ***/
 	unsigned int irq;
@@ -123,7 +130,7 @@ enum isp_irqevents {
 };
 
 enum isp_callback_type {
-	CBK_CCDC_VD0,
+	CBK_CCDC_VD0 = 0,
 	CBK_CCDC_VD1,
 	CBK_PREV_DONE,
 	CBK_RESZ_DONE,
@@ -131,11 +138,11 @@ enum isp_callback_type {
 	CBK_H3A_AWB_DONE,
 	CBK_HIST_DONE,
 	CBK_HS_VS,
-	CBK_LSC_ISR,
 	CBK_H3A_AF_DONE,
-	CBK_CATCHALL,
 	CBK_CSIA,
 	CBK_CSIB,
+	CBK_SBL_OVF,
+	CBK_CATCHALL,
 	CBK_END,
 };
 
@@ -178,7 +185,8 @@ struct isp_reg {
  * @hskip: Horizontal Start Pixel performed in Preview module.
  * @vskip: Vertical Start Line performed in Preview module.
  * @wenlog: Store the value for the sensor specific wenlog field.
- * @wait_hs_vs: Wait for this many hs_vs before anything else in the beginning.
+ * @wait_bayer_frame: Skip this many frames before starting bayer capture.
+ * @wait_yuv_frame: Skip this many frames before starting yuv capture.
  */
 struct isp_interface_config {
 	enum isp_interface_type ccdc_par_ser;
@@ -188,7 +196,11 @@ struct isp_interface_config {
 	int prestrobe;
 	int shutter;
 	u32 wenlog;
-	int wait_hs_vs;
+	int wait_bayer_frame;
+	int wait_yuv_frame;
+	u32 dcsub;
+	u32 cam_mclk;
+	u32 cam_mclk_src_div;
 	enum ispccdc_raw_fmt raw_fmt_in;
 	union {
 		struct par {
@@ -240,6 +252,8 @@ static inline void isp_reg_and_or(enum isp_mem_resources mmio_range, u32 reg,
 	isp_reg_writel((v & and_bits) | or_bits, mmio_range, reg);
 }
 
+void isp_flush(void);
+
 void isp_start(void);
 
 void isp_stop(void);
@@ -263,7 +277,11 @@ int isp_unset_callback(enum isp_callback_type type);
 
 u32 isp_set_xclk(u32 xclk, u8 xclksel);
 
+void isp_power_settings(int idle);
+
 int isp_configure_interface(struct isp_interface_config *config);
+
+int isp_configure_interface_bridge(u32 par_bridge);
 
 int isp_get(void);
 
@@ -296,13 +314,23 @@ void isp_config_crop(struct v4l2_pix_format *pix);
 int isp_try_fmt(struct v4l2_pix_format *pix_input,
 		struct v4l2_pix_format *pix_output);
 
-int isp_handle_private(int cmd, void *arg);
+int isp_lsc_workaround_enabled(void);
+
+int isp_handle_private(struct mutex *, int cmd, void *arg);
 
 void isp_save_context(struct isp_reg *);
 
 void isp_restore_context(struct isp_reg *);
 
 void isp_print_status(void);
+
+void isp_set_hs_vs(int);
+
+unsigned long isp_get_buf_offset(void);
+
+enum isp_running isp_state(void);
+
+dma_addr_t isp_tmp_buf_addr(void);
 
 int __init isp_ccdc_init(void);
 int __init isp_hist_init(void);

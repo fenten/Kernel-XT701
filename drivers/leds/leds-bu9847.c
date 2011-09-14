@@ -34,30 +34,26 @@
 #include <linux/module.h>
 #include <linux/err.h>
 #include <linux/cdev.h>
-#include <asm/gpio.h>
+#include <linux/gpio.h>
 #include <linux/mutex.h>
 #include <linux/delay.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/miscdevice.h>
 
 #include "linux/leds-bu9847.h"
 
 static int bu9847_open(struct inode *inode, struct file *file);
 static int bu9847_release(struct inode *inode, struct file *file);
-static int bu9847_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg);
-
-typedef struct {
-	unsigned char reg;
-	unsigned char	   data;
-} bu9847_cfg;
+static int bu9847_ioctl(struct inode *inode, struct file *file,
+			unsigned int cmd, unsigned long arg);
 
 struct bu9847_chip {
-	struct mutex lock;
+	struct mutex lock; /* checkpatch need some comments here! */
 	struct i2c_client *client;
 	int status;               /* flag indicate chip current power state */
 };
 
-struct file_operations bu9847_fops = {
+const struct file_operations bu9847_fops = {
 	.owner   = THIS_MODULE,
 	.open    = bu9847_open,
 	.release = bu9847_release,
@@ -71,16 +67,16 @@ static struct miscdevice bu9847_device = {
 };
 
 /*for register value keep here.*/
-char bu9847_reg_info_tbl[18] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+static char bu9847_reg_info_tbl[18];
 
 /* for ioctl */
 struct i2c_client *bu9847_i2c_client;
 
 /* device major number */
-int bu9847_major_num = 0;
-int bu9847_minor_num = 0;
+int bu9847_major_num;
+int bu9847_minor_num;
 
-#define BU9847_I2C_RETRY_MAX 3
+#define BU9847_I2C_RETRY_MAX 5
 
 /* *****************************************************
 
@@ -93,13 +89,15 @@ static int bu9847_reg_read(struct i2c_client *client, u8 reg_addr, u8 *buf)
      *  \brief Return error code, initialized to no error
      */
     int error = E_OK;
+    int ret = 0;
     /** \var i
      *  \brief Retry counter
      */
     int i = 0;
     unsigned char value[BU9847_REG_DATA_LEN];
 
-    /* If number of bytes is out of range or buffer is incorrect, report, exit */
+    /* If number of bytes is out of range or
+	buffer is incorrect, report, exit */
     if ((buf == NULL) || (reg_addr > BU9847_PRLDT_REG)) {
 	printk(KERN_ERR "invalid read parameter(s)\n");
 	return -EINVAL;
@@ -113,37 +111,41 @@ static int bu9847_reg_read(struct i2c_client *client, u8 reg_addr, u8 *buf)
 	/* Do read */
     do {
 	/* Establish read address
-	*  i2c_master_send returns either the number of bytes sent or negative error from
-	*  i2c_transfer
+	*  i2c_master_send returns either the number of bytes
+	* sent or negative error from i2c_transfer
 	*/
 	/* Copy the data into a buffer for correct format */
 	value[0] = reg_addr & 0xFF;
-	error = i2c_master_send(client, value , BU9847_REG_DATA_LEN);
-	/* Read data if send address succeeded (i2c_master_send returns the number
+	ret = i2c_master_send(client, value , BU9847_REG_DATA_LEN);
+	/* Read data if send address succeeded
+	*  (i2c_master_send returns the number
 	*  of bytes transferred) */
-	if (error == BU9847_REG_DATA_LEN) {
+	if (ret == BU9847_REG_DATA_LEN) {
 		/* Retreive data
-		*  i2c_master_recv returns either the number of bytes received or negative error
-		*  from i2c_transfer
+		*  i2c_master_recv returns either the number of bytes
+		* received or negative error from i2c_transfer
 		*/
-		error = i2c_master_recv(client, buf, BU9847_REG_DATA_LEN);
+		ret = i2c_master_recv(client, buf, BU9847_REG_DATA_LEN);
 	} else {
-		printk(KERN_ERR "bu9847 write of address %d failed: %d\n", value[0], error);
+		printk(KERN_ERR "bu9847 write of address %d failed: %d\n",
+						value[0], ret);
 	}
 
-	/* On failure (error will contain num_bytes if succeeded), print error code and
-	* delay before trying again */
-        if (error != BU9847_REG_DATA_LEN) {
-		printk(KERN_ERR "bu9847 read[%i] failed: %d\n", i, error);
+	/* On failure (error will contain num_bytes if succeeded),
+		print error code and delay before trying again */
+	if (ret != BU9847_REG_DATA_LEN) {
+		printk(KERN_ERR "bu9847 read[%i] failed: %d\n", i, ret);
 		msleep(10);
 	}
     /* Do while an error exists and we haven't exceeded retry attempts */
-    } while ((error != BU9847_REG_DATA_LEN) && ((++i) < 5));
+    } while ((ret != BU9847_REG_DATA_LEN) && ((++i) < BU9847_I2C_RETRY_MAX));
 
-    /* On success, set error to E_OK (i2c_master_recv returns the number of bytes
-     *  transferred) */
-    if (error == BU9847_REG_DATA_LEN)
+    /* On success, set error to E_OK (i2c_master_recv returns
+	the number of bytes transferred) */
+    if (ret == BU9847_REG_DATA_LEN)
 	error = E_OK;
+    else
+	error = ret;
 
     return error;
 }
@@ -155,9 +157,11 @@ int bu9847_fetch_regs(void)
 
     /*Read out status register information.*/
     for (reg_cnt = BU9847_HW_ID_REG; reg_cnt <= BU9847_PRLDT_REG; reg_cnt++) {
-	ret = bu9847_reg_read(bu9847_i2c_client, reg_cnt, &bu9847_reg_info_tbl[reg_cnt]);
+	ret = bu9847_reg_read(bu9847_i2c_client,
+			reg_cnt, &bu9847_reg_info_tbl[reg_cnt]);
 	if (ret != 0) {
-		printk(KERN_INFO "bu9847_reg_read_filed. reg_addr = %d\n", reg_cnt);
+		printk(KERN_INFO "bu9847_reg_read_filed. reg_addr = %d\n",
+					reg_cnt);
 		return ret;
 	}
     }
@@ -170,7 +174,8 @@ int bu9847_fetch_regs(void)
 	Probe, Remove
 
 * ******************************************************/
-static int bu9847_probe(struct i2c_client *client, const struct i2c_device_id *id)
+static int bu9847_probe(struct i2c_client *client,
+			const struct i2c_device_id *id)
 {
 	struct bu9847_chip *chip;
 	int ret = 0;
@@ -192,15 +197,11 @@ static int bu9847_probe(struct i2c_client *client, const struct i2c_device_id *i
 	strncpy(client->name, BU9847_DRIVER_NAME, I2C_NAME_SIZE);
 	i2c_set_clientdata(client, chip);
 
-#if 0
-       ret = i2c_attach_client(client);
-       if (ret != 0)
-	    printk(KERN_INFO "i2c_attach_client failed\n");
-#endif
-
        ret = misc_register(&bu9847_device);
-       if (ret != 0)
+	/*
+       if (!ret)
 	    printk(KERN_INFO "misc_register failed\n");
+	*/
 
 	mutex_init(&chip->lock);
 
@@ -239,29 +240,31 @@ static struct i2c_driver bu9847_driver = {
 
 static int bu9847_open(struct inode *inode, struct file *file)
 {
-  printk(KERN_INFO "%s is called.\n", __FUNCTION__);
+  printk(KERN_INFO "%s is called.\n", __func__);
   return nonseekable_open(inode, file);
 }
 
 static int bu9847_release(struct inode *inode, struct file *file)
 {
-  printk(KERN_INFO "%s is called.\n", __FUNCTION__);
+  printk(KERN_INFO "%s is called.\n", __func__);
   return 0;
 }
-static int bu9847_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg)
+static int bu9847_ioctl(
+	struct inode *inode, struct file *file,
+	unsigned int cmd, unsigned long arg)
 {
     int ret = 0;
 
     /* Do the handling. */
     switch (cmd) {
-	case BU9847_IOCTL_INIT:
-		/*EEPROM data fetch from HW.*/
-		ret = bu9847_fetch_regs();
-	break;
+    case BU9847_IOCTL_INIT:
+    /*EEPROM data fetch from HW.*/
+	    ret = bu9847_fetch_regs();
+	    break;
 
-	default:
-		printk(KERN_INFO "%s's default called. %d\n", __FUNCTION__, cmd);
-	break;
+    default:
+	    printk(KERN_INFO "%s's default called. %d\n", __func__, cmd);
+	    break;
     }
 
     return ret;

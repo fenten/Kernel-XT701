@@ -12,6 +12,7 @@
 #include <asm/gpio.h>
 #include <asm/io.h>
 #include <linux/wifi_tiwlan.h>
+#include <plat/board-mapphone.h>
 
 #include <linux/debugfs.h>
 
@@ -56,6 +57,12 @@ static int mapphone_wifi_power_state;
 int mapphone_wifi_power(int on)
 {
 	printk("%s: %d\n", __func__, on);
+	/*
+	 * Change VIO mode when wifi power on/off
+	 * it's a risk that this function may be called in an ISR context
+	 * optimize is needed in wifi driver
+	 */
+	change_vio_mode(1, on);
 	gpio_set_value(MAPPHONE_WIFI_PMENA_GPIO, on);
 	mapphone_wifi_power_state = on;
 	return 0;

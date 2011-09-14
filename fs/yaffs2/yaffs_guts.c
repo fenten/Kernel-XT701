@@ -1544,12 +1544,12 @@ static int yaffs_FindChunkInGroup(yaffs_Device *dev, int theChunk,
 	for (j = 0; theChunk && j < dev->chunkGroupSize; j++) {
 		if (yaffs_CheckChunkBit(dev, theChunk / dev->nChunksPerBlock,
 				theChunk % dev->nChunksPerBlock)) {
-
-			if (dev->chunkGroupSize == 1)
+			
+			if(dev->chunkGroupSize == 1)
 				return theChunk;
 			else {
-				yaffs_ReadChunkWithTagsFromNAND(dev, theChunk,
-								NULL, tags);
+				yaffs_ReadChunkWithTagsFromNAND(dev, theChunk, NULL,
+								tags);
 				if (yaffs_TagsMatch(tags, objectId, chunkInInode)) {
 					/* found it; */
 					return theChunk;
@@ -2519,7 +2519,7 @@ int yaffs_RenameObject(yaffs_Object *oldDir, const YCHAR *oldName,
 		result = yaffs_ChangeObjectName(obj, newDir, newName, 1, 0);
 
 		yaffs_UpdateParent(oldDir);
-		if (newDir != oldDir)
+		if(newDir != oldDir)
 			yaffs_UpdateParent(newDir);
 
 		return result;
@@ -2996,15 +2996,15 @@ static int yaffs_GarbageCollectBlock(yaffs_Device *dev, int block,
 
 	/*yaffs_VerifyFreeChunks(dev); */
 
-	if (bi->blockState == YAFFS_BLOCK_STATE_FULL)
+	if(bi->blockState == YAFFS_BLOCK_STATE_FULL)
 		bi->blockState = YAFFS_BLOCK_STATE_COLLECTING;
-
+	
 	bi->hasShrinkHeader = 0;	/* clear the flag so that the block can erase */
 
 	/* Take off the number of soft deleted entries because
 	 * they're going to get really deleted during GC.
 	 */
-	if (dev->gcChunk == 0) /* first time through for this block */
+	if(dev->gcChunk == 0) /* first time through for this block */
 		dev->nFreeChunks -= bi->softDeletions;
 
 	dev->isDoingGC = 1;
@@ -3813,7 +3813,7 @@ int yaffs_UpdateObjectHeader(yaffs_Object *in, const YCHAR *name, int force,
 		/* Create new chunk in NAND */
 		newChunkId =
 		    yaffs_WriteNewChunkWithTagsToNAND(dev, buffer, &newTags,
-						(prevChunkId > 0) ? 1 : 0);
+						      (prevChunkId > 0) ? 1 : 0);
 
 		if (newChunkId >= 0) {
 
@@ -5167,7 +5167,7 @@ static int yaffs_UnlinkFileIfNeeded(yaffs_Object *in)
 int yaffs_DeleteFile(yaffs_Object *in)
 {
 	int retVal = YAFFS_OK;
-	int deleted;
+	int deleted = in->deleted;
 
 	yaffs_ResizeFile(in, 0);
 
@@ -5177,8 +5177,6 @@ int yaffs_DeleteFile(yaffs_Object *in)
 		 */
 		if (!in->unlinked)
 			retVal = yaffs_UnlinkFileIfNeeded(in);
-
-		deleted = in->deleted;
 
 		if (retVal == YAFFS_OK && in->unlinked && !in->deleted) {
 			in->deleted = 1;
@@ -5268,7 +5266,7 @@ static int yaffs_UnlinkWorker(yaffs_Object *obj)
 		immediateDeletion = 1;
 #endif
 
-	if (obj)
+	if(obj)
 		yaffs_UpdateParent(obj->parent);
 
 	if (obj->variantType == YAFFS_OBJECT_TYPE_HARDLINK) {
@@ -5325,7 +5323,7 @@ static int yaffs_UnlinkWorker(yaffs_Object *obj)
 		default:
 			return YAFFS_FAIL;
 		}
-	} else if (yaffs_IsNonEmptyDirectory(obj))
+	} else if(yaffs_IsNonEmptyDirectory(obj))
 		return YAFFS_FAIL;
 	else
 		return yaffs_ChangeObjectName(obj, obj->myDev->unlinkedDir,
@@ -6839,15 +6837,16 @@ static void yaffs_VerifyDirectory(yaffs_Object *directory)
  *   rm dir/a:   update dir's mtime/ctime
  *   modify dir/a: don't update dir's mtimme/ctime
  */
+ 
 static void yaffs_UpdateParent(yaffs_Object *obj)
 {
-	if (!obj)
+	if(!obj)
 		return;
 
 	obj->dirty = 1;
 	obj->yst_mtime = obj->yst_ctime = Y_CURRENT_TIME;
 
-	yaffs_UpdateObjectHeader(obj, NULL, 0, 0, 0);
+	yaffs_UpdateObjectHeader(obj,NULL,0,0,0);
 }
 
 static void yaffs_RemoveObjectFromDirectory(yaffs_Object *obj)
@@ -6866,7 +6865,7 @@ static void yaffs_RemoveObjectFromDirectory(yaffs_Object *obj)
 
 	ylist_del_init(&obj->siblings);
 	obj->parent = NULL;
-
+	
 	yaffs_VerifyDirectory(parent);
 }
 

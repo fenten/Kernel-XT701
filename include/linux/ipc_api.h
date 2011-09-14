@@ -23,9 +23,8 @@
  * 05/09/2008      Motorola        Change Copyright and Changelog
  * 07/09/2008      Motorola        Change MAX_FRAME_SIZE for Phase 1
  * 11/03/2008      Motorola        Support sequence number
- * 
  */
- 
+
 /*!
  * @file ipc_api.h
  * @brief Header file for USB-IPC
@@ -54,7 +53,7 @@
 /* Log buffer in AP */
 #define MAX_LOG_BUF_NUM   20
 /* Max buffer size for each Log BULK IN transfer: 3K for 2 frames */
-#define MAX_LOG_BUF_SIZE  3072 
+#define MAX_LOG_BUF_SIZE  3072
 
 /* the extra-header will be used for DATA channel */
 #define IPC_FRAME_VERSION   0x0200
@@ -63,20 +62,20 @@ typedef struct {
 } IPC_FRAME_DESCRIPTOR;
 
 typedef struct {
-        unsigned short       version;
-        unsigned short       nb_frame;
-        unsigned char        sequence_number;
-        unsigned char        options;
-        unsigned short       checksum; 		 
-        IPC_FRAME_DESCRIPTOR frames[MAX_FRAME_NUM];
+	unsigned short version;
+	unsigned short nb_frame;
+	unsigned char sequence_number;
+	unsigned char options;
+	unsigned short checksum;
+	IPC_FRAME_DESCRIPTOR frames[MAX_FRAME_NUM];
 } IPC_DATA_HEADER;
 
 typedef struct {
-        unsigned short       version;
-        unsigned short       nb_frame;
-        unsigned char        sequence_number;
-        unsigned char        options;
-        unsigned short       checksum; 		 
+	unsigned short version;
+	unsigned short nb_frame;
+	unsigned char sequence_number;
+	unsigned char options;
+	unsigned short checksum;
 } IPC_DATA_HEADER_INDEX;
 
 
@@ -273,35 +272,38 @@ typedef struct {
 	 * read callback provided by the user, called when a read
 	 * transfer has been finished
 	 */
-	void (*read_callback) (HW_CTRL_IPC_READ_STATUS_T * status);
+	void (*read_callback) (HW_CTRL_IPC_READ_STATUS_T *status);
 
 	/*!
 	 * write callback provided by the user, called when a write
 	 * transfer has been finished
 	 */
-	void (*write_callback) (HW_CTRL_IPC_WRITE_STATUS_T * status);
+	void (*write_callback) (HW_CTRL_IPC_WRITE_STATUS_T *status);
 
 	/*!
 	 * notify callback provided by the user, called when an error
 	 * occurs during a transfer.
 	 */
-	void (*notify_callback) (HW_CTRL_IPC_NOTIFY_STATUS_T * status);
+	void (*notify_callback) (HW_CTRL_IPC_NOTIFY_STATUS_T *status);
 } HW_CTRL_IPC_OPEN_T;
 
-/*!@param *data_control_struct_ipcv2 
+/*!@param *data_control_struct_ipcv2
  *   Data Node Descriptor (Buffer Descriptor):
  *------------------------------------------------------------------------------
- *| 31	30	29	28	27	26	25	24	23	22	21	20	19	18	17	16	15	 …	  0|
+ *| 31	30	29	28	27	26	25	24	23	22
+21	20	19	18	17	16	15	0|
  *------------------------------------------------------------------------------
- *| L	E	D	R	R	R	R	R	|<---- Reserved          ---->  |<- Length-> |
+ *| L	E	D	R	R	R	R	R|<---- Reserved---->
+		|<- Length-> |
  *------------------------------------------------------------------------------
  *| <---------------------------- Data Ptr ----------------------------------->|
  *------------------------------------------------------------------------------
  *
- * L bit (LAST): If set, means that this buffer of data is the last buffer of the frame
+ * L bit (LAST): If set, means that this buffer of data is the last buffer of
+ * the frame.
  * E bit (END): If set, we reached the end of the buffers passed to the function
- * D bit (DONE): Only valid on the read callback. When set, means that the buffer has been 
- * filled by the SDMA.
+ * D bit (DONE): Only valid on the read callback. When set,
+ * means that the buffer has been filled by the SDMA.
  * Length: Length of data pointed by this node in bytes
  * Data Ptr: Pointer to the data pointed to by this node.
  */
@@ -322,7 +324,7 @@ typedef struct ipc_dataNodeDescriptor {
  * @return		returns HW_CTRL_IPC_STATUS_OK on success, an error code
  *			otherwise.
  */
-HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_init(const HW_CTRL_IPC_INIT_T * init_params);
+HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_init(const HW_CTRL_IPC_INIT_T *init_params);
 
 /*!
  * Opens an IPC link. This functions can be called directly by kernel
@@ -345,7 +347,7 @@ HW_CTRL_IPC_CHANNEL_T *hw_ctrl_ipc_open(const HW_CTRL_IPC_OPEN_T * config);
  * @return		returns HW_CTRL_IPC_STATUS_OK on success, an error code
  *			otherwise.
  */
-HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_close(HW_CTRL_IPC_CHANNEL_T * channel);
+HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_close(HW_CTRL_IPC_CHANNEL_T *channel);
 
 /*!
  * Reads data from an IPC link. This functions can be called directly by kernel
@@ -358,7 +360,7 @@ HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_close(HW_CTRL_IPC_CHANNEL_T * channel);
  * @return		returns HW_CTRL_IPC_STATUS_OK on success, an error code
  *			otherwise.
  */
-HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_read(HW_CTRL_IPC_CHANNEL_T * channel,
+HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_read(HW_CTRL_IPC_CHANNEL_T *channel,
 				      unsigned char *buf,
 				      unsigned short buffer_size);
 
@@ -373,7 +375,7 @@ HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_read(HW_CTRL_IPC_CHANNEL_T * channel,
  * @return		returns HW_CTRL_IPC_STATUS_OK on success, an error code
  *			otherwise.
  */
-HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_write(HW_CTRL_IPC_CHANNEL_T * channel,
+HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_write(HW_CTRL_IPC_CHANNEL_T *channel,
 				       unsigned char *buf,
 				       unsigned short nb_bytes);
 
@@ -388,8 +390,8 @@ HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_write(HW_CTRL_IPC_CHANNEL_T * channel,
  * @return              returns HW_CTRL_IPC_STATUS_OK on success, an error code
  *                      otherwise.
  */
-HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_write_ex(HW_CTRL_IPC_CHANNEL_T * channel,
-					  HW_CTRL_IPC_WRITE_PARAMS_T * mem_ptr);
+HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_write_ex(HW_CTRL_IPC_CHANNEL_T *channel,
+					  HW_CTRL_IPC_WRITE_PARAMS_T *mem_ptr);
 
 /*!
  * Used to set various channel parameters
@@ -399,7 +401,7 @@ HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_write_ex(HW_CTRL_IPC_CHANNEL_T * channel,
  * @param action  IPC driver control action to perform.
  * @param param   parameters required to complete the requested action
  */
-HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_ioctl(HW_CTRL_IPC_CHANNEL_T * channel,
+HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_ioctl(HW_CTRL_IPC_CHANNEL_T *channel,
 				       HW_CTRL_IPC_IOCTL_ACTION_T action,
 				       void *param);
 /*!
@@ -415,9 +417,8 @@ HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_ioctl(HW_CTRL_IPC_CHANNEL_T * channel,
  * @return              returns HW_CTRL_IPC_STATUS_OK on success, an error code
  *                      otherwise.
  */
-HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_write_ex2(HW_CTRL_IPC_CHANNEL_T * channel,
-					   HW_CTRL_IPC_DATA_NODE_DESCRIPTOR_T *
-					   ctrl_ptr);
+HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_write_ex2(HW_CTRL_IPC_CHANNEL_T *channel,
+			HW_CTRL_IPC_DATA_NODE_DESCRIPTOR_T *ctrl_ptr);
 
 /*!
  * This function is used to give a set of buffers to the IPC and enable data
@@ -430,10 +431,9 @@ HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_write_ex2(HW_CTRL_IPC_CHANNEL_T * channel,
  * @return              returns HW_CTRL_IPC_STATUS_OK on success, an error code
  *                      otherwise.
  */
-HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_read_ex2(HW_CTRL_IPC_CHANNEL_T * channel,
-					  HW_CTRL_IPC_DATA_NODE_DESCRIPTOR_T *
-					  ctrl_ptr);
+HW_CTRL_IPC_STATUS_T hw_ctrl_ipc_read_ex2(HW_CTRL_IPC_CHANNEL_T *channel,
+			HW_CTRL_IPC_DATA_NODE_DESCRIPTOR_T *ctrl_ptr);
 
-void hw_ctrl_ipc_register(void * param);
+void hw_ctrl_ipc_register(void *param);
 
-#endif				//__IPC_API_H__
+#endif	/*_IPC_API_H__*/

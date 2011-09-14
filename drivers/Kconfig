@@ -52,6 +52,8 @@ source "drivers/i2c/Kconfig"
 
 source "drivers/spi/Kconfig"
 
+source "drivers/pps/Kconfig"
+
 source "drivers/gpio/Kconfig"
 
 source "drivers/w1/Kconfig"
@@ -80,7 +82,6 @@ source "drivers/hid/Kconfig"
 
 source "drivers/usb/Kconfig"
 
-
 source "drivers/uwb/Kconfig"
 
 source "drivers/mmc/Kconfig"
@@ -107,6 +108,8 @@ source "drivers/auxdisplay/Kconfig"
 
 source "drivers/uio/Kconfig"
 
+source "drivers/vlynq/Kconfig"
+
 source "drivers/xen/Kconfig"
 
 source "drivers/staging/Kconfig"
@@ -114,5 +117,4 @@ source "drivers/staging/Kconfig"
 source "drivers/platform/Kconfig"
 
 source "drivers/sim/Kconfig"
-
 endmenu

@@ -18,14 +18,16 @@
 #include <linux/regulator/machine.h>
 #include <linux/spi/cpcap.h>
 #include <linux/spi/spi.h>
-#include <mach/mcspi.h>
-#include <mach/gpio.h>
-#include <mach/mux.h>
-#include <mach/resource.h>
-#include <mach/omap34xx.h>
+#include <plat/mcspi.h>
+#include <plat/gpio.h>
+#include <plat/mux.h>
+#include <plat/resource.h>
+#include <plat/omap34xx.h>
 
+#ifdef CONFIG_MFD_CPCAP
 extern struct platform_device cpcap_disp_button_led;
 extern struct platform_device cpcap_rgb_led;
+#endif
 
 struct cpcap_spi_init_data sholes_cpcap_spi_init[] = {
 	{CPCAP_REG_ASSIGN1,   0x0101},
@@ -97,8 +99,10 @@ unsigned short cpcap_regulator_mode_values[CPCAP_NUM_REGULATORS] = {
 #define REGULATOR_CONSUMER(name, device) { .supply = name, .dev = device, }
 
 struct regulator_consumer_supply cpcap_sw5_consumers[] = {
-	REGULATOR_CONSUMER("sw5", &cpcap_disp_button_led.dev),
-	REGULATOR_CONSUMER("sw5", &cpcap_rgb_led.dev),
+#ifdef CONFIG_MFD_CPCAP
+	REGULATOR_CONSUMER("vdd_button_backlight", &cpcap_disp_button_led.dev),
+	REGULATOR_CONSUMER("vdd_notification_led", &cpcap_rgb_led.dev),
+#endif
 };
 
 struct regulator_consumer_supply cpcap_vcam_consumers[] = {
@@ -290,7 +294,8 @@ static struct regulator_init_data cpcap_regulator[CPCAP_NUM_REGULATORS] = {
 		.constraints = {
 			.min_uV			= 3300000,
 			.max_uV			= 3300000,
-			.valid_ops_mask		= REGULATOR_CHANGE_STATUS,
+			.valid_ops_mask		= (REGULATOR_CHANGE_VOLTAGE |
+						   REGULATOR_CHANGE_STATUS),
 			.apply_uV		= 1,
 		},
 	},

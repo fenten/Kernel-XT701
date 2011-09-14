@@ -1,7 +1,7 @@
 /******************************************************************************
  * NetMUX register.c                                                          *
  *                                                                            *
- * Copyright (C) 2006-2008 Motorola, Inc.                                     *
+ * Copyright (C) 2006-2010 Motorola, Inc.                                     *
  *                                                                            *
  * Redistribution and use in source and binary forms, with or without         *
  * modification, are permitted provided that the following conditions are     *
@@ -40,6 +40,7 @@
  *   2008/07/15  Motorola    add NetmuxLogInit for AP config log              *
  *   2009/07/10  Motorola    Update send buffers number                       *
  *   2009/08/06  Motorola    Change permission for /proc/netmuxlog to 660     *
+ *   2010/04/28  Motorola    Format cleanup                                   *
  ******************************************************************************/
 
 /* register.c handles the communication process between a link driver and a   */
@@ -56,17 +57,19 @@
 #define REGISTER_HOST           1
 #define REGISTER_SEND_BUFFERS   336
 
-#define LOG_COMMAND_LEN            2 
+#define LOG_COMMAND_LEN            2
 
 /*Netmux info accessible via the proc interface*/
 static struct proc_dir_entry *proc_netmux_log_entry = NULL;
 char *NetmuxLogState = NULL;
-static int GetNetmuxLogState(char *buf, char**start, off_t offset, int count,int *eof, void *data);
-static int WriteNetmuxLogCommand(struct file* file, const char* buffer, unsigned long count, void* data);
+static int GetNetmuxLogState(char *buf, char **start, off_t offset,
+			     int count, int *eof, void *data);
+static int WriteNetmuxLogCommand(struct file *file, const char *buffer,
+				 unsigned long count, void *data);
 /*
  * Declare a list to hold each registered interface
  */
-INTERFACELIST* interfacelist = 0;
+INTERFACELIST *interfacelist = 0;
 
 /*
  * RegisterMUXLink is called by a linkdriver when registration
@@ -77,75 +80,69 @@ INTERFACELIST* interfacelist = 0;
  * linkif -- defines a method of communication with the linkdriver
  * muxif -- defines a method of communication with a NetMUX
  */
-int32 RegisterMUXLink (INTERFACELINK* linkif, INTERFACEMUX* muxif)
+int32 RegisterMUXLink(INTERFACELINK *linkif, INTERFACEMUX *muxif)
 {
-    INTERRUPT_STATE       state;
-    MUX*                  mux;
-    MUXINTERFACE_LIBRARY* muxlib;
-    INTERFACELIST**       ilist;
-    int32                 result;
+	INTERRUPT_STATE state;
+	MUX *mux;
+	MUXINTERFACE_LIBRARY *muxlib;
+	INTERFACELIST **ilist;
+	int32 result;
 
-    DEBUG("RegisterMUXLink(%p, %p)\n", linkif, muxif);
+	DEBUG("RegisterMUXLink(%p, %p)\n", linkif, muxif);
 
-    if(!linkif || !muxif)
-        return DEBUGERROR(ERROR_INVALIDPARAMETER);
+	if (!linkif || !muxif)
+		return DEBUGERROR(ERROR_INVALIDPARAMETER);
 
-    result = CreateInterfaceLibrary(REGISTER_MAX_INTERFACES, &muxlib);
-    if(result != ERROR_NONE)
-        return DEBUGERROR(result);
+	result = CreateInterfaceLibrary(REGISTER_MAX_INTERFACES, &muxlib);
+	if (result != ERROR_NONE)
+		return DEBUGERROR(result);
 
-    result = CreateMUX(
-                       REGISTER_MAX_CHANNELS,
-                       REGISTER_SEND_BUFFERS,
-                       linkif->localMaxRcvSize,
-                       linkif->remoteMaxRcvSize,
-                       linkif->LinkSend,
-                       muxlib,
-                       &mux
-                      );
-    if(result != ERROR_NONE)
-    {
-        DestroyInterfaceLibrary(muxlib);
+	result = CreateMUX(REGISTER_MAX_CHANNELS,
+			   REGISTER_SEND_BUFFERS,
+			   linkif->localMaxRcvSize,
+			   linkif->remoteMaxRcvSize,
+			   linkif->LinkSend, muxlib, &mux);
+	if (result != ERROR_NONE) {
+		DestroyInterfaceLibrary(muxlib);
 
-        return DEBUGLDP(LDP_ERROR_FATAL);
-    }
+		return DEBUGLDP(LDP_ERROR_FATAL);
+	}
 
-    muxif->MUXReceive      = &ReceiveFromLink;
-    muxif->MUXInform       = &InformMUX;
-    muxif->id              = mux;
+	muxif->MUXReceive = &ReceiveFromLink;
+	muxif->MUXInform = &InformMUX;
+	muxif->id = mux;
 
-    disable_interrupts(state);
+	disable_interrupts(state);
 
-    ilist = &interfacelist;
+	ilist = &interfacelist;
 
-    while(*ilist)
-        ilist = &(*ilist)->next;
+	while (*ilist)
+		ilist = &(*ilist)->next;
 
-    (*ilist) = (INTERFACELIST*)int_alloc_mem(sizeof(INTERFACELIST));
+	(*ilist) = (INTERFACELIST *) int_alloc_mem(sizeof(INTERFACELIST));
 
-    (*ilist)->next = 0;
+	(*ilist)->next = 0;
 
-    enable_interrupts(state);
+	enable_interrupts(state);
 
-    (*ilist)->mux = mux;
+	(*ilist)->mux = mux;
 
-    memcpy(&(*ilist)->muxinterface, muxif, sizeof(INTERFACEMUX));
-    memcpy(&(*ilist)->linkinterface, linkif, sizeof(INTERFACELINK));
+	memcpy(&(*ilist)->muxinterface, muxif, sizeof(INTERFACEMUX));
+	memcpy(&(*ilist)->linkinterface, linkif, sizeof(INTERFACELINK));
 
-    result = ActivateMUX(mux, *ilist);
-    if(result != ERROR_NONE)
-    {
-        DestroyMUX(mux);
-        DestroyInterfaceLibrary(muxlib);
+	result = ActivateMUX(mux, *ilist);
+	if (result != ERROR_NONE) {
+		DestroyMUX(mux);
+		DestroyInterfaceLibrary(muxlib);
 
-        free_mem((*ilist));
+		free_mem((*ilist));
 
-        (*ilist) = 0;
+		(*ilist) = 0;
 
-        return DEBUGLDP(LDP_ERROR_FATAL);
-    }
+		return DEBUGLDP(LDP_ERROR_FATAL);
+	}
 
-    return DEBUGLDP(LDP_ERROR_NONE);
+	return DEBUGLDP(LDP_ERROR_NONE);
 }
 
 /*
@@ -158,36 +155,35 @@ int32 RegisterMUXLink (INTERFACELINK* linkif, INTERFACEMUX* muxif)
  * Params --
  * id -- the value provided to the linkdriver upon registration
  */
-int32 UnregisterMUXLink (void* id)
+int32 UnregisterMUXLink(void *id)
 {
-    INTERRUPT_STATE state;
-    INTERFACELIST** ilist;
-    INTERFACELIST*  found;
+	INTERRUPT_STATE state;
+	INTERFACELIST **ilist;
+	INTERFACELIST *found;
 
-    DEBUG("UnregisterMUXLink(%p)\n", id);
+	DEBUG("UnregisterMUXLink(%p)\n", id);
 
-    ilist = &interfacelist;
+	ilist = &interfacelist;
 
-    disable_interrupts(state);
+	disable_interrupts(state);
 
-    while((*ilist) && (*ilist)->muxinterface.id != id)
-        ilist = &(*ilist)->next;
+	while ((*ilist) && (*ilist)->muxinterface.id != id)
+		ilist = &(*ilist)->next;
 
-    if(!(*ilist))
-    {
-        enable_interrupts(state);
+	if (!(*ilist)) {
+		enable_interrupts(state);
 
-        return DEBUGLDP(LDP_ERROR_FATAL);
-    }
+		return DEBUGLDP(LDP_ERROR_FATAL);
+	}
 
-    found    = (*ilist);
-    (*ilist) = found->next;
+	found = (*ilist);
+	(*ilist) = found->next;
 
-    enable_interrupts(state);
+	enable_interrupts(state);
 
-    DeactivateMUX(found);
+	DeactivateMUX(found);
 
-    return DEBUGLDP(LDP_ERROR_NONE);
+	return DEBUGLDP(LDP_ERROR_NONE);
 }
 
 /*
@@ -199,56 +195,68 @@ int32 UnregisterMUXLink (void* id)
  * mux -- the mux to be activated
  * ilist -- the interfacelist to be setup
  */
-int32 ActivateMUX (MUX* mux, INTERFACELIST* ilist)
+int32 ActivateMUX(MUX *mux, INTERFACELIST *ilist)
 {
-    int32 result;
+	int32 result;
 
-    DEBUG("ActivateMUX(%p, %p)\n", mux, ilist);
+	DEBUG("ActivateMUX(%p, %p)\n", mux, ilist);
 
-    result = CreateConfigInterface(REGISTER_CONFIG_CHANNEL, mux, REGISTER_CONFIGDATA_COUNT, REGISTER_CONFIGDATA, &ilist->config);
-    if(result != ERROR_NONE)
-        return DEBUGERROR(result);
+	result =
+	    CreateConfigInterface(REGISTER_CONFIG_CHANNEL, mux,
+				  REGISTER_CONFIGDATA_COUNT,
+				  REGISTER_CONFIGDATA, &ilist->config);
+	if (result != ERROR_NONE)
+		return DEBUGERROR(result);
 
-    result = CreateDirectInterface("direct", "netmux", DIRECT_DYNAMIC_MAJOR_ASSIGNMENT, REGISTER_DIRECT_MINCH, REGISTER_DIRECT_MAXCH, mux, (DIRECTINTERFACE**)&ilist->direct);
-    if(result != ERROR_NONE)
-    {
-        DestroyConfigInterface(ilist->config);
+	result =
+	    CreateDirectInterface("direct", "netmux",
+				  DIRECT_DYNAMIC_MAJOR_ASSIGNMENT,
+				  REGISTER_DIRECT_MINCH,
+				  REGISTER_DIRECT_MAXCH, mux,
+				  (DIRECTINTERFACE **) &ilist->direct);
+	if (result != ERROR_NONE) {
+		DestroyConfigInterface(ilist->config);
 
-        return DEBUGERROR(result);
-    }
+		return DEBUGERROR(result);
+	}
 
-    result = CreateTTYInterface("tty", "netmux", TTY_DYNAMIC_MAJOR_ASSIGNMENT, REGISTER_TTY_MINCH, REGISTER_TTY_MAXCH, mux, (TTYINTERFACE**)&ilist->tty);
-    if(result != ERROR_NONE)
-    {
-        DestroyConfigInterface(ilist->config);
-        DestroyDirectInterface((DIRECTINTERFACE*)ilist->direct);
+	result =
+	    CreateTTYInterface("tty", "netmux",
+			       TTY_DYNAMIC_MAJOR_ASSIGNMENT,
+			       REGISTER_TTY_MINCH, REGISTER_TTY_MAXCH, mux,
+			       (TTYINTERFACE **) &ilist->tty);
+	if (result != ERROR_NONE) {
+		DestroyConfigInterface(ilist->config);
+		DestroyDirectInterface((DIRECTINTERFACE *) ilist->direct);
 
-        return DEBUGERROR(result);
-    }
+		return DEBUGERROR(result);
+	}
 
-    result = CreateNetworkInterface("network", REGISTER_NETWORK_MINCH, REGISTER_NETWORK_MAXCH, mux, (NETWORKINTERFACE**)&ilist->network);
-    if(result != ERROR_NONE)
-    {
-        DestroyConfigInterface(ilist->config);
-        DestroyDirectInterface((DIRECTINTERFACE*)ilist->direct);
-        DestroyTTYInterface((TTYINTERFACE*)ilist->tty);
+	result =
+	    CreateNetworkInterface("network", REGISTER_NETWORK_MINCH,
+				   REGISTER_NETWORK_MAXCH, mux,
+				   (NETWORKINTERFACE **) &ilist->network);
+	if (result != ERROR_NONE) {
+		DestroyConfigInterface(ilist->config);
+		DestroyDirectInterface((DIRECTINTERFACE *) ilist->direct);
+		DestroyTTYInterface((TTYINTERFACE *) ilist->tty);
 
-        return DEBUGERROR(result);
-    }
+		return DEBUGERROR(result);
+	}
 
-    result = ActivateConfigInterface(REGISTER_HOST, ilist->config);
-    if(result != ERROR_NONE)
-    {
-        DestroyConfigInterface(ilist->config);
+	result = ActivateConfigInterface(REGISTER_HOST, ilist->config);
+	if (result != ERROR_NONE) {
+		DestroyConfigInterface(ilist->config);
 
-        DestroyDirectInterface((DIRECTINTERFACE*)ilist->direct);
-        DestroyNetworkInterface((NETWORKINTERFACE*)ilist->network);
-        DestroyTTYInterface((TTYINTERFACE*)ilist->tty);
+		DestroyDirectInterface((DIRECTINTERFACE *) ilist->direct);
+		DestroyNetworkInterface((NETWORKINTERFACE *) ilist->
+					network);
+		DestroyTTYInterface((TTYINTERFACE *) ilist->tty);
 
-        return DEBUGERROR(result);
-    }
+		return DEBUGERROR(result);
+	}
 
-    return DEBUGERROR(ERROR_NONE);
+	return DEBUGERROR(ERROR_NONE);
 }
 
 /*
@@ -259,83 +267,81 @@ int32 ActivateMUX (MUX* mux, INTERFACELIST* ilist)
  * Params:
  * ilist -- the interface to be deactivated
  */
-void DeactivateMUX (INTERFACELIST* ilist)
+void DeactivateMUX(INTERFACELIST *ilist)
 {
-    DEBUG("DeactivateMUX(%p)\n", ilist);
+	DEBUG("DeactivateMUX(%p)\n", ilist);
 
-    DestroyDirectInterface((DIRECTINTERFACE*)ilist->direct);
-    DestroyNetworkInterface((NETWORKINTERFACE*)ilist->network);
-    DestroyTTYInterface((TTYINTERFACE*)ilist->tty);
+	DestroyDirectInterface((DIRECTINTERFACE *) ilist->direct);
+	DestroyNetworkInterface((NETWORKINTERFACE *) ilist->network);
+	DestroyTTYInterface((TTYINTERFACE *) ilist->tty);
 
-    DeactivateConfigInterface(ilist->config);
-    DestroyConfigInterface(ilist->config);
+	DeactivateConfigInterface(ilist->config);
+	DestroyConfigInterface(ilist->config);
 
-    ilist->linkinterface.LinkInform((void*)LDP_INFORM_SHUTDOWN, (void*)ilist->muxinterface.id);
+	ilist->linkinterface.LinkInform((void *) LDP_INFORM_SHUTDOWN,
+					(void *) ilist->muxinterface.id);
 
-    DestroyMUX(ilist->mux);
+	DestroyMUX(ilist->mux);
 
-    free_mem(ilist);
+	free_mem(ilist);
 }
 
 /*
  * GetNetmuxLogState is a read callback function of proc interface on NetMUX.
- * 
+ *
  */
 
-static int GetNetmuxLogState(char *buf, char**start, off_t offset, int count,int *eof, void *data)
+static int GetNetmuxLogState(char *buf, char **start, off_t offset,
+			     int count, int *eof, void *data)
 {
-    int len;
-    int index;
-    
-    len = LOG_COMMAND_LEN;
-    index = 0;
+	int len;
+	int index;
 
-    len = sprintf(buf,"%s\n", &NetmuxLogState[index]);
-    *eof = 1;
-    return len;
+	len = LOG_COMMAND_LEN;
+	index = 0;
+
+	len = sprintf(buf, "%s\n", &NetmuxLogState[index]);
+	*eof = 1;
+	return len;
 }
 
 /*
- * WriteNetmuxLogCommand is a write callback function of proc interface on NetMUX.
+ * WriteNetmuxLogCommand is a write callback
+ * function of proc interface on NetMUX.
  *
  */
-                                                                                                                             
-static int WriteNetmuxLogCommand(struct file* file, const char* buffer, unsigned long count, void* data)
+
+static int WriteNetmuxLogCommand(struct file *file, const char *buffer,
+				 unsigned long count, void *data)
 {
-    int len;
-    int index;
+	int len;
+	int index;
 
-    len= count;
-    index = 0;
-    if(len > LOG_COMMAND_LEN)
-    {
-        printk("Error : Netmux log command is invalid\n");
-        return -ENOSPC;
-    }
-    if(copy_from_user(&NetmuxLogState[index], buffer, len)) {
-        return -EFAULT;
-    }
-    NetmuxLogState[LOG_COMMAND_LEN-1] = '\0';
+	len = count;
+	index = 0;
+	if (len > LOG_COMMAND_LEN) {
+		printk(KERN_ERR "Error : Netmux log command is invalid\n");
+		return -ENOSPC;
+	}
+	if (copy_from_user(&NetmuxLogState[index], buffer, len))
+		return -EFAULT;
+	NetmuxLogState[LOG_COMMAND_LEN - 1] = '\0';
 
-    return len;
+	return len;
 }
 
 void NetmuxLogInit(void)
 {
-    NetmuxLogState = alloc_mem(LOG_COMMAND_LEN);
-    NetmuxLogState[0] = '0';
-    NetmuxLogState[1] = '\0';
-                                                                                                                             
-    proc_netmux_log_entry = create_proc_entry("netmuxlog", 0x660, 0);
-    if ((!proc_netmux_log_entry) || (!NetmuxLogState))
-    {
-        remove_proc_entry("netmuxlog", 0);
-    }
-    else
-    {
-        proc_netmux_log_entry->data =  NetmuxLogState;
-        proc_netmux_log_entry->read_proc =  GetNetmuxLogState;
-        proc_netmux_log_entry->write_proc = WriteNetmuxLogCommand;
-        proc_netmux_log_entry->owner = THIS_MODULE;
-    }
+	NetmuxLogState = alloc_mem(LOG_COMMAND_LEN);
+	NetmuxLogState[0] = '0';
+	NetmuxLogState[1] = '\0';
+
+	proc_netmux_log_entry = create_proc_entry("netmuxlog", 0x660, 0);
+	if ((!proc_netmux_log_entry) || (!NetmuxLogState)) {
+		remove_proc_entry("netmuxlog", 0);
+	} else {
+		proc_netmux_log_entry->data = NetmuxLogState;
+		proc_netmux_log_entry->read_proc = GetNetmuxLogState;
+		proc_netmux_log_entry->write_proc = WriteNetmuxLogCommand;
+	}
 }

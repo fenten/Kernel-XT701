@@ -62,6 +62,6 @@
 #define BU9847_IOCTL_BASE 42
 
 /*Below direct register control is for exceptional case for HAL.*/
-#define BU9847_IOCTL_INIT                  _IO(BU9847_IOCTL_BASE, 20) /*Basic init for BU9847 device.*/
+#define BU9847_IOCTL_INIT _IO(BU9847_IOCTL_BASE, 20) /*init for BU9847 device.*/
 
 #endif /* __LEDS_BU9847_H */

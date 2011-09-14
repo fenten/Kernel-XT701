@@ -23,7 +23,6 @@
 #include <linux/string.h>
 #include <linux/ctype.h>
 #include <linux/module.h>
-#include <linux/memcopy.h>
 
 #ifndef __HAVE_ARCH_STRNICMP
 /**
@@ -247,13 +246,17 @@ EXPORT_SYMBOL(strlcat);
 #undef strcmp
 int strcmp(const char *cs, const char *ct)
 {
-	signed char __res;
+	unsigned char c1, c2;
 
 	while (1) {
-		if ((__res = *cs - *ct++) != 0 || !*cs++)
+		c1 = *cs++;
+		c2 = *ct++;
+		if (c1 != c2)
+			return c1 < c2 ? -1 : 1;
+		if (!c1)
 			break;
 	}
-	return __res;
+	return 0;
 }
 EXPORT_SYMBOL(strcmp);
 #endif
@@ -267,14 +270,18 @@ EXPORT_SYMBOL(strcmp);
  */
 int strncmp(const char *cs, const char *ct, size_t count)
 {
-	signed char __res = 0;
+	unsigned char c1, c2;
 
 	while (count) {
-		if ((__res = *cs - *ct++) != 0 || !*cs++)
+		c1 = *cs++;
+		c2 = *ct++;
+		if (c1 != c2)
+			return c1 < c2 ? -1 : 1;
+		if (!c1)
 			break;
 		count--;
 	}
-	return __res;
+	return 0;
 }
 EXPORT_SYMBOL(strncmp);
 #endif
@@ -553,12 +560,11 @@ EXPORT_SYMBOL(memset);
  */
 void *memcpy(void *dest, const void *src, size_t count)
 {
-	unsigned long dstp = (unsigned long)dest;
-	unsigned long srcp = (unsigned long)src;
+	char *tmp = dest;
+	const char *s = src;
 
-	/* Copy from the beginning to the end */
-	mem_copy_fwd(dstp, srcp, count);
-
+	while (count--)
+		*tmp++ = *s++;
 	return dest;
 }
 EXPORT_SYMBOL(memcpy);
@@ -575,15 +581,21 @@ EXPORT_SYMBOL(memcpy);
  */
 void *memmove(void *dest, const void *src, size_t count)
 {
-	unsigned long dstp = (unsigned long)dest;
-	unsigned long srcp = (unsigned long)src;
+	char *tmp;
+	const char *s;
 
-	if (dest - src >= count) {
-		/* Copy from the beginning to the end */
-		mem_copy_fwd(dstp, srcp, count);
+	if (dest <= src) {
+		tmp = dest;
+		s = src;
+		while (count--)
+			*tmp++ = *s++;
 	} else {
-		/* Copy from the end to the beginning */
-		mem_copy_bwd(dstp, srcp, count);
+		tmp = dest;
+		tmp += count;
+		s = src;
+		s += count;
+		while (count--)
+			*--tmp = *--s;
 	}
 	return dest;
 }

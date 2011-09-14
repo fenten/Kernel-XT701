@@ -28,8 +28,9 @@
 #include <linux/omapfb.h>
 #include <linux/vmalloc.h>
 
-#include <mach/display.h>
-#include <mach/vrfb.h>
+#include <plat/display.h>
+#include <plat/vrfb.h>
+#include <plat/vram.h>
 
 #include "omapfb.h"
 
@@ -37,7 +38,6 @@ static int omapfb_setup_plane(struct fb_info *fbi, struct omapfb_plane_info *pi)
 {
 	struct omapfb_info *ofbi = FB2OFB(fbi);
 	struct omapfb2_device *fbdev = ofbi->fbdev;
-	struct omap_dss_device *display = fb2display(fbi);
 	struct omap_overlay *ovl;
 	struct omap_overlay_info info;
 	int r = 0;
@@ -77,18 +77,6 @@ static int omapfb_setup_plane(struct fb_info *fbi, struct omapfb_plane_info *pi)
 		r = ovl->manager->apply(ovl->manager);
 		if (r)
 			goto out;
-	}
-
-	if (display) {
-		u16 w, h;
-
-		if (display->sync)
-			display->sync(display);
-
-		display->get_resolution(display, &w, &h);
-
-		if (display->update)
-			display->update(display, 0, 0, w, h);
 	}
 
 out:
@@ -167,7 +155,7 @@ static int omapfb_query_mem(struct fb_info *fbi, struct omapfb_mem_info *mi)
 	return 0;
 }
 
-static int omapfb_update_window(struct fb_info *fbi,
+static int omapfb_update_window_nolock(struct fb_info *fbi,
 		u32 x, u32 y, u32 w, u32 h)
 {
 	struct omap_dss_device *display = fb2display(fbi);
@@ -184,10 +172,28 @@ static int omapfb_update_window(struct fb_info *fbi,
 	if (x + w > dw || y + h > dh)
 		return -EINVAL;
 
-	display->update(display, x, y, w, h);
-
-	return 0;
+	return display->update(display, x, y, w, h);
 }
+
+/* This function is exported for SGX driver use */
+int omapfb_update_window(struct fb_info *fbi,
+		u32 x, u32 y, u32 w, u32 h)
+{
+	struct omapfb_info *ofbi = FB2OFB(fbi);
+	struct omapfb2_device *fbdev = ofbi->fbdev;
+	int r;
+
+	omapfb_lock(fbdev);
+	lock_fb_info(fbi);
+
+	r = omapfb_update_window_nolock(fbi, x, y, w, h);
+
+	unlock_fb_info(fbi);
+	omapfb_unlock(fbdev);
+
+	return r;
+}
+EXPORT_SYMBOL(omapfb_update_window);
 
 static int omapfb_set_update_mode(struct fb_info *fbi,
 				   enum omapfb_update_mode mode)
@@ -475,6 +481,8 @@ int omapfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 		enum omapfb_update_mode		update_mode;
 		int test_num;
 		struct omapfb_memory_read	memory_read;
+		struct omapfb_vram_info		vram_info;
+		struct omapfb_tearsync_info	tearsync_info;
 	} p;
 
 	int r = 0;
@@ -505,7 +513,7 @@ int omapfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 			break;
 		}
 
-		r = omapfb_update_window(fbi, p.uwnd_o.x, p.uwnd_o.y,
+		r = omapfb_update_window_nolock(fbi, p.uwnd_o.x, p.uwnd_o.y,
 				p.uwnd_o.width, p.uwnd_o.height);
 		break;
 
@@ -522,7 +530,7 @@ int omapfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 			break;
 		}
 
-		r = omapfb_update_window(fbi, p.uwnd.x, p.uwnd.y,
+		r = omapfb_update_window_nolock(fbi, p.uwnd.x, p.uwnd.y,
 				p.uwnd.width, p.uwnd.height);
 		break;
 
@@ -572,7 +580,10 @@ int omapfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 		}
 
 		memset(&p.caps, 0, sizeof(p.caps));
-		p.caps.ctrl = display->caps;
+		if (display->caps & OMAP_DSS_DISPLAY_CAP_MANUAL_UPDATE)
+			p.caps.ctrl |= OMAPFB_CAPS_MANUAL_UPDATE;
+		if (display->caps & OMAP_DSS_DISPLAY_CAP_TEAR_ELIM)
+			p.caps.ctrl |= OMAPFB_CAPS_TEARSYNC;
 
 		if (copy_to_user((void __user *)arg, &p.caps, sizeof(p.caps)))
 			r = -EFAULT;
@@ -694,6 +705,41 @@ int omapfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 		r = omapfb_memory_read(fbi, &p.memory_read);
 
 		break;
+
+	case OMAPFB_GET_VRAM_INFO: {
+		unsigned long vram, free, largest;
+
+		DBG("ioctl GET_VRAM_INFO\n");
+
+		omap_vram_get_info(&vram, &free, &largest);
+		p.vram_info.total = vram;
+		p.vram_info.free = free;
+		p.vram_info.largest_free_block = largest;
+
+		if (copy_to_user((void __user *)arg, &p.vram_info,
+					sizeof(p.vram_info)))
+			r = -EFAULT;
+		break;
+	}
+
+	case OMAPFB_SET_TEARSYNC: {
+		DBG("ioctl SET_TEARSYNC\n");
+
+		if (copy_from_user(&p.tearsync_info, (void __user *)arg,
+					sizeof(p.tearsync_info))) {
+			r = -EFAULT;
+			break;
+		}
+
+		if (!display->enable_te) {
+			r = -ENODEV;
+			break;
+		}
+
+		r = display->enable_te(display, !!p.tearsync_info.enabled);
+
+		break;
+	}
 
 	default:
 		dev_err(fbdev->dev, "Unknown ioctl 0x%x\n", cmd);

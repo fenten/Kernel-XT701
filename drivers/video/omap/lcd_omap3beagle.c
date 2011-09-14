@@ -24,16 +24,14 @@
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
 #include <linux/i2c/twl4030.h>
-#include <linux/omapfb.h>
 
-#include <mach/mux.h>
+#include <plat/mux.h>
+#include <plat/mux.h>
 #include <asm/mach-types.h>
 
-#define LCD_PANEL_ENABLE_GPIO       170
+#include "omapfb.h"
 
-#define LCD_XRES		1024	
-#define LCD_YRES 		768
-#define LCD_PIXCLOCK		64000 /* in kHz */
+#define LCD_PANEL_ENABLE_GPIO       170
 
 static int omap3beagle_panel_init(struct lcd_panel *panel,
 				struct omapfb_device *fbdev)
@@ -44,6 +42,7 @@ static int omap3beagle_panel_init(struct lcd_panel *panel,
 
 static void omap3beagle_panel_cleanup(struct lcd_panel *panel)
 {
+	gpio_free(LCD_PANEL_ENABLE_GPIO);
 }
 
 static int omap3beagle_panel_enable(struct lcd_panel *panel)
@@ -68,8 +67,8 @@ struct lcd_panel omap3beagle_panel = {
 
 	.bpp		= 16,
 	.data_lines	= 24,
-	.x_res		= LCD_XRES,
-	.y_res		= LCD_YRES,
+	.x_res		= 1024,
+	.y_res		= 768,
 	.hsw		= 3,		/* hsync_len (4) - 1 */
 	.hfp		= 3,		/* right_margin (4) - 1 */
 	.hbp		= 39,		/* left_margin (40) - 1 */
@@ -77,7 +76,7 @@ struct lcd_panel omap3beagle_panel = {
 	.vfp		= 2,		/* lower_margin */
 	.vbp		= 7,		/* upper_margin (8) - 1 */
 
-	.pixel_clock	= LCD_PIXCLOCK,
+	.pixel_clock	= 64000,
 
 	.init		= omap3beagle_panel_init,
 	.cleanup	= omap3beagle_panel_cleanup,

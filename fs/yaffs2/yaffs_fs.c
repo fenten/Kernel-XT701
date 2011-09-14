@@ -165,8 +165,8 @@ static struct inode *yaffs_iget(struct super_block *sb, unsigned long ino);
 
 #define update_dir_time(dir) do {\
 			(dir)->i_ctime = (dir)->i_mtime = CURRENT_TIME; \
-		} while (0)
-
+		} while(0)
+		
 static void yaffs_put_super(struct super_block *sb);
 
 static ssize_t yaffs_file_write(struct file *f, const char *buf, size_t n,
@@ -1520,7 +1520,7 @@ static int yaffs_link(struct dentry *old_dentry, struct inode *dir,
 
 	yaffs_GrossUnlock(dev);
 
-	if (link) {
+	if (link){
 		update_dir_time(dir);
 		return 0;
 	}
@@ -1622,9 +1622,9 @@ static int yaffs_rename(struct inode *old_dir, struct dentry *old_dentry,
 			new_dentry->d_inode->i_nlink--;
 			mark_inode_dirty(new_dentry->d_inode);
 		}
-
+		
 		update_dir_time(old_dir);
-		if (old_dir != new_dir)
+		if(old_dir != new_dir)
 			update_dir_time(new_dir);
 		return 0;
 	} else {
@@ -1930,10 +1930,10 @@ typedef struct {
 	int skip_checkpoint_read;
 	int skip_checkpoint_write;
 	int no_cache;
-	int tags_ecc_on;
-	int tags_ecc_off;
 	int empty_lost_and_found_overridden;
 	int empty_lost_and_found;
+	int tags_ecc_on;
+	int tags_ecc_off;
 } yaffs_options;
 
 #define MAX_OPT_LEN 20
@@ -1971,16 +1971,16 @@ static int yaffs_parse_options(yaffs_options *options, const char *options_str)
 		else if (!strcmp(cur_opt, "no-checkpoint")) {
 			options->skip_checkpoint_read = 1;
 			options->skip_checkpoint_write = 1;
-		} else if (!strcmp(cur_opt, "tags-ecc-on")) {
-			options->tags_ecc_on = 1;
-		} else if (!strcmp(cur_opt, "tags-ecc-off")) {
-			options->tags_ecc_off = 1;
 		} else if (!strcmp(cur_opt, "empty-lost-and-found-disable")) {
 			options->empty_lost_and_found = 0;
 			options->empty_lost_and_found_overridden = 1;
 		} else if (!strcmp(cur_opt, "empty-lost-and-found-enable")) {
 			options->empty_lost_and_found = 1;
 			options->empty_lost_and_found_overridden = 1;
+		} else if (!strcmp(cur_opt, "tags-ecc-on")) {
+			options->tags_ecc_on = 1;
+		} else if (!strcmp(cur_opt, "tags-ecc-off")) {
+			options->tags_ecc_off = 1;
 		} else {
 			printk(KERN_INFO "yaffs: Bad mount option \"%s\"\n",
 					cur_opt);

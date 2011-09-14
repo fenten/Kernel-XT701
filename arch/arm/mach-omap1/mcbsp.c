@@ -18,19 +18,18 @@
 #include <linux/platform_device.h>
 
 #include <mach/irqs.h>
-#include <mach/dma.h>
-#include <mach/irqs.h>
-#include <mach/mux.h>
-#include <mach/cpu.h>
-#include <mach/mcbsp.h>
-#include <mach/dsp_common.h>
+#include <plat/dma.h>
+#include <plat/mux.h>
+#include <plat/cpu.h>
+#include <plat/mcbsp.h>
+#include <plat/dsp_common.h>
 
 #define DPS_RSTCT2_PER_EN	(1 << 0)
 #define DSP_RSTCT2_WD_PER_EN	(1 << 1)
 
-#if defined(CONFIG_ARCH_OMAP15XX) || defined(CONFIG_ARCH_OMAP16XX)
-const char *clk_names[] = { "dsp_ck", "api_ck", "dspxor_ck" };
-#endif
+static int dsp_use;
+static struct clk *api_clk;
+static struct clk *dsp_clk;
 
 static void omap1_mcbsp_request(unsigned int id)
 {
@@ -39,20 +38,40 @@ static void omap1_mcbsp_request(unsigned int id)
 	 * are DSP public peripherals.
 	 */
 	if (id == OMAP_MCBSP1 || id == OMAP_MCBSP3) {
-		omap_dsp_request_mem();
-		/*
-		 * DSP external peripheral reset
-		 * FIXME: This should be moved to dsp code
-		 */
-		__raw_writew(__raw_readw(DSP_RSTCT2) | DPS_RSTCT2_PER_EN |
-				DSP_RSTCT2_WD_PER_EN, DSP_RSTCT2);
+		if (dsp_use++ == 0) {
+			api_clk = clk_get(NULL, "api_ck");
+			dsp_clk = clk_get(NULL, "dsp_ck");
+			if (!IS_ERR(api_clk) && !IS_ERR(dsp_clk)) {
+				clk_enable(api_clk);
+				clk_enable(dsp_clk);
+
+				omap_dsp_request_mem();
+				/*
+				 * DSP external peripheral reset
+				 * FIXME: This should be moved to dsp code
+				 */
+				__raw_writew(__raw_readw(DSP_RSTCT2) | DPS_RSTCT2_PER_EN |
+						DSP_RSTCT2_WD_PER_EN, DSP_RSTCT2);
+			}
+		}
 	}
 }
 
 static void omap1_mcbsp_free(unsigned int id)
 {
-	if (id == OMAP_MCBSP1 || id == OMAP_MCBSP3)
-		omap_dsp_release_mem();
+	if (id == OMAP_MCBSP1 || id == OMAP_MCBSP3) {
+		if (--dsp_use == 0) {
+			omap_dsp_release_mem();
+			if (!IS_ERR(api_clk)) {
+				clk_disable(api_clk);
+				clk_put(api_clk);
+			}
+			if (!IS_ERR(dsp_clk)) {
+				clk_disable(dsp_clk);
+				clk_put(dsp_clk);
+			}
+		}
+	}
 }
 
 static struct omap_mcbsp_ops omap1_mcbsp_ops = {
@@ -60,29 +79,29 @@ static struct omap_mcbsp_ops omap1_mcbsp_ops = {
 	.free		= omap1_mcbsp_free,
 };
 
-#ifdef CONFIG_ARCH_OMAP730
-static struct omap_mcbsp_platform_data omap730_mcbsp_pdata[] = {
+#if defined(CONFIG_ARCH_OMAP730) || defined(CONFIG_ARCH_OMAP850)
+static struct omap_mcbsp_platform_data omap7xx_mcbsp_pdata[] = {
 	{
-		.phys_base	= OMAP730_MCBSP1_BASE,
+		.phys_base	= OMAP7XX_MCBSP1_BASE,
 		.dma_rx_sync	= OMAP_DMA_MCBSP1_RX,
 		.dma_tx_sync	= OMAP_DMA_MCBSP1_TX,
-		.rx_irq		= INT_730_McBSP1RX,
-		.tx_irq		= INT_730_McBSP1TX,
+		.rx_irq		= INT_7XX_McBSP1RX,
+		.tx_irq		= INT_7XX_McBSP1TX,
 		.ops		= &omap1_mcbsp_ops,
 	},
 	{
-		.phys_base	= OMAP730_MCBSP2_BASE,
+		.phys_base	= OMAP7XX_MCBSP2_BASE,
 		.dma_rx_sync	= OMAP_DMA_MCBSP3_RX,
 		.dma_tx_sync	= OMAP_DMA_MCBSP3_TX,
-		.rx_irq		= INT_730_McBSP2RX,
-		.tx_irq		= INT_730_McBSP2TX,
+		.rx_irq		= INT_7XX_McBSP2RX,
+		.tx_irq		= INT_7XX_McBSP2TX,
 		.ops		= &omap1_mcbsp_ops,
 	},
 };
-#define OMAP730_MCBSP_PDATA_SZ		ARRAY_SIZE(omap730_mcbsp_pdata)
+#define OMAP7XX_MCBSP_PDATA_SZ		ARRAY_SIZE(omap7xx_mcbsp_pdata)
 #else
-#define omap730_mcbsp_pdata		NULL
-#define OMAP730_MCBSP_PDATA_SZ		0
+#define omap7xx_mcbsp_pdata		NULL
+#define OMAP7XX_MCBSP_PDATA_SZ		0
 #endif
 
 #ifdef CONFIG_ARCH_OMAP15XX
@@ -94,8 +113,6 @@ static struct omap_mcbsp_platform_data omap15xx_mcbsp_pdata[] = {
 		.rx_irq		= INT_McBSP1RX,
 		.tx_irq		= INT_McBSP1TX,
 		.ops		= &omap1_mcbsp_ops,
-		.clk_names	= clk_names,
-		.num_clks	= 3,
 	},
 	{
 		.phys_base	= OMAP1510_MCBSP2_BASE,
@@ -112,8 +129,6 @@ static struct omap_mcbsp_platform_data omap15xx_mcbsp_pdata[] = {
 		.rx_irq		= INT_McBSP3RX,
 		.tx_irq		= INT_McBSP3TX,
 		.ops		= &omap1_mcbsp_ops,
-		.clk_names	= clk_names,
-		.num_clks	= 3,
 	},
 };
 #define OMAP15XX_MCBSP_PDATA_SZ		ARRAY_SIZE(omap15xx_mcbsp_pdata)
@@ -131,8 +146,6 @@ static struct omap_mcbsp_platform_data omap16xx_mcbsp_pdata[] = {
 		.rx_irq		= INT_McBSP1RX,
 		.tx_irq		= INT_McBSP1TX,
 		.ops		= &omap1_mcbsp_ops,
-		.clk_names	= clk_names,
-		.num_clks	= 3,
 	},
 	{
 		.phys_base	= OMAP1610_MCBSP2_BASE,
@@ -149,8 +162,6 @@ static struct omap_mcbsp_platform_data omap16xx_mcbsp_pdata[] = {
 		.rx_irq		= INT_McBSP3RX,
 		.tx_irq		= INT_McBSP3TX,
 		.ops		= &omap1_mcbsp_ops,
-		.clk_names	= clk_names,
-		.num_clks	= 3,
 	},
 };
 #define OMAP16XX_MCBSP_PDATA_SZ		ARRAY_SIZE(omap16xx_mcbsp_pdata)
@@ -161,8 +172,8 @@ static struct omap_mcbsp_platform_data omap16xx_mcbsp_pdata[] = {
 
 int __init omap1_mcbsp_init(void)
 {
-	if (cpu_is_omap730())
-		omap_mcbsp_count = OMAP730_MCBSP_PDATA_SZ;
+	if (cpu_is_omap7xx())
+		omap_mcbsp_count = OMAP7XX_MCBSP_PDATA_SZ;
 	if (cpu_is_omap15xx())
 		omap_mcbsp_count = OMAP15XX_MCBSP_PDATA_SZ;
 	if (cpu_is_omap16xx())
@@ -173,9 +184,9 @@ int __init omap1_mcbsp_init(void)
 	if (!mcbsp_ptr)
 		return -ENOMEM;
 
-	if (cpu_is_omap730())
-		omap_mcbsp_register_board_cfg(omap730_mcbsp_pdata,
-						OMAP730_MCBSP_PDATA_SZ);
+	if (cpu_is_omap7xx())
+		omap_mcbsp_register_board_cfg(omap7xx_mcbsp_pdata,
+						OMAP7XX_MCBSP_PDATA_SZ);
 
 	if (cpu_is_omap15xx())
 		omap_mcbsp_register_board_cfg(omap15xx_mcbsp_pdata,

@@ -939,9 +939,9 @@ static IMG_BOOL ProcessFlip(IMG_HANDLE  hCmdCookie,
 	{
 		return IMG_FALSE;
 	}
-	
+
 	psDevInfo = (OMAPLFB_DEVINFO*)psFlipCmd->hExtDevice;
-	
+
 	psBuffer = (OMAPLFB_BUFFER*)psFlipCmd->hExtBuffer;
 	psSwapChain = (OMAPLFB_SWAPCHAIN*) psFlipCmd->hExtSwapChain;
 
@@ -955,12 +955,14 @@ static IMG_BOOL ProcessFlip(IMG_HANDLE  hCmdCookie,
 
 	if (!list_empty(&psBuffer->list)) {
 		pr_warning("omaplfb: this buffer's already on the list\n");
-		psSwapChain->psPVRJTable->pfnPVRSRVCmdComplete(hCmdCookie, IMG_TRUE);
+		psSwapChain->psPVRJTable->\
+		pfnPVRSRVCmdComplete(hCmdCookie, IMG_TRUE);
 	} else {
 		if (list_empty(&psDevInfo->active_list)) {
 			OMAPLFBFlip(psSwapChain,
 				    (unsigned long)psBuffer->sSysAddr.uiAddr);
-			psSwapChain->psPVRJTable->pfnPVRSRVCmdComplete(hCmdCookie, IMG_TRUE);
+			psSwapChain->psPVRJTable->\
+			pfnPVRSRVCmdComplete(hCmdCookie, IMG_TRUE);
 		}
 		psBuffer->hCmdCookie = hCmdCookie;
 
@@ -1366,7 +1368,7 @@ void OMAPLFBDriverSuspend(void)
 	}
 	psDevInfo->bDeviceSuspended = OMAP_TRUE;
 
-	
+
 	SetFlushStateInternalNoLock(psDevInfo, OMAP_TRUE);
 
 ExitUnlock:

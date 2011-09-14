@@ -14,11 +14,11 @@
 
 #include <linux/kernel.h>
 #include <linux/device.h>
+#include <linux/usb/android_composite.h>
 #include <linux/tty.h>
 
 #include "u_serial.h"
 #include "gadget_chips.h"
-
 #ifdef CONFIG_USB_MOT_ANDROID
 #include "f_mot_android.h"
 #endif
@@ -97,9 +97,6 @@ static inline struct f_acm *port_to_acm(struct gserial *p)
 
 #ifdef CONFIG_USB_MOT_ANDROID
 static struct f_acm *g_acm_dev;
-static struct usb_descriptor_header *null_acm_descs[] = {
-	NULL,
-};
 #endif
 
 /*-------------------------------------------------------------------------*/
@@ -149,7 +146,7 @@ static struct usb_cdc_header_desc acm_header_desc __initdata = {
 	.bLength =		sizeof(acm_header_desc),
 	.bDescriptorType =	USB_DT_CS_INTERFACE,
 	.bDescriptorSubType =	USB_CDC_HEADER_TYPE,
-	.bcdCDC =		__constant_cpu_to_le16(0x0110),
+	.bcdCDC =		cpu_to_le16(0x0110),
 };
 
 static struct usb_cdc_call_mgmt_descriptor
@@ -189,7 +186,6 @@ static struct usb_cdc_union_desc acm_union_desc __initdata = {
 };
 
 /* full speed support: */
-
 #ifdef CONFIG_USB_MOT_ANDROID
 static struct usb_endpoint_descriptor acm_fs_notify_desc = {
 #else
@@ -199,7 +195,7 @@ static struct usb_endpoint_descriptor acm_fs_notify_desc __initdata = {
 	.bDescriptorType =	USB_DT_ENDPOINT,
 	.bEndpointAddress =	USB_DIR_IN,
 	.bmAttributes =		USB_ENDPOINT_XFER_INT,
-	.wMaxPacketSize =	__constant_cpu_to_le16(GS_NOTIFY_MAXPACKET),
+	.wMaxPacketSize =	cpu_to_le16(GS_NOTIFY_MAXPACKET),
 	.bInterval =		1 << GS_LOG2_NOTIFY_INTERVAL,
 };
 
@@ -253,7 +249,7 @@ static struct usb_endpoint_descriptor acm_hs_notify_desc __initdata = {
 	.bDescriptorType =	USB_DT_ENDPOINT,
 	.bEndpointAddress =	USB_DIR_IN,
 	.bmAttributes =		USB_ENDPOINT_XFER_INT,
-	.wMaxPacketSize =	__constant_cpu_to_le16(GS_NOTIFY_MAXPACKET),
+	.wMaxPacketSize =	cpu_to_le16(GS_NOTIFY_MAXPACKET),
 	.bInterval =		GS_LOG2_NOTIFY_INTERVAL+4,
 };
 
@@ -265,7 +261,7 @@ static struct usb_endpoint_descriptor acm_hs_in_desc __initdata = {
 	.bLength =		USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =	USB_DT_ENDPOINT,
 	.bmAttributes =		USB_ENDPOINT_XFER_BULK,
-	.wMaxPacketSize =	__constant_cpu_to_le16(512),
+	.wMaxPacketSize =	cpu_to_le16(512),
 };
 
 #ifdef CONFIG_USB_MOT_ANDROID
@@ -276,7 +272,7 @@ static struct usb_endpoint_descriptor acm_hs_out_desc __initdata = {
 	.bLength =		USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =	USB_DT_ENDPOINT,
 	.bmAttributes =		USB_ENDPOINT_XFER_BULK,
-	.wMaxPacketSize =	__constant_cpu_to_le16(512),
+	.wMaxPacketSize =	cpu_to_le16(512),
 };
 
 #ifdef CONFIG_USB_MOT_ANDROID
@@ -457,10 +453,10 @@ static int acm_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 			usb_ep_disable(acm->notify);
 		} else {
 			VDBG(cdev, "init acm ctrl interface %d\n", intf);
-			acm->notify_desc = ep_choose(cdev->gadget,
-					acm->hs.notify,
-					acm->fs.notify);
 		}
+		acm->notify_desc = ep_choose(cdev->gadget,
+				acm->hs.notify,
+				acm->fs.notify);
 		usb_ep_enable(acm->notify, acm->notify_desc);
 		acm->notify->driver_data = acm;
 
@@ -470,11 +466,11 @@ static int acm_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 			gserial_disconnect(&acm->port);
 		} else {
 			DBG(cdev, "activate acm ttyGS%d\n", acm->port_num);
-			acm->port.in_desc = ep_choose(cdev->gadget,
-					acm->hs.in, acm->fs.in);
-			acm->port.out_desc = ep_choose(cdev->gadget,
-					acm->hs.out, acm->fs.out);
 		}
+		acm->port.in_desc = ep_choose(cdev->gadget,
+				acm->hs.in, acm->fs.in);
+		acm->port.out_desc = ep_choose(cdev->gadget,
+				acm->hs.out, acm->fs.out);
 		gserial_connect(&acm->port, acm->port_num);
 
 	} else
@@ -592,7 +588,7 @@ static void acm_cdc_notify_complete(struct usb_ep *ep, struct usb_request *req)
 }
 
 #ifdef CONFIG_USB_MOT_ANDROID
-static void acm_tiocmset(struct gserial *port, int set, int clear)
+static int acm_tiocmset(struct gserial *port, int set, int clear)
 {
 	struct f_acm            *acm = port_to_acm(port);
 
@@ -617,9 +613,9 @@ static void acm_tiocmset(struct gserial *port, int set, int clear)
 		acm->serial_state &= ~ACM_CTRL_OVERRUN;
 
 	/*
-	*  TODO:  configure DSR/DCD/OUT1, etc according to set/clear
-	*/
-	acm_notify_serial_state(acm);
+	 *  TODO:  configure DSR/DCD/OUT1, etc according to set/clear
+	 */
+	return acm_notify_serial_state(acm);
 }
 #endif
 
@@ -749,6 +745,7 @@ acm_bind(struct usb_configuration *c, struct usb_function *f)
 #else
 		f->hs_descriptors = usb_copy_descriptors(acm_hs_function);
 #endif
+
 		acm->hs.in = usb_find_endpoint(acm_hs_function,
 				f->hs_descriptors, &acm_hs_in_desc);
 		acm->hs.out = usb_find_endpoint(acm_hs_function,
@@ -756,11 +753,6 @@ acm_bind(struct usb_configuration *c, struct usb_function *f)
 		acm->hs.notify = usb_find_endpoint(acm_hs_function,
 				f->hs_descriptors, &acm_hs_notify_desc);
 	}
-
-#ifdef CONFIG_USB_MOT_ANDROID
-	f->descriptors = null_acm_descs;
-	f->hs_descriptors = null_acm_descs;
-#endif
 
 	DBG(cdev, "acm ttyGS%d: %s speed IN/%s OUT/%s NOTIFY/%s\n",
 			acm->port_num,
@@ -835,6 +827,8 @@ int __init acm_bind_config(struct usb_configuration *c, u8 port_num)
 	if (!can_support_cdc(c))
 		return -EINVAL;
 
+	printk(KERN_INFO "Gadget Usb: ACM Bind Config \n");
+
 	/* REVISIT might want instance-specific strings to help
 	 * distinguish instances ...
 	 */
@@ -889,52 +883,27 @@ int __init acm_bind_config(struct usb_configuration *c, u8 port_num)
 	return status;
 }
 
-#ifdef CONFIG_USB_MOT_ANDROID
-struct usb_configuration *g_device_cfg;
-static int g_serial_setup_flag;
-int __init acm_function_add(struct usb_composite_dev *cdev,
-	struct usb_configuration *c)
+#if defined(CONFIG_USB_ANDROID_ACM) || defined(CONFIG_USB_MOT_ANDROID)
+
+int acm_function_bind_config(struct usb_configuration *c)
 {
-	g_device_cfg = c;
-	g_serial_setup_flag = 0;
-	return acm_bind_config(c, 0);
+	int ret = acm_bind_config(c, 0);
+	if (ret == 0)
+		gserial_setup(c->cdev->gadget, 1);
+	return ret;
 }
 
-struct usb_function *acm_function_enable(int enable, int id)
+static struct android_usb_function acm_function = {
+	.name = "acm",
+	.bind_config = acm_function_bind_config,
+};
+
+static int __init init(void)
 {
-	printk(KERN_DEBUG "%s(): enable=%d id=%d\n", __func__, enable, id);
-
-	if (g_acm_dev) {
-		if (enable) {
-			acm_control_interface_desc.bInterfaceNumber = id;
-			acm_union_desc .bMasterInterface0 = id;
-			acm_data_interface_desc.bInterfaceNumber = id + 1;
-			acm_union_desc.bSlaveInterface0 = id + 1;
-			acm_call_mgmt_descriptor.bDataInterface = id + 1;
-			g_acm_dev->port.func.descriptors = acm_fs_function;
-			g_acm_dev->port.func.hs_descriptors = acm_hs_function;
-			g_acm_dev->ctrl_id = id;
-			g_acm_dev->data_id = id + 1;
-/*
-			if (!g_serial_setup_flag)  {
-				int status = gserial_setup(
-					g_device_cfg->cdev->gadget, 1);
-				if (status >= 0)
-					g_serial_setup_flag = 1;
-			}
-*/
-		} else {
-			g_acm_dev->port.func.descriptors = null_acm_descs;
-			g_acm_dev->port.func.hs_descriptors = null_acm_descs;
-			if (g_serial_setup_flag)  {
-				/* gserial_cleanup(); */
-				g_serial_setup_flag = 0;
-			}
-		}
-	}
-	return &g_acm_dev->port.func;
+	printk(KERN_INFO "f_acm init\n");
+	android_register_function(&acm_function);
+	return 0;
 }
+module_init(init);
 
-#endif
-
-
+#endif /* CONFIG_USB_ANDROID_ACM || CONFIG_USB_MOT_ANDROID */

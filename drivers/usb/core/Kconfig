@@ -28,7 +28,7 @@ comment "Miscellaneous USB options"
 	depends on USB
 
 config USB_DEVICEFS
-	bool "USB device filesystem"
+	bool "USB device filesystem (DEPRECATED)"
 	depends on USB
 	---help---
 	  If you say Y here (and to "/proc file system support" in the "File
@@ -46,11 +46,15 @@ config USB_DEVICEFS
 	  For the format of the various /proc/bus/usb/ files, please read
 	  <file:Documentation/usb/proc_usb_info.txt>.
 
-	  Usbfs files can't handle Access Control Lists (ACL), which are the
-	  default way to grant access to USB devices for untrusted users of a
-	  desktop system. The usbfs functionality is replaced by real
-	  device-nodes managed by udev. These nodes live in /dev/bus/usb and
-	  are used by libusb.
+	  Modern Linux systems do not use this.
+
+	  Usbfs entries are files and not character devices; usbfs can't
+	  handle Access Control Lists (ACL) which are the default way to
+	  grant access to USB devices for untrusted users of a desktop
+	  system.
+
+	  The usbfs functionality is replaced by real device-nodes managed by
+	  udev.  These nodes lived in /dev/bus/usb and are used by libusb.
 
 config USB_DEVICE_CLASS
 	bool "USB device class-devices (DEPRECATED)"
@@ -135,12 +139,4 @@ config USB_OTG_BLACKLIST_HUB
 	  external hubs.  OTG hosts are allowed to reduce hardware
 	  and software costs by not supporting external hubs.  So
 	  are "Embedded Hosts" that don't offer OTG support.
-
-config EHCI_SKIP_SYS_RESUME
-	bool "skip system resume"
-	default n
-	help
-	  This should be enabled for MAPPHONE only - mapphone_defconfig,
-	  where no use case existing for USB-PERSIST port handover. Please
-	  refer to function usb_suspend in driver.c for details.
 

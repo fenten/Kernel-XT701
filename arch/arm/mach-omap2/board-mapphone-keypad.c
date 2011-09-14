@@ -2,7 +2,7 @@
  * arch/arm/mach-omap2/board-mapphone-keypad.c
  *
  * Copyright (C) 2009 Google, Inc.
- * Copyright (C) 2009 Motorola, Inc.
+ * Copyright (C) 2009-2010 Motorola, Inc.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -20,15 +20,31 @@
 #include <linux/gpio_event.h>
 #include <linux/keyreset.h>
 
-#include <mach/mux.h>
-#include <mach/gpio.h>
-#include <mach/keypad.h>
-#include <mach/board-mapphone.h>
+#include <plat/mux.h>
+#include <plat/gpio.h>
+#include <linux/gpio_mapping.h>
+#include <plat/keypad.h>
+#include <plat/board-mapphone.h>
 
 #ifdef CONFIG_ARM_OF
 #include <mach/dt_path.h>
 #include <asm/prom.h>
 #endif
+
+#ifdef CONFIG_KEYBOARD_ADP5588
+#include <linux/adp5588_keypad.h>
+#endif
+
+//////////////////////////////////////////////////////////////////////
+// Adding by no change device tree
+#define DT_PROP_KEYPAD_ADP5588  "adp5588_keypad"
+#define DT_KPAD_LED		"/System@0/KeypadBacklight@0"
+
+#define DT_PROP_ADP5588_KPAD_LED "adp5588_kpad_led"
+
+
+
+//////////////////////////////////////////////////////////////////////
 
 static unsigned int mapphone_col_gpios[] = { 43, 53, 54, 55, 56, 57, 58, 63 };
 static unsigned int mapphone_row_gpios[] = { 34, 35, 36, 37, 38, 39, 40, 41 };
@@ -110,11 +126,50 @@ static const unsigned short mapphone_p3_keymap[ARRAY_SIZE(mapphone_col_gpios) *
 	[KEYMAP_INDEX(7, 7)] = KEY_W,
 };
 
+#ifndef CONFIG_ARM_OF
+static const unsigned short mapphone_keymap_closed[
+	ARRAY_SIZE(mapphone_col_gpios) * ARRAY_SIZE(mapphone_row_gpios)] = {
+	[KEYMAP_INDEX(0, 3)] = KEY_VOLUMEDOWN,
+	[KEYMAP_INDEX(0, 5)] = KEY_VOLUMEUP,
+	[KEYMAP_INDEX(4, 3)] = KEY_CAMERA-1,	/* camera 1 key, steal KEY_HP*/
+	[KEYMAP_INDEX(4, 5)] = KEY_CAMERA,	/* "camera 2" key */
+};
+#else
+static const unsigned short *mapphone_keymap_closed;
+#endif
+
+#ifdef CONFIG_KEYBOARD_ADP5588
+static struct adp5588_leds_platform_data mapphone_adp5588_leds_pdata;
+
+static struct platform_device mapphone_adp5588_leds_dev = {
+	.name		= ADP5588_BACKLIGHT_NAME,
+	.id		= -1,
+	.dev		= {
+		.platform_data  = &mapphone_adp5588_leds_pdata,
+	},
+};
+
+struct adp5588_platform_data mapphone_adp5588_pdata = {
+	.leds_device = &mapphone_adp5588_leds_dev,
+};
+#endif
+
+static int fixup(int index)
+{
+       int slide_open = gpio_get_value(GPIO_SLIDER);
+       if (!slide_open)
+		return mapphone_keymap_closed[index];
+       return 1;
+}
+
 static struct gpio_event_matrix_info mapphone_keypad_matrix_info = {
 	.info.func = gpio_event_matrix_func,
 	.keymap = mapphone_p3_keymap,
 	.output_gpios = mapphone_col_gpios,
 	.input_gpios = mapphone_row_gpios,
+#ifndef CONFIG_ARM_OF
+	.sw_fixup = fixup,
+#endif
 	.noutputs = ARRAY_SIZE(mapphone_col_gpios),
 	.ninputs = ARRAY_SIZE(mapphone_row_gpios),
 	.settle_time.tv.nsec = 40 * NSEC_PER_USEC,
@@ -176,6 +231,60 @@ struct platform_device mapphone_reset_keys_device = {
 	.dev.platform_data = &mapphone_reset_keys_pdata,
 };
 
+#if defined(CONFIG_KEYBOARD_ADP5588) && defined(CONFIG_ARM_OF)
+static void mapphone_dt_adp5588_init(struct device_node *kp_node)
+{
+	struct device_node *kp_led_node;
+	const void *kp_prop;
+
+	/* Assume GPIO matrix keypad by default */
+	mapphone_adp5588_pdata.use_adp5588 = 0;
+
+	kp_prop = of_get_property(kp_node, DT_PROP_KEYPAD_ADP5588, NULL);
+	if (kp_prop)
+		mapphone_adp5588_pdata.use_adp5588 = *(u8 *)kp_prop;
+
+	if (!mapphone_adp5588_pdata.use_adp5588)
+		return;
+
+	printk(KERN_INFO "%s: Keypad device is ADP5588\n", __func__);
+
+	mapphone_keypad_matrix_info.info.func = gpio_event_adp5588_func;
+	mapphone_keypad_data.name = ADP5588_KEYPAD_NAME;
+
+	mapphone_adp5588_pdata.reset_gpio = get_gpio_by_name("adp5588_reset_b");
+
+	/* If RESET GPIO is not configured in device_tree, assume default */
+	if (mapphone_adp5588_pdata.reset_gpio < 0) {
+		printk(KERN_INFO "%s: ADP5588: RESET_GPIO not in device_tree\n",
+			__func__);
+		mapphone_adp5588_pdata.reset_gpio = ADP5588_RESET_GPIO;
+	}
+
+	mapphone_adp5588_pdata.int_gpio = get_gpio_by_name("adp5588_int_b");
+
+	/* If INT GPIO is not configured in device_tree, assume default */
+	if (mapphone_adp5588_pdata.int_gpio < 0) {
+		printk(KERN_INFO "%s: ADP5588: INT_GPIO not in device_tree\n",
+			__func__);
+		mapphone_adp5588_pdata.int_gpio = ADP5588_INT_GPIO;
+	}
+
+	/* Assume CPCAP keypad leds by default */
+	mapphone_adp5588_leds_pdata.use_leds = 0;
+
+	kp_led_node = of_find_node_by_path(DT_KPAD_LED);
+	if (kp_led_node) {
+		kp_prop = of_get_property(kp_led_node, \
+				DT_PROP_ADP5588_KPAD_LED, NULL);
+		if (kp_prop)
+			mapphone_adp5588_leds_pdata.use_leds = *(u8 *)kp_prop;
+
+		of_node_put(kp_led_node);
+	}
+}
+#endif
+
 #ifdef CONFIG_ARM_OF
 static int __init mapphone_dt_kp_init(void)
 {
@@ -207,6 +316,17 @@ static int __init mapphone_dt_kp_init(void)
 				DT_PROP_KEYPAD_MAPS, NULL)))
 			mapphone_keypad_matrix_info.keymap = \
 				(unsigned short *)kp_prop;
+
+		kp_prop = of_get_property(kp_node, \
+				DT_PROP_KEYPAD_CLOSED_MAPS, NULL);
+		if (kp_prop) {
+			mapphone_keymap_closed = (unsigned short *)kp_prop;
+			mapphone_keypad_matrix_info.sw_fixup = fixup;
+		}
+
+#ifdef CONFIG_KEYBOARD_ADP5588
+		mapphone_dt_adp5588_init(kp_node);
+#endif
 
 		of_node_put(kp_node);
 	}

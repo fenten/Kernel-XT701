@@ -19,7 +19,7 @@
 #include <linux/module.h>
 #include <linux/delay.h>
 
-#include <mach/display.h>
+#include <plat/display.h>
 
 static struct omap_video_timings samsung_lte_timings = {
 	.x_res = 480,

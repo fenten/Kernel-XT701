@@ -25,14 +25,15 @@
 #include <linux/platform_device.h>
 #include <linux/delay.h>
 #include <linux/i2c/twl4030.h>
-#include <linux/omapfb.h>
 
 #include <mach/gpio.h>
-#include <mach/mux.h>
+#include <plat/mux.h>
 #include <asm/mach-types.h>
 
-#define LCD_PANEL_BACKLIGHT_GPIO 	(15 + OMAP_MAX_GPIO_LINES)
-#define LCD_PANEL_ENABLE_GPIO 		(7 + OMAP_MAX_GPIO_LINES)
+#include "omapfb.h"
+
+#define LCD_PANEL_BACKLIGHT_GPIO	(15 + OMAP_MAX_GPIO_LINES)
+#define LCD_PANEL_ENABLE_GPIO		(7 + OMAP_MAX_GPIO_LINES)
 
 #define LCD_PANEL_RESET_GPIO		55
 #define LCD_PANEL_QVGA_GPIO		56
@@ -86,10 +87,10 @@ static int ldp_panel_init(struct lcd_panel *panel,
 
 static void ldp_panel_cleanup(struct lcd_panel *panel)
 {
-	gpio_free(LCD_PANEL_RESET_GPIO);
-	gpio_free(LCD_PANEL_QVGA_GPIO);
-	gpio_free(LCD_PANEL_ENABLE_GPIO);
 	gpio_free(LCD_PANEL_BACKLIGHT_GPIO);
+	gpio_free(LCD_PANEL_ENABLE_GPIO);
+	gpio_free(LCD_PANEL_QVGA_GPIO);
+	gpio_free(LCD_PANEL_RESET_GPIO);
 }
 
 static int ldp_panel_enable(struct lcd_panel *panel)
@@ -121,7 +122,7 @@ static void ldp_panel_disable(struct lcd_panel *panel)
 
 	t2_out(PM_RECEIVER, 0x0, TWL4030_VPLL2_DEDICATED);
 	t2_out(PM_RECEIVER, 0x0, TWL4030_VPLL2_DEV_GRP);
-	mdelay(4);
+	msleep(4);
 }
 
 static unsigned long ldp_panel_get_caps(struct lcd_panel *panel)

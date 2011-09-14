@@ -1,10 +1,11 @@
 /*
  * driver/media/video/mipi_dli.c
  *
- * Copyright 2009 Motorola Corporation.
+ * Copyright (C) 2009-2010 Motorola, Inc.
  *
- * Authors: DongSun Yang. <mbr863@motorola.com>
- *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -31,14 +32,14 @@ unsigned long crc_counter;
 
 static int mipi_dli_open(struct inode *inode, struct file *file)
 {
-  printk(KERN_ERR "%s is called.\n", __func__);
-  return nonseekable_open(inode, file);
+	printk(KERN_ERR "%s is called.\n", __func__);
+	return nonseekable_open(inode, file);
 }
 
 static int mipi_dli_release(struct inode *inode, struct file *file)
 {
-  printk(KERN_ERR "%s is called.\n", __func__);
-  return 0;
+	printk(KERN_ERR "%s is called.\n", __func__);
+	return 0;
 }
 
 static int mipi_dli_ioctl(struct inode *inode, struct file *file,\
@@ -131,19 +132,12 @@ static struct miscdevice mipi_dli_device = {
 
 static int __init mipi_dli_probe(struct platform_device *pdev)
 {
-	struct mipi_dli_platform_data *mipi_dli;
 	int ret = 0;
-
-	mipi_dli = kzalloc(sizeof(struct mipi_dli_platform_data), GFP_KERNEL);
-	if (!mipi_dli)
-		return -ENOMEM;
 
 	ret = misc_register(&mipi_dli_device);
 
 	if (ret != 0)
 		printk(KERN_ERR "misc_register failed\n");
-
-	mutex_init(&mipi_dli->lock);
 
 	printk(KERN_ERR "MIPI DLI tester probe is finished.\n");
 
@@ -178,7 +172,7 @@ static int __init mipi_dli_init(void)
 	return retval;
 }
 
-subsys_initcall(mipi_dli_init);
+module_init(mipi_dli_init);
 
 MODULE_AUTHOR("Motorola Corporation");
 MODULE_DESCRIPTION("MIPI DLI test Module");

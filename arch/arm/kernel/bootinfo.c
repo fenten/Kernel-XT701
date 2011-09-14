@@ -251,7 +251,6 @@ static struct proc_dir_entry *proc_bootinfo;
 int __init bootinfo_init_module(void)
 {
 	proc_bootinfo = &proc_root;
-	proc_bootinfo->owner = THIS_MODULE;
 	create_proc_read_entry("bootinfo", 0, NULL, get_bootinfo, NULL);
 	return 0;
 }

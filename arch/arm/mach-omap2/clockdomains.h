@@ -10,7 +10,7 @@
 #ifndef __ARCH_ARM_MACH_OMAP2_CLOCKDOMAINS_H
 #define __ARCH_ARM_MACH_OMAP2_CLOCKDOMAINS_H
 
-#include <mach/clockdomain.h>
+#include <plat/clockdomain.h>
 
 /*
  * OMAP2/3-common clockdomains
@@ -21,6 +21,13 @@
  * sys_clkout/sys_clkout2.
  */
 
+/* This is an implicit clockdomain - it is never defined as such in TRM */
+static struct clockdomain wkup_clkdm = {
+	.name		= "wkup_clkdm",
+	.pwrdm		= { .name = "wkup_pwrdm" },
+	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP24XX | CHIP_IS_OMAP3430),
+};
+
 static struct clockdomain prm_clkdm = {
 	.name		= "prm_clkdm",
 	.pwrdm		= { .name = "wkup_pwrdm" },
@@ -30,16 +37,6 @@ static struct clockdomain prm_clkdm = {
 static struct clockdomain cm_clkdm = {
 	.name		= "cm_clkdm",
 	.pwrdm		= { .name = "core_pwrdm" },
-	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP24XX | CHIP_IS_OMAP3430),
-};
-
-/*
- * virt_opp_clkdm is intended solely for use with virtual OPP clocks,
- * e.g., virt_prcm_set, until OPP handling is rationalized.
- */
-static struct clockdomain virt_opp_clkdm = {
-	.name		= "virt_opp_clkdm",
-	.pwrdm		= { .name = "wkup_pwrdm" },
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP24XX | CHIP_IS_OMAP3430),
 };
 
@@ -319,9 +316,9 @@ static struct clkdm_pwrdm_autodep clkdm_pwrdm_autodeps[] = {
 
 static struct clockdomain *clockdomains_omap[] = {
 
+	&wkup_clkdm,
 	&cm_clkdm,
 	&prm_clkdm,
-	&virt_opp_clkdm,
 
 #ifdef CONFIG_ARCH_OMAP2420
 	&mpu_2420_clkdm,

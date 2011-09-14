@@ -36,14 +36,14 @@
 #include <linux/io.h>
 
 #include <linux/spi/spi.h>
-#include <mach/system.h>
+#include <plat/system.h>
 #include <linux/irq.h>
 
-#include <mach/dma.h>
-#include <mach/clock.h>
-#include <mach/board-mapphone-emu_uart.h>
-#include <mach/hardware.h>
-#include <mach/omap34xx.h>
+#include <plat/dma.h>
+#include <plat/clock.h>
+#include <plat/board-mapphone-emu_uart.h>
+#include <plat/hardware.h>
+#include <plat/omap34xx.h>
 
 /*
  * Register definitions for CPCAP related SPI register
@@ -111,7 +111,7 @@
 #define OMAP2_MCSPI_MODE_IS_SLAVE	1
 #define OMAP_MCSPI_WAKEUP_ENABLE	1
 
-#define OMAP_MCSPI_BASE                 0xd8098000
+#define OMAP_MCSPI_BASE                 IO_ADDRESS(0x48098000)
 
 #define WORD_LEN            32
 #define CLOCK_DIV           12	/* 2^(12)=4096  48000000/4096<19200 */
@@ -121,8 +121,8 @@
 #define WRITE_CPCAP         1
 #define READ_CPCAP          0
 
-#define CM_ICLKEN1_CORE  0xd8004A10
-#define CM_FCLKEN1_CORE  0xd8004A00
+#define CM_ICLKEN1_CORE  IO_ADDRESS(0x48004A10)
+#define CM_FCLKEN1_CORE  IO_ADDRESS(0x48004A00)
 #define OMAP2_MCSPI_EN_MCSPI1   (1 << 18)
 
 #define  RESET_FAIL      1
@@ -191,8 +191,7 @@ static inline u32 raw_readl_reg(u32 reg)
 {
 	u32 result;
 	unsigned int absolute_reg;
-
-	absolute_reg = OMAP_MCSPI_BASE + reg;
+	absolute_reg = (u32)OMAP_MCSPI_BASE + reg;
 #if defined(LOCAL_DEVELOPER_DEBUG)
 	printk(KERN_ERR " raw read reg =0x%x  \n", absolute_reg);
 #endif

@@ -1,7 +1,7 @@
 /******************************************************************************
  * NetMUX interface.h                                                         *
  *                                                                            *
- * Copyright Motorola 2006                                                    *
+ * Copyright (C) 2006-2010 Motorola, Inc.                                     *
  *                                                                            *
  * Redistribution and use in source and binary forms, with or without         *
  * modification, are permitted provided that the following conditions are     *
@@ -32,6 +32,7 @@
 /*   DATE        OWNER       COMMENT                                          *
  *   ----------  ----------  -----------------------------------------------  *
  *   2006/09/28  Motorola    Initial version                                  *
+ *   2010/04/28  Motorola    Format cleanup                                   *
  ******************************************************************************/
 
 /* interface.h provides the necessary data types and macros to interface.c.   */
@@ -51,76 +52,78 @@
  * LIBRARY_INFORM defines a macro to easily invoke an interfaces
  * inform function
  */
-#define LIBRARY_INFORM(if, index, l) ((l)->interfaces[index]->Inform((void*)if, (void*)(l)->interfaces[index]->param))
+#define LIBRARY_INFORM(if, index, l)				\
+		((l)->interfaces[index]->Inform((void *)if,	\
+		 (void *)(l)->interfaces[index]->param))
 
-/* 
- * INTERFACEINFORM defines a structure to be delivered to 
+/*
+ * INTERFACEINFORM defines a structure to be delivered to
  * interface inform functions. The members are briefly described
  * below.
  *
- * inform_type is the reason why the interface inform function is 
+ * inform_type is the reason why the interface inform function is
  *             being invoked
- * inform_type is the reason why the interface inform function is 
+ * inform_type is the reason why the interface inform function is
  *             being invoked
  * data associates a particular set of data with the inform function call
  */
-typedef struct INTERFACEINFORM
-{
-    int32        inform_type;
-    struct MUX*  source;
-    void*        data;
-}INTERFACEINFORM;
+typedef struct INTERFACEINFORM {
+	int32 inform_type;
+	struct MUX *source;
+	void *data;
+} INTERFACEINFORM;
 
-/* 
- * MUXINTERFACE defines and associates an interface with specific 
+/*
+ * MUXINTERFACE defines and associates an interface with specific
  * functionality . The members are briefly described below
- * 
+ *
  * Inform points to an inform function the mux can invoke
  * Receive points to a receive function the mux can invoke
- * interface_index stores the index of the interface which is equivlent to the id
+ * interface_index stores the index of the interface which is
+ * 	 equivlent to the id
  * param is a parameter passed to the invoke and receive functions
  */
-typedef struct MUXINTERFACE
-{
-    int32 (*Inform)  (void*, void*);
-    int32 (*Receive) (COMMBUFF*, void*);
+typedef struct MUXINTERFACE {
+	int32(*Inform) (void *, void *);
+	int32(*Receive) (COMMBUFF *, void *);
 
-    int32 interface_index;
-    int32 param;
-}MUXINTERFACE;
+	int32 interface_index;
+	int32 param;
+} MUXINTERFACE;
 
-/* 
+/*
  * MUXINTERFACE_LIBRARY stores a list of registered interfaces. The
  * members are briefly described below.
- * 
- * maxinterfaces is the maximum number of interfaces that the library 
+ *
+ * maxinterfaces is the maximum number of interfaces that the library
  *               can hold
  * names is a list of names for each interface in the library
  * interfaces is a list of interfaces within the library
  */
-typedef struct MUXINTERFACE_LIBRARY
-{
-    int32           maxinterfaces;
-    sint8**         names;
-    MUXINTERFACE**  interfaces;
-    CRITICALSECTION lock;
-}MUXINTERFACE_LIBRARY;
+typedef struct MUXINTERFACE_LIBRARY {
+	int32 maxinterfaces;
+	sint8 **names;
+	MUXINTERFACE **interfaces;
+	CRITICALSECTION lock;
+} MUXINTERFACE_LIBRARY;
 
 
 /*
  * Define various functions used by the interface API
  */
 
-int32 CreateInterfaceLibrary  (int32, MUXINTERFACE_LIBRARY**);
-int32 DestroyInterfaceLibrary (MUXINTERFACE_LIBRARY*);
+int32 CreateInterfaceLibrary(int32, MUXINTERFACE_LIBRARY **);
+int32 DestroyInterfaceLibrary(MUXINTERFACE_LIBRARY *);
 
-int32 RegisterInterface   (sint8*, int32 (*inform) (void*, void*), int32 (*receive) (COMMBUFF*, void*), int32, MUXINTERFACE_LIBRARY*);
-int32 UnregisterInterface (int32, MUXINTERFACE_LIBRARY*);
+int32 RegisterInterface(sint8 *, int32(*inform) (void *, void *),
+			int32(*receive) (COMMBUFF *, void *), int32,
+			MUXINTERFACE_LIBRARY *);
+int32 UnregisterInterface(int32, MUXINTERFACE_LIBRARY *);
 
-int32 QueryInterfaceIndex (sint8*, MUXINTERFACE_LIBRARY*, int32*);
-int32 ConnectInterface    (int32, MUXINTERFACE_LIBRARY*, MUXINTERFACE**);
+int32 QueryInterfaceIndex(sint8 *, MUXINTERFACE_LIBRARY *, int32 *);
+int32 ConnectInterface(int32, MUXINTERFACE_LIBRARY *, MUXINTERFACE **);
 
-int32 BroadcastLibraryInform (INTERFACEINFORM*, MUXINTERFACE_LIBRARY*);
+int32 BroadcastLibraryInform(INTERFACEINFORM *, MUXINTERFACE_LIBRARY *);
 
 
 #endif

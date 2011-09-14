@@ -42,23 +42,12 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/list.h>
-#include <linux/errno.h>
-#include <linux/uaccess.h>
-#include <mach/hardware.h>
-#include <linux/slab.h>
-#include <linux/init.h>
-#include <linux/timer.h>
-#include <linux/delay.h>
-#include <linux/sched.h>
 #include <linux/usb.h>
 #include <linux/poll.h>
-#include <linux/major.h>
 #include <linux/usb_ipc.h>
 #include <linux/ipc_api.h>
-#include <linux/kthread.h>
 
-#define DEBUG(args...) //printk(args)
+#define DEBUG(args...) /*printk(args)*/
 
 /* USB endpoint detectio */
 #define IS_EP_BULK(ep)		(((ep)->bmAttributes) == \
@@ -169,8 +158,10 @@ IPC_LOG_DATA_BUFFER *ipc_log_alloc_read_buffer(void)
 				 ipc_log_param.write_buf->ptr;	\
 			ipc_log_param.read_urb.transfer_buffer_length =\
 			 ipc_log_param.read_bufsize;	\
+			LOG_IPC_ACTIVITY(aLogR, iLogR, 0x1); \
 			if (usb_submit_urb(&ipc_log_param.read_urb,\
 				 GFP_KERNEL)) {\
+				LOG_IPC_ACTIVITY(aLogR, iLogR, 0xE); \
 				DEBUG("submit urb is error \n");\
 			}				\
 			else {			\
@@ -221,6 +212,7 @@ static unsigned int usb_ipc_log_poll(struct file *file,
 	DEBUG("Enter %s\n", __func__);
 	if ((ipc_log_param.isopen == 0) || (ipc_log_param.probe_flag == 0)) {
 		DEBUG("%s: USB IPC LOG calling poll error\n", __func__);
+		LOG_IPC_ACTIVITY(aLogR, iLogR, 0xF);
 		return -EBUSY;
 	}
 
@@ -291,7 +283,10 @@ static void ipc_log_read_callback(struct urb *urb)
 	IPC_LOG_DATA_BUFFER	*temp_buf;
 
 	DEBUG("%s: %d\n", __func__, urb->actual_length);
+	LOG_IPC_ACTIVITY(aLogR, iLogR, 0x11);
+	LOG_IPC_ACTIVITY(aLogR, iLogR, urb->actual_length);
 
+	ipc_log_param.urb_flag = 0;
 	if (urb->actual_length != 0)	{
 		ipc_log_param.write_buf->read_num = 0;
 		ipc_log_param.write_buf->data_num = urb->actual_length;
@@ -309,6 +304,8 @@ static void ipc_log_read_callback(struct urb *urb)
 				/*up(&ipc_log_param.mutex);*/
 				wake_up_interruptible(&ipc_log_wait_q);
 				ipc_log_param.urb_flag = 0;
+				LOG_IPC_ACTIVITY( \
+					aLogR, iLogR, 0x1F);
 				return;
 			}
 			/* add new buffer to buffer list .... */
@@ -325,10 +322,10 @@ static void ipc_log_read_callback(struct urb *urb)
 	/* start URB */
 	if ((ipc_log_param.isopen == 0) || (ipc_log_param.probe_flag == 0)) {
 		DEBUG("%s: USB IPC LOG callback error\n", __func__);
+		LOG_IPC_ACTIVITY(aLogR, iLogR, 0x1E);
 		return;
 	}
 
-	ipc_log_param.urb_flag = 0;
 	IPC_LOG_URB_START();
 
 	spin_lock_irqsave(&ipc_event_lock, flags);
@@ -400,6 +397,7 @@ void usb_ipc_log_disconnect(struct usb_interface *intf)
 
 	if (ipc_log_param.probe_flag != 0)	{
 		DEBUG("%s: deregister USB device\n", __func__);
+		LOG_IPC_ACTIVITY(aLogR, iLogR, 0xD);
 
 		/* remove device node */
 		usb_deregister_dev(intf, &usb_ipc_log_device);

@@ -36,13 +36,13 @@
 #include <linux/io.h>
 
 #include <asm/mach/flash.h>
-#include <mach/gpmc.h>
-#include <mach/onenand.h>
+#include <plat/gpmc.h>
+#include <plat/onenand.h>
 #include <mach/gpio.h>
 
-#include <mach/dma.h>
+#include <plat/dma.h>
 
-#include <mach/board.h>
+#include <plat/board.h>
 
 #define DRIVER_NAME "omap2-onenand"
 
@@ -266,7 +266,7 @@ static inline int omap2_onenand_bufferram_offset(struct mtd_info *mtd, int area)
 
 	if (ONENAND_CURRENT_BUFFERRAM(this)) {
 		if (area == ONENAND_DATARAM)
-			return mtd->writesize;
+			return this->writesize;
 		if (area == ONENAND_SPARERAM)
 			return mtd->oobsize;
 	}
@@ -291,6 +291,10 @@ static int omap3_onenand_read_bufferram(struct mtd_info *mtd, int area,
 
 	bram_offset = omap2_onenand_bufferram_offset(mtd, area) + area + offset;
 	if (bram_offset & 3 || (size_t)buf & 3 || count < 384)
+		goto out_copy;
+
+	/* panic_write() may be in an interrupt context */
+	if (in_interrupt())
 		goto out_copy;
 
 	if (buf >= high_memory) {
@@ -561,7 +565,7 @@ int omap2_onenand_rephase(void)
 				      NULL, __adjust_timing);
 }
 
-static void __devexit omap2_onenand_shutdown(struct platform_device *pdev)
+static void omap2_onenand_shutdown(struct platform_device *pdev)
 {
 	struct omap2_onenand *c = dev_get_drvdata(&pdev->dev);
 
@@ -667,9 +671,11 @@ static int __devinit omap2_onenand_probe(struct platform_device *pdev)
 		 c->onenand.base);
 
 	c->pdev = pdev;
-	c->mtd.name = pdev->dev.bus_id;
+	c->mtd.name = dev_name(&pdev->dev);
 	c->mtd.priv = &c->onenand;
 	c->mtd.owner = THIS_MODULE;
+
+	c->mtd.dev.parent = &pdev->dev;
 
 	if (c->dma_channel >= 0) {
 		struct onenand_chip *this = &c->onenand;
@@ -764,6 +770,7 @@ static int __devexit omap2_onenand_remove(struct platform_device *pdev)
 	}
 	iounmap(c->onenand.base);
 	release_mem_region(c->phys_base, ONENAND_IO_SIZE);
+	gpmc_cs_free(c->gpmc_cs);
 	kfree(c);
 
 	return 0;
@@ -771,7 +778,7 @@ static int __devexit omap2_onenand_remove(struct platform_device *pdev)
 
 static struct platform_driver omap2_onenand_driver = {
 	.probe		= omap2_onenand_probe,
-	.remove		= omap2_onenand_remove,
+	.remove		= __devexit_p(omap2_onenand_remove),
 	.shutdown	= omap2_onenand_shutdown,
 	.driver		= {
 		.name	= DRIVER_NAME,

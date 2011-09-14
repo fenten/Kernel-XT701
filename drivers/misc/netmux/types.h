@@ -1,7 +1,7 @@
 /******************************************************************************
  * NetMUX types.h                                                             *
  *                                                                            *
- * Copyright Motorola 2006                                                    *
+ * Copyright (C) 2006-2010 Motorola, Inc.                                     *
  *                                                                            *
  * Redistribution and use in source and binary forms, with or without         *
  * modification, are permitted provided that the following conditions are     *
@@ -32,6 +32,7 @@
 /*   DATE        OWNER       COMMENT                                          *
  *   ----------  ----------  -----------------------------------------------  *
  *   2006/09/28  Motorola    Initial version                                  *
+ *   2010/04/28  Motorola    Format cleanup                                   *
  ******************************************************************************/
 
 
@@ -41,43 +42,43 @@
 #define _NETMUX_TYPES_H_
 
 
-/* 
- * int32 is always an unsigned 4 bytes 
+/*
+ * int32 is always an unsigned 4 bytes
  */
-typedef unsigned long int32; 
+typedef unsigned long int32;
 
-/* 
- * int16 is always an unsigned 2 bytes 
+/*
+ * int16 is always an unsigned 2 bytes
  */
 typedef unsigned short int16;
 
-/* 
- * int8 is always an unsigned byte 
+/*
+ * int8 is always an unsigned byte
  */
 typedef unsigned char int8;
 
-/* 
- * sint32 is always a signed 4 bytes 
+/*
+ * sint32 is always a signed 4 bytes
  */
 typedef signed long sint32;
 
-/* 
- * sint16 is always a signed 2 bytes 
+/*
+ * sint16 is always a signed 2 bytes
  */
 typedef signed short sint16;
 
-/* 
- * sint8 is always a signed byte 
+/*
+ * sint8 is always a signed byte
  */
 typedef signed char sint8;
 
-/* 
- * real4 represents a 4 byte floating point value 
+/*
+ * real4 represents a 4 byte floating point value
  */
 typedef float real4;
 
-/* 
- * real8 represents an 8 byte floating point value 
+/*
+ * real8 represents an 8 byte floating point value
  */
 typedef double real8;
 

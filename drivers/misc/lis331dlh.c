@@ -19,15 +19,13 @@
 #include <linux/err.h>
 #include <linux/errno.h>
 #include <linux/delay.h>
-#ifdef CONFIG_HAS_EARLYSUSPEND
-#include <linux/earlysuspend.h>
-#endif
 #include <linux/fs.h>
 #include <linux/i2c.h>
 #include <linux/input.h>
 #include <linux/input-polldev.h>
 #include <linux/miscdevice.h>
 #include <linux/uaccess.h>
+#include <linux/suspend.h>
 
 #include <linux/lis331dlh.h>
 
@@ -96,24 +94,17 @@ struct lis331dlh_data {
 	atomic_t enabled;
 	int on_before_suspend;
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend early_suspend;
-#endif
-
 	u8 shift_adj;
 	u8 resume_state[5];
 };
-
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void lis331dlh_early_suspend(struct early_suspend *handler);
-static void lis331dlh_late_resume(struct early_suspend *handler);
-#endif
 
 /*
  * Because misc devices can not carry a pointer from driver register to
  * open, we keep this global.  This limits the driver to a single instance.
  */
 struct lis331dlh_data *lis331dlh_misc_data;
+
+static struct notifier_block lis331dlh_pm_notifier;
 
 static int lis331dlh_i2c_read(struct lis331dlh_data *lis, u8 * buf, int len)
 {
@@ -202,8 +193,7 @@ static int lis331dlh_hw_init(struct lis331dlh_data *lis)
 static void lis331dlh_device_power_off(struct lis331dlh_data *lis)
 {
 	int err;
-/*	u8 buf[2] = { CTRL_REG4, PM_OFF }; */
-	u8 buf[2] = { CTRL_REG1, PM_OFF };
+	u8 buf[2] = { CTRL_REG4, PM_OFF };
 
 	err = lis331dlh_i2c_write(lis, buf, 1);
 	if (err < 0)
@@ -681,15 +671,10 @@ static int lis331dlh_probe(struct i2c_client *client,
 
 	lis331dlh_device_power_off(lis);
 
+	register_pm_notifier(&lis331dlh_pm_notifier);
+
 	/* As default, do not report information */
 	atomic_set(&lis->enabled, 0);
-
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	lis->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
-	lis->early_suspend.suspend = lis331dlh_early_suspend;
-	lis->early_suspend.resume = lis331dlh_late_resume;
-	register_early_suspend(&lis->early_suspend);
-#endif
 
 	mutex_unlock(&lis->lock);
 
@@ -729,41 +714,6 @@ static int __devexit lis331dlh_remove(struct i2c_client *client)
 	return 0;
 }
 
-static int lis331dlh_resume(struct i2c_client *client)
-{
-	struct lis331dlh_data *lis = i2c_get_clientdata(client);
-
-	if (lis->on_before_suspend)
-		return lis331dlh_enable(lis);
-	return 0;
-}
-
-static int lis331dlh_suspend(struct i2c_client *client, pm_message_t mesg)
-{
-	struct lis331dlh_data *lis = i2c_get_clientdata(client);
-
-	lis->on_before_suspend = atomic_read(&lis->enabled);
-	return lis331dlh_disable(lis);
-}
-
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void lis331dlh_early_suspend(struct early_suspend *handler)
-{
-	struct lis331dlh_data *lis;
-
-	lis = container_of(handler, struct lis331dlh_data, early_suspend);
-	lis331dlh_suspend(lis->client, PMSG_SUSPEND);
-}
-
-static void lis331dlh_late_resume(struct early_suspend *handler)
-{
-	struct lis331dlh_data *lis;
-
-	lis = container_of(handler, struct lis331dlh_data, early_suspend);
-	lis331dlh_resume(lis->client);
-}
-#endif
-
 static const struct i2c_device_id lis331dlh_id[] = {
 	{NAME, 0},
 	{},
@@ -771,16 +721,43 @@ static const struct i2c_device_id lis331dlh_id[] = {
 
 MODULE_DEVICE_TABLE(i2c, lis331dlh_id);
 
+static int lis331dlh_resume(void)
+{
+	if (lis331dlh_misc_data->on_before_suspend)
+		return lis331dlh_enable(lis331dlh_misc_data);
+	return 0;
+}
+
+static int lis331dlh_suspend(void)
+{
+	lis331dlh_misc_data->on_before_suspend =
+		atomic_read(&lis331dlh_misc_data->enabled);
+	return lis331dlh_disable(lis331dlh_misc_data);
+}
+
+static int lis331dlh_pm_event(struct notifier_block *this, unsigned long event,
+				void *ptr)
+{
+	switch (event) {
+	case PM_SUSPEND_PREPARE:
+		lis331dlh_suspend();
+		break;
+	case PM_POST_SUSPEND:
+		lis331dlh_resume();
+	}
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block lis331dlh_pm_notifier = {
+	.notifier_call = lis331dlh_pm_event,
+};
+
 static struct i2c_driver lis331dlh_driver = {
 	.driver = {
 		   .name = NAME,
 		   },
 	.probe = lis331dlh_probe,
 	.remove = __devexit_p(lis331dlh_remove),
-#ifndef CONFIG_HAS_EARLYSUSPEND
-	.resume = lis331dlh_resume,
-	.suspend = lis331dlh_suspend,
-#endif
 	.id_table = lis331dlh_id,
 };
 

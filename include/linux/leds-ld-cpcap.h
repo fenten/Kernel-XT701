@@ -20,8 +20,10 @@
 #define __LED_LD_CPCAP_H__
 
 #define LD_MSG_IND_DEV "notification-led"
-#define LD_DISP_BUTTON_DEV "button-backlight"
-#define LD_KPAD_DEV "keyboard-backlight"
+#define SYS_DISP_BUTTON_DEV "button-backlight"
+#define LD_DISP_BUTTON_DEV "ld-button-backlight"
+#define SYS_LD_KPAD_DEV "keyboard-backlight"
+#define LD_KPAD_DEV "ld-keyboard-backlight"
 #define LD_AF_LED_DEV "af-led"
 #define LD_SUPPLY "sw5"
 
@@ -31,7 +33,7 @@
 
 #define LD_MSG_IND_CPCAP_MASK       0x3FF
 
-#define LD_MSG_IND_LOW              0x10
+#define LD_MSG_IND_LOW              0x20
 #define LD_MSG_IND_LOW_MED          0x20
 #define LD_MSG_IND_MEDIUM           0x30
 #define LD_MSG_IND_MED_HIGH         0x40
@@ -46,10 +48,19 @@
 #define LD_DISP_BUTTON_DUTY_CYCLE	0x2A0
 #define LD_DISP_BUTTON_CPCAP_MASK	0x3FF
 
-#define LD_BLED_CPCAP_DUTY_CYCLE    0xB8
+#define LD_BLED_CPCAP_DUTY_CYCLE    0x41
 #define LD_BLED_CPCAP_MASK          0x3FF
-#define LD_BLED_CPCAP_CURRENT       0x0
+#define LD_BLED_CPCAP_CURRENT       0x6
 
 #define LD_ALT_ADBL_CURRENT         0x4
+
+#define LD_BUTTON_CPCAP_DUTY_CYCLE  0x7F0
+#define LD_BUTTON_CPCAP_MASK        0x3FF
+#define LD_BUTTON_CPCAP_CURRENT     0x2
+#define LD_BUTTON_CPCAP_PWM	        0x1800
+#define LD_BUTTON_CPCAP_FADE_TIME	0x4000
+#define LD_BUTTON_CPCAP_FADE_EN	    0x2000
+#define LD_BUTTON_CPCAP_ABMODE	    0x1C
+#define LD_BUTTON_CPCAP_ABMODE_MASK	0x1C
 
 #endif  /* __LED_LD_CPCAP_H__ */

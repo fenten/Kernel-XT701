@@ -1,7 +1,7 @@
 /******************************************************************************
  * NetMUX main.c                                                              *
  *                                                                            *
- * Copyright (C) 2006-2007 Motorola, Inc.                                     *
+ * Copyright (C) 2006-2010 Motorola, Inc.                                     *
  *                                                                            *
  * Redistribution and use in source and binary forms, with or without         *
  * modification, are permitted provided that the following conditions are     *
@@ -37,6 +37,7 @@
  *   2007/12/05  Motorola    change code as kernel upgrade                    *
  *   2007/12/05  Motorola    Add NetmuxLogInit in init module                 *
  *   2009/07/23  Motorola    Add wake lock functionality                      *
+ *   2010/04/28  Motorola    Format cleanup                                   *
  ******************************************************************************/
 
 /* main.c defines entry points for the NetMUX.  Each entry point is unique    */
@@ -74,7 +75,7 @@ struct wake_lock netmux_receive_wakelock;
 /*
  * A list of registered interfaces is defined in register.c
  */
-extern INTERFACELIST* interfacelist;
+extern INTERFACELIST *interfacelist;
 
 /*
  * create /dev/netmux
@@ -88,22 +89,23 @@ struct class *netmux_class = NULL;
  */
 static int __init netmux_init(void)
 {
-    printk("Running NetMUX\n");
-    initialize_utilities();
+	printk(KERN_INFO "Running NetMUX\n");
+	initialize_utilities();
 
-    netmux_class = class_create(THIS_MODULE, "netmux");
-    if (IS_ERR(netmux_class))
-    {
-        printk(KERN_ERR "Error in creating netmux_class class\n");
-        return PTR_ERR(netmux_class);
-    }
+	netmux_class = class_create(THIS_MODULE, "netmux");
+	if (IS_ERR(netmux_class)) {
+		printk(KERN_ERR "Error in creating netmux_class class\n");
+		return PTR_ERR(netmux_class);
+	}
 
-    NetmuxLogInit();
+	NetmuxLogInit();
 
-    wake_lock_init(&netmux_send_wakelock, WAKE_LOCK_SUSPEND, "NETMUX_send");
-    wake_lock_init(&netmux_receive_wakelock, WAKE_LOCK_SUSPEND, "NETMUX_receive");
+	wake_lock_init(&netmux_send_wakelock, WAKE_LOCK_SUSPEND,
+		       "NETMUX_send");
+	wake_lock_init(&netmux_receive_wakelock, WAKE_LOCK_SUSPEND,
+		       "NETMUX_receive");
 
-    return 0;
+	return 0;
 }
 
 /*
@@ -112,17 +114,16 @@ static int __init netmux_init(void)
  */
 static void __exit netmux_exit(void)
 {
-    printk("Cleaning Up NetMUX\n");
-    while(interfacelist)
-        DeactivateMUX(interfacelist);
-    shutdown_utilities();
+	printk(KERN_INFO "Cleaning Up NetMUX\n");
+	while (interfacelist)
+		DeactivateMUX(interfacelist);
+	shutdown_utilities();
 
-    wake_lock_destroy(&netmux_send_wakelock);
-    wake_lock_destroy(&netmux_receive_wakelock);
+	wake_lock_destroy(&netmux_send_wakelock);
+	wake_lock_destroy(&netmux_receive_wakelock);
 
-    class_destroy(netmux_class);
+	class_destroy(netmux_class);
 }
 
 module_init(netmux_init);
 module_exit(netmux_exit);
-

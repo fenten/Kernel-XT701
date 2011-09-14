@@ -27,9 +27,8 @@
 #include <linux/delay.h>
 #include <linux/errno.h>
 
-#include <mach/board.h>
-#include <mach/display.h>
-#include <mach/cpu.h>
+#include <plat/display.h>
+#include <plat/cpu.h>
 
 #include "dss.h"
 
@@ -41,24 +40,28 @@ static struct {
 static int dpi_set_dsi_clk(bool is_tft, unsigned long pck_req,
 		unsigned long *fck, int *lck_div, int *pck_div)
 {
-	struct dsi_clock_info cinfo;
+	struct dsi_clock_info dsi_cinfo;
+	struct dispc_clock_info dispc_cinfo;
 	int r;
 
-	r = dsi_pll_calc_pck(is_tft, pck_req, &cinfo);
+	r = dsi_pll_calc_clock_div_pck(is_tft, pck_req, &dsi_cinfo,
+			&dispc_cinfo);
 	if (r)
 		return r;
 
-	r = dsi_pll_program(&cinfo);
+	r = dsi_pll_set_clock_div(&dsi_cinfo);
 	if (r)
 		return r;
 
 	dss_select_clk_source(0, 1);
 
-	dispc_set_lcd_divisor(cinfo.lck_div, cinfo.pck_div);
+	r = dispc_set_clock_div(&dispc_cinfo);
+	if (r)
+		return r;
 
-	*fck = cinfo.dsi1_pll_fclk;
-	*lck_div = cinfo.lck_div;
-	*pck_div = cinfo.pck_div;
+	*fck = dsi_cinfo.dsi1_pll_fclk;
+	*lck_div = dispc_cinfo.lck_div;
+	*pck_div = dispc_cinfo.pck_div;
 
 	return 0;
 }
@@ -66,20 +69,25 @@ static int dpi_set_dsi_clk(bool is_tft, unsigned long pck_req,
 static int dpi_set_dispc_clk(bool is_tft, unsigned long pck_req,
 		unsigned long *fck, int *lck_div, int *pck_div)
 {
-	struct dispc_clock_info cinfo;
+	struct dss_clock_info dss_cinfo;
+	struct dispc_clock_info dispc_cinfo;
 	int r;
 
-	r = dispc_calc_clock_div(is_tft, pck_req, &cinfo);
+	r = dss_calc_clock_div(is_tft, pck_req, &dss_cinfo, &dispc_cinfo);
 	if (r)
 		return r;
 
-	r = dispc_set_clock_div(&cinfo);
+	r = dss_set_clock_div(&dss_cinfo);
 	if (r)
 		return r;
 
-	*fck = cinfo.fck;
-	*lck_div = cinfo.lck_div;
-	*pck_div = cinfo.pck_div;
+	r = dispc_set_clock_div(&dispc_cinfo);
+	if (r)
+		return r;
+
+	*fck = dss_cinfo.fck;
+	*lck_div = dispc_cinfo.lck_div;
+	*pck_div = dispc_cinfo.pck_div;
 
 	return 0;
 }
@@ -166,7 +174,14 @@ static int dpi_display_enable(struct omap_dss_device *dssdev)
 
 #ifdef CONFIG_OMAP2_DSS_USE_DSI_PLL
 	dss_clk_enable(DSS_CLK_FCK2);
-	r = dsi_pll_init(0, 1);
+
+	if (cpu_is_omap3630()) {
+		/* Magic bit to make dss_pck work for omap36xx.
+		   It is a workaroud for omap3630 chip bug. */
+		r = dsi_pll_init(dssdev, 1, 1);
+	} else {
+		r = dsi_pll_init(dssdev, 0, 1);
+	}
 	if (r)
 		goto err3;
 #endif
@@ -297,29 +312,32 @@ static int dpi_check_timings(struct omap_dss_device *dssdev,
 
 #ifdef CONFIG_OMAP2_DSS_USE_DSI_PLL
 	{
-		struct dsi_clock_info cinfo;
-		r = dsi_pll_calc_pck(is_tft, timings->pixel_clock * 1000,
-				&cinfo);
+		struct dsi_clock_info dsi_cinfo;
+		struct dispc_clock_info dispc_cinfo;
+		r = dsi_pll_calc_clock_div_pck(is_tft,
+				timings->pixel_clock * 1000,
+				&dsi_cinfo, &dispc_cinfo);
 
 		if (r)
 			return r;
 
-		fck = cinfo.dsi1_pll_fclk;
-		lck_div = cinfo.lck_div;
-		pck_div = cinfo.pck_div;
+		fck = dsi_cinfo.dsi1_pll_fclk;
+		lck_div = dispc_cinfo.lck_div;
+		pck_div = dispc_cinfo.pck_div;
 	}
 #else
 	{
-		struct dispc_clock_info cinfo;
-		r = dispc_calc_clock_div(is_tft, timings->pixel_clock * 1000,
-				&cinfo);
+		struct dss_clock_info dss_cinfo;
+		struct dispc_clock_info dispc_cinfo;
+		r = dss_calc_clock_div(is_tft, timings->pixel_clock * 1000,
+				&dss_cinfo, &dispc_cinfo);
 
 		if (r)
 			return r;
 
-		fck = cinfo.fck;
-		lck_div = cinfo.lck_div;
-		pck_div = cinfo.pck_div;
+		fck = dss_cinfo.fck;
+		lck_div = dispc_cinfo.lck_div;
+		pck_div = dispc_cinfo.pck_div;
 	}
 #endif
 

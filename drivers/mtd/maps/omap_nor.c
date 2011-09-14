@@ -45,7 +45,7 @@
 #include <asm/io.h>
 #include <mach/hardware.h>
 #include <asm/mach/flash.h>
-#include <mach/tc.h>
+#include <plat/tc.h>
 
 #ifdef CONFIG_MTD_PARTITIONS
 static const char *part_probes[] = { /* "RedBoot", */ "cmdlinepart", NULL };
@@ -115,6 +115,8 @@ static int __init omapflash_probe(struct platform_device *pdev)
 	}
 	info->mtd->owner = THIS_MODULE;
 
+	info->mtd->dev.parent = &pdev->dev;
+
 #ifdef CONFIG_MTD_PARTITIONS
 	err = parse_mtd_partitions(info->mtd, part_probes, &info->parts, 0);
 	if (err > 0)
@@ -142,12 +144,11 @@ out_free_info:
 static int __exit omapflash_remove(struct platform_device *pdev)
 {
 	struct omapflash_info *info = platform_get_drvdata(pdev);
-	struct flash_platform_data *pdata = pdev->dev.platform_data;
 
 	platform_set_drvdata(pdev, NULL);
 
 	if (info) {
-		if (info->parts || (pdata && pdata->parts)) {
+		if (info->parts) {
 			del_mtd_partitions(info->mtd);
 			kfree(info->parts);
 		} else

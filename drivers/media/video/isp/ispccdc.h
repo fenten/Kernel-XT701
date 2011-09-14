@@ -22,7 +22,7 @@
 #ifndef OMAP_ISP_CCDC_H
 #define OMAP_ISP_CCDC_H
 
-#include <mach/isp_user.h>
+#include <plat/isp_user.h>
 
 #define is_isplsc_activated()		1
 
@@ -39,7 +39,8 @@ enum ccdc_output {
 	CCDC_YUV_MEM_RSZ,
 	CCDC_OTHERS_VP,
 	CCDC_OTHERS_MEM,
-	CCDC_OTHERS_VP_MEM
+	CCDC_OTHERS_VP_MEM,
+	CCDC_OTHERS_VP_MEM_LSC
 };
 
 /* Enumeration constants for the sync interface parameters */
@@ -166,17 +167,15 @@ void ispccdc_config_alaw(enum alaw_ipwidth ipwidth);
 
 void ispccdc_enable_alaw(u8 enable);
 
-int ispccdc_load_lsc(u8 *table_addr, u32 table_size);
-
-void ispccdc_config_lsc(struct ispccdc_lsc_config *lsc_cfg);
-
 void ispccdc_enable_lsc(u8 enable);
 
-void ispccdc_lsc_error_handler(void);
+int ispccdc_lsc_busy(void);
 
 void ispccdc_config_imgattr(u32 colptn);
 
 void ispccdc_config_shadow_registers(void);
+
+void ispccdc_config_shadow_lsc(void);
 
 int ispccdc_try_size(u32 input_w, u32 input_h, u32 *output_w, u32 *output_h);
 
@@ -185,6 +184,10 @@ int ispccdc_config_size(u32 input_w, u32 input_h, u32 output_w, u32 output_h);
 int ispccdc_config_outlineoffset(u32 offset, u8 oddeven, u8 numlines);
 
 int ispccdc_set_outaddr(u32 addr);
+
+void ispccdc_lsc_pref_comp_handler(void);
+
+void ispccdc_lsc_state_handler(unsigned long status);
 
 void ispccdc_enable(u8 enable);
 
@@ -206,6 +209,10 @@ int omap34xx_isp_ccdc_config(void *userspace_add);
 
 void ispccdc_set_wenlog(u32 wenlog);
 
-void ispccdc_set_crop_offset(enum ispccdc_raw_fmt);
+void ispccdc_set_dcsub(u32 dcsub);
+
+void ispccdc_set_raw_offset(enum ispccdc_raw_fmt);
+
+void ispccdc_request_lsc_enable(int enable);
 
 #endif		/* OMAP_ISP_CCDC_H */

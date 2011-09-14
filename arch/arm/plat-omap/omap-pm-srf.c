@@ -2,14 +2,11 @@
  * omap-pm-srf.c - OMAP power management interface implemented
  * using Shared resource framework
  *
- * This code implements the OMAP power management interface to
- * drivers, CPUIdle, CPUFreq, and DSP Bridge.  It is strictly for
- * debug/demonstration use, as it does nothing but printk() whenever a
- * function is called (when DEBUG is defined, below)
+ * Copyright (C) 2008-2009 Texas Instruments, Inc.
+ * Copyright (C) 2008-2009 Nokia Corporation
+ * Rajendra Nayak
  *
- * Copyright (C) 2008 Texas Instruments, Inc.
- * Copyright (C) 2008 Nokia Corporation
- * Paul Walmsley
+ * This code is based on plat-omap/omap-pm-noop.c.
  *
  * Interface developed by (in alphabetical order):
  * Karthik Dasu, Tony Lindgren, Rajendra Nayak, Sakari Poussa, Veeramanikandan
@@ -23,10 +20,11 @@
 #include <linux/device.h>
 #include <linux/module.h>
 
-#include <mach/omap-pm.h>
-#include <mach/powerdomain.h>
-#include <mach/resource.h>
-#include <mach/omapdev.h>
+#include <plat/omap-pm.h>
+#include <plat/powerdomain.h>
+#include <plat/resource.h>
+#include <plat/omap_device.h>
+#include <plat/omap34xx.h>
 
 struct omap_opp *dsp_opps;
 struct omap_opp *mpu_opps;
@@ -93,10 +91,11 @@ void omap_pm_set_min_bus_tput(struct device *dev, u8 agent_id, unsigned long r)
 		resource_request("vdd2_opp", dev, r);
 	}
 }
+EXPORT_SYMBOL(omap_pm_set_min_bus_tput);
 
 void omap_pm_set_max_dev_wakeup_lat(struct device *dev, long t)
 {
-	struct omapdev *odev;
+	struct omap_device *odev;
 	struct powerdomain *pwrdm_dev;
 	struct platform_device *pdev;
 	char *lat_res_name;
@@ -121,11 +120,11 @@ void omap_pm_set_max_dev_wakeup_lat(struct device *dev, long t)
 		return;
 	}
 
-	odev = omapdev_find_pdev(pdev);
+	odev = to_omap_device(pdev);
 	if (odev) {
-		pwrdm_dev = omapdev_get_pwrdm(odev);
+		pwrdm_dev = omap_device_get_pwrdm(odev);
 	} else {
-		printk(KERN_ERR "OMAP-PM: Error: Could not find omapdev "
+		printk(KERN_ERR "OMAP-PM: Error: Could not find omap_device "
 						"for %s\n", pdev->name);
 		return;
 	}
@@ -183,9 +182,8 @@ const struct omap_opp *omap_pm_dsp_get_opp_table(void)
 	 * array should have .rate = .opp_id = 0.
 	 */
 
-	return NULL;
+	return dsp_opps;
 }
-EXPORT_SYMBOL(omap_pm_dsp_get_opp_table);
 
 void omap_pm_dsp_set_min_opp(u8 opp_id)
 {
@@ -203,28 +201,24 @@ void omap_pm_dsp_set_min_opp(u8 opp_id)
 	resource_request("vdd1_opp", &dummy_dsp_dev, opp_id);
 	return;
 }
-EXPORT_SYMBOL(omap_pm_dsp_set_min_opp);
 
 u8 omap_pm_dsp_get_opp(void)
 {
 	pr_debug("OMAP PM: DSP requests current DSP OPP ID\n");
 	return resource_get_level("vdd1_opp");
 }
-EXPORT_SYMBOL(omap_pm_dsp_get_opp);
 
 u8 omap_pm_vdd1_get_opp(void)
 {
 	pr_debug("OMAP PM: User requests current VDD1 OPP\n");
 	return resource_get_level("vdd1_opp");
 }
-EXPORT_SYMBOL(omap_pm_vdd1_get_opp);
 
 u8 omap_pm_vdd2_get_opp(void)
 {
 	pr_debug("OMAP PM: User requests current VDD2 OPP\n");
 	return resource_get_level("vdd2_opp");
 }
-EXPORT_SYMBOL(omap_pm_vdd2_get_opp);
 
 /*
  * CPUFreq-originated constraint
@@ -261,14 +255,31 @@ void omap_pm_cpu_set_freq(unsigned long f)
 	resource_request("mpu_freq", &dummy_cpufreq_dev, f);
 	return;
 }
-EXPORT_SYMBOL(omap_pm_cpu_set_freq);
+
+void omap_pm_set_min_mpu_freq(struct device *dev, unsigned long f)
+{
+	if (f < 0) {
+		WARN_ON(1);
+		return;
+	}
+
+	if (f == 0) {
+		pr_debug("OMAP PM: remove CPU frequency minimal request\n");
+		resource_release("mpu_freq", dev);
+	} else {
+		pr_debug("OMAP PM: add CPU frequency minimal request to %lu\n",
+			f);
+		resource_request("mpu_freq", dev, f);
+	}
+	return;
+}
+EXPORT_SYMBOL(omap_pm_set_min_mpu_freq);
 
 unsigned long omap_pm_cpu_get_freq(void)
 {
 	pr_debug("OMAP PM: CPUFreq requests current CPU frequency\n");
 	return resource_get_level("mpu_freq");
 }
-EXPORT_SYMBOL(omap_pm_cpu_get_freq);
 
 /*
  * Device context loss tracking
@@ -276,6 +287,10 @@ EXPORT_SYMBOL(omap_pm_cpu_get_freq);
 
 int omap_pm_get_dev_context_loss_count(struct device *dev)
 {
+	struct platform_device *pdev;
+	struct omap_device *odev;
+	struct powerdomain *pwrdm;
+
 	if (!dev) {
 		WARN_ON(1);
 		return -EINVAL;
@@ -288,48 +303,19 @@ int omap_pm_get_dev_context_loss_count(struct device *dev)
 	 * Map the device to the powerdomain.  Return the powerdomain
 	 * off counter.
 	 */
+	pdev = to_platform_device(dev);
+	odev = to_omap_device(pdev);
 
+	if (odev) {
+		pwrdm = omap_device_get_pwrdm(odev);
+		if (pwrdm)
+			return pwrdm->state_counter[0];
+	}
 	return 0;
 }
 
 /*
- * Powerdomain usecounting hooks
- */
-
-void omap_pm_pwrdm_active(struct powerdomain *pwrdm)
-{
-	if (!pwrdm) {
-		WARN_ON(1);
-		return;
-	};
-
-	pr_debug("OMAP PM: powerdomain %s is becoming active\n", pwrdm->name);
-
-	/*
-	 * CDP code apparently will need these for the enable_power_domain()
-	 * and disable_power_domain() functions.
-	 */
-}
-
-void omap_pm_pwrdm_inactive(struct powerdomain *pwrdm)
-{
-	if (!pwrdm) {
-		WARN_ON(1);
-		return;
-	};
-
-	pr_debug("OMAP PM: powerdomain %s is becoming inactive\n",
-		 pwrdm->name);
-
-	/*
-	 * CDP code apparently will need these for the enable_power_domain()
-	 * and disable_power_domain() functions.
-	 */
-}
-
-/*
- * Should be called before clk framework since clk fw will call
- * omap_pm_pwrdm_{in,}active()
+ * Must be called before clk framework init
  */
 int __init omap_pm_if_early_init(struct omap_opp *mpu_opp_table,
 				 struct omap_opp *dsp_opp_table,
@@ -352,3 +338,70 @@ void omap_pm_if_exit(void)
 {
 	/* Deallocate CPUFreq frequency table here */
 }
+
+u8 omap_pm_get_max_vdd1_opp()
+{
+	if (cpu_is_omap3630()) {
+		switch (omap_rev_id()) {
+		case OMAP_3630:
+		default:
+			return VDD1_OPP4;
+		case OMAP_3630_800:
+			return VDD1_OPP3;
+		case OMAP_3630_1000:
+			return VDD1_OPP4;
+		}
+	} else {
+		if (omap_rev() < OMAP3430_REV_ES3_1)
+			return VDD1_OPP5;
+		else {
+			switch (omap_rev_id()) {
+			case OMAP_3420:
+			case OMAP_3430:
+				return VDD1_OPP5;
+			case OMAP_3440:
+				return VDD1_OPP6;
+			default:
+				return VDD1_OPP5;
+			}
+		}
+	}
+}
+EXPORT_SYMBOL(omap_pm_get_max_vdd1_opp);
+
+u8 omap_pm_get_min_vdd1_opp(void)
+{
+	return VDD1_OPP1;
+}
+EXPORT_SYMBOL(omap_pm_get_min_vdd1_opp);
+
+
+u8 omap_pm_get_max_vdd2_opp(void)
+{
+	if (cpu_is_omap3630())
+		return VDD2_OPP2;
+	else
+		return VDD2_OPP3;
+}
+EXPORT_SYMBOL(omap_pm_get_max_vdd2_opp);
+
+u8 omap_pm_get_min_vdd2_opp(void)
+{
+	if (cpu_is_omap3630())
+		return VDD2_OPP1;
+	else
+		return VDD2_OPP2;
+}
+EXPORT_SYMBOL(omap_pm_get_min_vdd2_opp);
+
+struct omap_opp *omap_get_mpu_rate_table()
+{
+	return mpu_opps;
+}
+EXPORT_SYMBOL(omap_get_mpu_rate_table);
+
+struct omap_opp *omap_get_dsp_rate_table()
+{
+	return dsp_opps;
+}
+EXPORT_SYMBOL(omap_get_dsp_rate_table);

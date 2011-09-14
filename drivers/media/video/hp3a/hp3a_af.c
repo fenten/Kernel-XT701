@@ -21,7 +21,8 @@
 #include <linux/interrupt.h>
 #include <linux/device.h>
 #include <linux/delay.h>
-#include <mach/oldisp_user.h>
+#include <linux/videodev2.h>
+#include <plat/isp_user.h>
 
 #include "hp3a.h"
 #include "hp3a_common.h"
@@ -34,27 +35,27 @@
 
 struct hp3a_reg isp_af_regs[] = {
 	{HP3A_REG_32BIT, ISPH3A_PCR, 0}, /* 0 */
-	{HP3A_REG_32BIT, ISPH3A_AFPAX1, 0}, /* 1 */
-	{HP3A_REG_32BIT, ISPH3A_AFPAX2, 0}, /* 2 */
-	{HP3A_REG_32BIT, ISPH3A_AFPAXSTART, 0}, /* 3 */
-	{HP3A_REG_32BIT, ISPH3A_AFIIRSH, 0}, /* 4 */
+	{HP3A_REG_32BIT, ISPH3A_AFPAX1, 0},
+	{HP3A_REG_32BIT, ISPH3A_AFPAX2, 0},
+	{HP3A_REG_32BIT, ISPH3A_AFPAXSTART, 0},
+	{HP3A_REG_32BIT, ISPH3A_AFIIRSH, 0},
 	{HP3A_REG_32BIT, ISPH3A_AFBUFST, 0}, /* 5 */
-	{HP3A_REG_32BIT, ISPH3A_AFCOEF010, 0}, /* 6 */
-	{HP3A_REG_32BIT, ISPH3A_AFCOEF032, 0}, /* 7 */
-	{HP3A_REG_32BIT, ISPH3A_AFCOEF054, 0}, /* 8 */
-	{HP3A_REG_32BIT, ISPH3A_AFCOEF076, 0}, /* 9 */
+	{HP3A_REG_32BIT, ISPH3A_AFCOEF010, 0},
+	{HP3A_REG_32BIT, ISPH3A_AFCOEF032, 0},
+	{HP3A_REG_32BIT, ISPH3A_AFCOEF054, 0},
+	{HP3A_REG_32BIT, ISPH3A_AFCOEF076, 0},
 	{HP3A_REG_32BIT, ISPH3A_AFCOEF098, 0}, /* 10 */
-	{HP3A_REG_32BIT, ISPH3A_AFCOEF0010, 0}, /* 11 */
-	{HP3A_REG_32BIT, ISPH3A_AFCOEF110, 0}, /* 12 */
-	{HP3A_REG_32BIT, ISPH3A_AFCOEF132, 0}, /* 13 */
-	{HP3A_REG_32BIT, ISPH3A_AFCOEF154, 0}, /* 15 */
-	{HP3A_REG_32BIT, ISPH3A_AFCOEF176, 0}, /* 16 */
-	{HP3A_REG_32BIT, ISPH3A_AFCOEF198, 0}, /* 17 */
-	{HP3A_REG_32BIT, ISPH3A_AFCOEF1010, 0}, /* 18 */
+	{HP3A_REG_32BIT, ISPH3A_AFCOEF0010, 0},
+	{HP3A_REG_32BIT, ISPH3A_AFCOEF110, 0},
+	{HP3A_REG_32BIT, ISPH3A_AFCOEF132, 0},
+	{HP3A_REG_32BIT, ISPH3A_AFCOEF154, 0},
+	{HP3A_REG_32BIT, ISPH3A_AFCOEF176, 0}, /* 15 */
+	{HP3A_REG_32BIT, ISPH3A_AFCOEF198, 0},
+	{HP3A_REG_32BIT, ISPH3A_AFCOEF1010, 0},
 	{HP3A_REG_32BIT, ISPH3A_AEWWIN1, 0},
 	{HP3A_REG_32BIT, ISPH3A_AEWINSTART, 0},
 	{HP3A_REG_32BIT, ISPH3A_AEWINBLK, 0},
-	{HP3A_REG_32BIT, ISPH3A_AEWSUBWIN, 0},
+	{HP3A_REG_32BIT, ISPH3A_AEWSUBWIN, 0}, /* 20 */
 	{HP3A_REG_32BIT, ISPH3A_AEWBUFST, 0},
 	{HP3A_REG_TOK_TERM, 0, 0}
 	};
@@ -152,6 +153,9 @@ int hp3a_config_af(struct hp3a_af_config *config, struct hp3a_fh *fh)
 	int index;
 	int coeff0_index = 6; /* index into isp_af_regs array. */
 	int coeff1_index = 12; /* index into isp_af_regs array. */
+
+	if (g_tc.hw_initialized == 0)
+		return -EINVAL;
 
 	if (config->enable) {
 		/* Install AF callback. */

@@ -27,7 +27,7 @@
 #define DEBUG
 #endif
 
-#include <mach/display.h>
+#include <plat/display.h>
 
 #ifdef DEBUG
 extern unsigned int omapfb_debug;
@@ -95,22 +95,16 @@ struct omapfb_colormode {
 	struct fb_bitfield transp;
 };
 
-u32 omapfb_get_region_paddr(struct omapfb_info *ofbi);
-void __iomem *omapfb_get_region_vaddr(struct omapfb_info *ofbi);
-
 void set_fb_fix(struct fb_info *fbi);
 int check_fb_var(struct fb_info *fbi, struct fb_var_screeninfo *var);
 int omapfb_realloc_fbmem(struct fb_info *fbi, unsigned long size, int type);
 int omapfb_apply_changes(struct fb_info *fbi, int init);
-int omapfb_fb_init(struct omapfb2_device *fbdev, struct fb_info *fbi);
 
 int omapfb_create_sysfs(struct omapfb2_device *fbdev);
 void omapfb_remove_sysfs(struct omapfb2_device *fbdev);
 
 int omapfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg);
 
-int omapfb_mode_to_timings(const char *mode_str,
-		struct omap_video_timings *timings, u8 *bpp);
 int dss_mode_to_fb_mode(enum omap_color_mode dssmode,
 			struct fb_var_screeninfo *var);
 

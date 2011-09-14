@@ -1,23 +1,25 @@
-/****************************************************************
-
- Siano Mobile Silicon, Inc.
- MDTV receiver kernel modules.
- Copyright (C) 2006-2008, Uri Shkolnik
-
- This program is free software: you can redistribute it and/or modify
- it under the terms of the GNU General Public License as published by
- the Free Software Foundation, either version 2 of the License, or
- (at your option) any later version.
-
- This program is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- GNU General Public License for more details.
-
- You should have received a copy of the GNU General Public License
- along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
- ****************************************************************/
+/*
+ *  Siano core API module
+ *
+ *  This file contains implementation for the interface to sms core component
+ *
+ *  author: Uri Shkolnik
+ *
+ *  Copyright (c), 2005-2008 Siano Mobile Silicon, Inc.
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License version 2 as
+ *  published by the Free Software Foundation;
+ *
+ *  Software distributed under the License is distributed on an "AS IS"
+ *  basis, WITHOUT WARRANTY OF ANY KIND, either express or implied.
+ *
+ *  See the GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ */
 
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -26,40 +28,19 @@
 #include <linux/dma-mapping.h>
 #include <linux/delay.h>
 #include <linux/io.h>
-#include <linux/uaccess.h>
+
 #include <linux/firmware.h>
 #include <linux/wait.h>
-
 #include <asm/byteorder.h>
 
 #include "smscoreapi.h"
-#include "smsendian.h"
 #include "sms-cards.h"
 #include "smsir.h"
+#include "smsendian.h"
 
-#define MAX_GPIO_PIN_NUMBER	31
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 10)
-/*#define REQUEST_FIRMWARE_SUPPORTED*/
-#undef REQUEST_FIRMWARE_SUPPORTED
-/*#define DEFAULT_FW_FILE_PATH "/system/mdtv"*/
-#define DEFAULT_FW_FILE_PATH "/system/etc/firmware"
-#else
-/*#define DEFAULT_FW_FILE_PATH "/lib/firmware"*/
-/*#define DEFAULT_FW_FILE_PATH "/system/mdtv"*/
-#define DEFAULT_FW_FILE_PATH "/system/etc/firmware"
-#endif
-
-/* Debug level is low */
-int sms_debug = 7;
-
-module_param_named(debug, sms_debug, int, 0644);
+static int sms_dbg;
+module_param_named(debug, sms_dbg, int, 0644);
 MODULE_PARM_DESC(debug, "set debug level (info=1, adv=2 (or-able))");
-
-/*##w21558, mode change : 4 --> 2*/
-static int default_mode = DEVICE_MODE_DAB_TDMB;
-module_param(default_mode, int, 0644);
-MODULE_PARM_DESC(default_mode, "default firmware id (device mode)");
 
 struct smscore_device_notifyee_t {
 	struct list_head entry;
@@ -68,17 +49,17 @@ struct smscore_device_notifyee_t {
 
 struct smscore_idlist_t {
 	struct list_head entry;
-	int id;
-	int data_type;
+	int		id;
+	int		data_type;
 };
 
 struct smscore_client_t {
 	struct list_head entry;
 	struct smscore_device_t *coredev;
-	void *context;
-	struct list_head idlist;
-	onresponse_t onresponse_handler;
-	onremove_t onremove_handler;
+	void			*context;
+	struct list_head 	idlist;
+	onresponse_t	onresponse_handler;
+	onremove_t		onremove_handler;
 };
 
 void smscore_set_board_id(struct smscore_device_t *core, int id)
@@ -86,16 +67,25 @@ void smscore_set_board_id(struct smscore_device_t *core, int id)
 	core->board_id = id;
 }
 
+int smscore_led_state(struct smscore_device_t *core, int led)
+{
+	if (led >= 0)
+		core->led_state = led;
+	return core->led_state;
+}
+EXPORT_SYMBOL_GPL(smscore_set_board_id);
+
 int smscore_get_board_id(struct smscore_device_t *core)
 {
 	return core->board_id;
 }
+EXPORT_SYMBOL_GPL(smscore_get_board_id);
 
 struct smscore_registry_entry_t {
 	struct list_head entry;
-	char devpath[32];
-	int mode;
-	enum sms_device_type_st type;
+	char			devpath[32];
+	int				mode;
+	enum sms_device_type_st	type;
 };
 
 static struct list_head g_smscore_notifyees;
@@ -105,22 +95,29 @@ static struct mutex g_smscore_deviceslock;
 static struct list_head g_smscore_registry;
 static struct mutex g_smscore_registrylock;
 
+static int default_mode = 4;
+
+module_param(default_mode, int, 0644);
+MODULE_PARM_DESC(default_mode, "default firmware id (device mode)");
+
 static struct smscore_registry_entry_t *smscore_find_registry(char *devpath)
 {
 	struct smscore_registry_entry_t *entry;
 	struct list_head *next;
 
 	kmutex_lock(&g_smscore_registrylock);
-	for (next = g_smscore_registry.next; next != &g_smscore_registry; next
-			= next->next) {
+	for (next = g_smscore_registry.next;
+	     next != &g_smscore_registry;
+	     next = next->next) {
 		entry = (struct smscore_registry_entry_t *) next;
 		if (!strcmp(entry->devpath, devpath)) {
 			kmutex_unlock(&g_smscore_registrylock);
 			return entry;
 		}
 	}
-	entry = /* (struct smscore_registry_entry_t *) */kmalloc(
-			sizeof(struct smscore_registry_entry_t), GFP_KERNEL);
+	entry = (struct smscore_registry_entry_t *)
+			kmalloc(sizeof(struct smscore_registry_entry_t),
+				GFP_KERNEL);
 	if (entry) {
 		entry->mode = default_mode;
 		strcpy(entry->devpath, devpath);
@@ -143,6 +140,7 @@ int smscore_registry_getmode(char *devpath)
 
 	return default_mode;
 }
+EXPORT_SYMBOL_GPL(smscore_registry_getmode);
 
 static enum sms_device_type_st smscore_registry_gettype(char *devpath)
 {
@@ -169,7 +167,8 @@ void smscore_registry_setmode(char *devpath, int mode)
 }
 
 static void smscore_registry_settype(char *devpath,
-		enum sms_device_type_st type) {
+				     enum sms_device_type_st type)
+{
 	struct smscore_registry_entry_t *entry;
 
 	entry = smscore_find_registry(devpath);
@@ -179,12 +178,16 @@ static void smscore_registry_settype(char *devpath,
 		sms_err("No registry found.");
 }
 
+
 static void list_add_locked(struct list_head *new, struct list_head *head,
-		spinlock_t *lock) {
+			    spinlock_t *lock)
+{
 	unsigned long flags;
 
 	spin_lock_irqsave(lock, flags);
+
 	list_add(new, head);
+
 	spin_unlock_irqrestore(lock, flags);
 }
 
@@ -202,16 +205,16 @@ int smscore_register_hotplug(hotplug_t hotplug)
 	struct list_head *next, *first;
 	int rc = 0;
 
-	sms_info(" entering... smscore_register_hotplug \n");
 	kmutex_lock(&g_smscore_deviceslock);
 
 	notifyee = kmalloc(sizeof(struct smscore_device_notifyee_t),
-		GFP_KERNEL);
+			   GFP_KERNEL);
 	if (notifyee) {
 		/* now notify callback about existing devices */
 		first = &g_smscore_devices;
-		for (next = first->next; next != first && !rc;
-			next = next->next) {
+		for (next = first->next;
+		     next != first && !rc;
+		     next = next->next) {
 			struct smscore_device_t *coredev =
 				(struct smscore_device_t *) next;
 			rc = hotplug(coredev, coredev->device, 1);
@@ -229,6 +232,7 @@ int smscore_register_hotplug(hotplug_t hotplug)
 
 	return rc;
 }
+EXPORT_SYMBOL_GPL(smscore_register_hotplug);
 
 /**
  * unregister a client callback that called when device plugged in/unplugged
@@ -240,15 +244,13 @@ void smscore_unregister_hotplug(hotplug_t hotplug)
 {
 	struct list_head *next, *first;
 
-	sms_info(" exiting... smscore_register_hotplug \n");
-
 	kmutex_lock(&g_smscore_deviceslock);
 
 	first = &g_smscore_notifyees;
 
 	for (next = first->next; next != first;) {
 		struct smscore_device_notifyee_t *notifyee =
-				(struct smscore_device_notifyee_t *) next;
+			(struct smscore_device_notifyee_t *) next;
 		next = next->next;
 
 		if (notifyee->hotplug == hotplug) {
@@ -259,6 +261,7 @@ void smscore_unregister_hotplug(hotplug_t hotplug)
 
 	kmutex_unlock(&g_smscore_deviceslock);
 }
+EXPORT_SYMBOL_GPL(smscore_unregister_hotplug);
 
 static void smscore_notify_clients(struct smscore_device_t *coredev)
 {
@@ -272,7 +275,8 @@ static void smscore_notify_clients(struct smscore_device_t *coredev)
 }
 
 static int smscore_notify_callbacks(struct smscore_device_t *coredev,
-		struct device *device, int arrival) {
+				    struct device *device, int arrival)
+{
 	struct list_head *next, *first;
 	int rc = 0;
 
@@ -282,7 +286,7 @@ static int smscore_notify_callbacks(struct smscore_device_t *coredev,
 
 	for (next = first->next; next != first; next = next->next) {
 		rc = ((struct smscore_device_notifyee_t *) next)->
-			 hotplug(coredev, device, arrival);
+				hotplug(coredev, device, arrival);
 		if (rc < 0)
 			break;
 	}
@@ -290,10 +294,12 @@ static int smscore_notify_callbacks(struct smscore_device_t *coredev,
 	return rc;
 }
 
-static struct smscore_buffer_t *smscore_createbuffer(u8 *buffer,
-		void *common_buffer, dma_addr_t common_buffer_phys) {
-	struct smscore_buffer_t *cb = kmalloc(sizeof(struct smscore_buffer_t),
-			GFP_KERNEL);
+static struct
+smscore_buffer_t *smscore_createbuffer(u8 *buffer, void *common_buffer,
+				       dma_addr_t common_buffer_phys)
+{
+	struct smscore_buffer_t *cb =
+		kmalloc(sizeof(struct smscore_buffer_t), GFP_KERNEL);
 	if (!cb) {
 		sms_info("kmalloc(...) failed");
 		return NULL;
@@ -317,11 +323,11 @@ static struct smscore_buffer_t *smscore_createbuffer(u8 *buffer,
  * @return 0 on success, <0 on error.
  */
 int smscore_register_device(struct smsdevice_params_t *params,
-		struct smscore_device_t **coredev) {
+			    struct smscore_device_t **coredev)
+{
 	struct smscore_device_t *dev;
 	u8 *buffer;
 
-	sms_info(" entering....smscore_register_device \n");
 	dev = kzalloc(sizeof(struct smscore_device_t), GFP_KERNEL);
 	if (!dev) {
 		sms_info("kzalloc(...) failed");
@@ -339,7 +345,7 @@ int smscore_register_device(struct smsdevice_params_t *params,
 	spin_lock_init(&dev->clientslock);
 	spin_lock_init(&dev->bufferslock);
 
-	/* Device protocol completion events */
+	/* init completion events */
 	init_completion(&dev->version_ex_done);
 	init_completion(&dev->data_download_done);
 	init_completion(&dev->trigger_done);
@@ -355,26 +361,22 @@ int smscore_register_device(struct smsdevice_params_t *params,
 	init_waitqueue_head(&dev->buffer_mng_waitq);
 
 	/* alloc common buffer */
-	sms_info(" entering...alloc common buffer \n");
 	dev->common_buffer_size = params->buffer_size * params->num_buffers;
-
-/* w21558 */
-#if defined(MOT_FEAT_OMAP_DMA_USE)
 	dev->common_buffer = dma_alloc_coherent(NULL, dev->common_buffer_size,
-			&dev->common_buffer_phys, GFP_KERNEL | GFP_DMA);
+						&dev->common_buffer_phys,
+						GFP_KERNEL | GFP_DMA);
 	if (!dev->common_buffer) {
 		smscore_unregister_device(dev);
 		return -ENOMEM;
 	}
-#endif
 
 	/* prepare dma buffers */
-	sms_info("entering... prepare dma buffers \n");
-	for (buffer = dev->common_buffer; dev->num_buffers <
-			params->num_buffers; dev->num_buffers++, buffer
-			+= params->buffer_size) {
-		struct smscore_buffer_t *cb = smscore_createbuffer(buffer,
-				dev->common_buffer, dev->common_buffer_phys);
+	for (buffer = dev->common_buffer;
+	     dev->num_buffers < params->num_buffers;
+	     dev->num_buffers++, buffer += params->buffer_size) {
+		struct smscore_buffer_t *cb =
+			smscore_createbuffer(buffer, dev->common_buffer,
+					     dev->common_buffer_phys);
 		if (!cb) {
 			smscore_unregister_device(dev);
 			return -ENOMEM;
@@ -406,10 +408,12 @@ int smscore_register_device(struct smsdevice_params_t *params,
 
 	*coredev = dev;
 
-	sms_info("device %p created\n", dev);
+	sms_info("device %p created", dev);
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(smscore_register_device);
+
 
 static int smscore_sendrequest_and_wait(struct smscore_device_t *coredev,
 		void *buffer, size_t size, struct completion *completion) {
@@ -420,7 +424,8 @@ static int smscore_sendrequest_and_wait(struct smscore_device_t *coredev,
 	}
 
 	return wait_for_completion_timeout(completion,
-			msecs_to_jiffies(SMS_PROTOCOL_MAX_RAOUNDTRIP_MS)) ? 0 : -ETIME;
+			msecs_to_jiffies(SMS_PROTOCOL_MAX_RAOUNDTRIP_MS)) ?
+			0 : -ETIME;
 }
 
 /**
@@ -484,17 +489,12 @@ static int smscore_init_ir(struct smscore_device_t *coredev)
  */
 int smscore_start_device(struct smscore_device_t *coredev)
 {
-	int rc;
-
-	sms_info("%p starting......\n", coredev);
-#ifdef REQUEST_FIRMWARE_SUPPORTED
-	rc = smscore_set_device_mode(coredev, smscore_registry_getmode(
-			coredev->devpath));
+	int rc = smscore_set_device_mode(
+			coredev, smscore_registry_getmode(coredev->devpath));
 	if (rc < 0) {
-		sms_info("set device mode failed , rc %d", rc);
+		sms_info("set device mode faile , rc %d", rc);
 		return rc;
 	}
-#endif
 
 	kmutex_lock(&g_smscore_deviceslock);
 
@@ -507,22 +507,24 @@ int smscore_start_device(struct smscore_device_t *coredev)
 
 	return rc;
 }
+EXPORT_SYMBOL_GPL(smscore_start_device);
+
 
 static int smscore_load_firmware_family2(struct smscore_device_t *coredev,
-		void *buffer, size_t size) {
+					 void *buffer, size_t size)
+{
 	struct SmsFirmware_ST *firmware = (struct SmsFirmware_ST *) buffer;
 	struct SmsMsgHdr_ST *msg;
 	u32 mem_address;
 	u8 *payload = firmware->Payload;
 	int rc = 0;
-
 	firmware->StartAddress = le32_to_cpu(firmware->StartAddress);
 	firmware->Length = le32_to_cpu(firmware->Length);
 
 	mem_address = firmware->StartAddress;
 
 	sms_info("loading FW to addr 0x%x size %d",
-			mem_address, firmware->Length);
+		 mem_address, firmware->Length);
 	if (coredev->preload_handler) {
 		rc = coredev->preload_handler(coredev->context);
 		if (rc < 0)
@@ -537,35 +539,35 @@ static int smscore_load_firmware_family2(struct smscore_device_t *coredev,
 	if (coredev->mode != DEVICE_MODE_NONE) {
 		sms_debug("sending reload command.");
 		SMS_INIT_MSG(msg, MSG_SW_RELOAD_START_REQ,
-				sizeof(struct SmsMsgHdr_ST));
-		smsendian_handle_tx_message((struct SmsMsgHdr_ST *)msg);
-		rc = smscore_sendrequest_and_wait(coredev, msg, msg->msgLength,
-				&coredev->reload_start_done);
+			     sizeof(struct SmsMsgHdr_ST));
+		rc = smscore_sendrequest_and_wait(coredev, msg,
+						  msg->msgLength,
+						  &coredev->reload_start_done);
 		mem_address = *(u32 *) &payload[20];
 	}
 
 	while (size && rc >= 0) {
 		struct SmsDataDownload_ST *DataMsg =
-				(struct SmsDataDownload_ST *) msg;
-		int payload_size = min((int)size, SMS_MAX_PAYLOAD_SIZE);
+			(struct SmsDataDownload_ST *) msg;
+		int payload_size = min((int) size, SMS_MAX_PAYLOAD_SIZE);
 
 		SMS_INIT_MSG(msg, MSG_SMS_DATA_DOWNLOAD_REQ,
-				(u16) (sizeof(struct SmsMsgHdr_ST) +
-						sizeof(u32) + payload_size));
+			     (u16)(sizeof(struct SmsMsgHdr_ST) +
+				      sizeof(u32) + payload_size));
 
 		DataMsg->MemAddr = mem_address;
 		memcpy(DataMsg->Payload, payload, payload_size);
 
-		smsendian_handle_tx_message((struct SmsMsgHdr_ST *)msg);
 		if ((coredev->device_flags & SMS_ROM_NO_RESPONSE) &&
-				(coredev->mode	== DEVICE_MODE_NONE)) {
-			rc = coredev->sendrequest_handler(coredev->context, DataMsg,
-					DataMsg->xMsgHeader. msgLength);
-		}
+		    (coredev->mode == DEVICE_MODE_NONE))
+			rc = coredev->sendrequest_handler(
+				coredev->context, DataMsg,
+				DataMsg->xMsgHeader.msgLength);
 		else
-			rc = smscore_sendrequest_and_wait(coredev, DataMsg,
-					DataMsg->xMsgHeader. msgLength,
-					&coredev->data_download_done);
+			rc = smscore_sendrequest_and_wait(
+				coredev, DataMsg,
+				DataMsg->xMsgHeader.msgLength,
+				&coredev->data_download_done);
 
 		payload += payload_size;
 		size -= payload_size;
@@ -575,48 +577,47 @@ static int smscore_load_firmware_family2(struct smscore_device_t *coredev,
 	if (rc >= 0) {
 		if (coredev->mode == DEVICE_MODE_NONE) {
 			struct SmsMsgData_ST *TriggerMsg =
-					(struct SmsMsgData_ST *) msg;
+				(struct SmsMsgData_ST *) msg;
 
 			SMS_INIT_MSG(msg, MSG_SMS_SWDOWNLOAD_TRIGGER_REQ,
-					sizeof(struct SmsMsgHdr_ST) +
-					sizeof(u32) * 5);
+				     sizeof(struct SmsMsgHdr_ST) +
+				     sizeof(u32) * 5);
 
 			TriggerMsg->msgData[0] = firmware->StartAddress;
-			/* Entry point */
+						/* Entry point */
 			TriggerMsg->msgData[1] = 5; /* Priority */
 			TriggerMsg->msgData[2] = 0x200; /* Stack size */
 			TriggerMsg->msgData[3] = 0; /* Parameter */
 			TriggerMsg->msgData[4] = 4; /* Task ID */
 
-			smsendian_handle_tx_message((struct SmsMsgHdr_ST *)msg);
 			if (coredev->device_flags & SMS_ROM_NO_RESPONSE) {
-				rc = coredev->sendrequest_handler(coredev->
-					context, TriggerMsg,
+				rc = coredev->sendrequest_handler(
+					coredev->context, TriggerMsg,
 					TriggerMsg->xMsgHeader.msgLength);
-
 				msleep(100);
 			} else
-				rc = smscore_sendrequest_and_wait(coredev,
-					TriggerMsg,
+				rc = smscore_sendrequest_and_wait(
+					coredev, TriggerMsg,
 					TriggerMsg->xMsgHeader.msgLength,
 					&coredev->trigger_done);
-
 		} else {
 			SMS_INIT_MSG(msg, MSG_SW_RELOAD_EXEC_REQ,
-					sizeof(struct SmsMsgHdr_ST));
-			smsendian_handle_tx_message((struct SmsMsgHdr_ST *)msg);
-			rc = coredev->sendrequest_handler(coredev->context, msg,
-					msg->msgLength);
+				     sizeof(struct SmsMsgHdr_ST));
+
+			rc = coredev->sendrequest_handler(coredev->context,
+							  msg, msg->msgLength);
 		}
 		msleep(500);
 	}
 
-	sms_debug("rc=%d, postload=%p ", rc, coredev->postload_handler);
+	sms_debug("rc=%d, postload=%p ", rc,
+		  coredev->postload_handler);
 
 	kfree(msg);
 
 	return ((rc >= 0) && coredev->postload_handler) ?
-			coredev->postload_handler(coredev->context) : rc;
+		coredev->postload_handler(coredev->context) :
+		rc;
 }
 
 /**
@@ -630,16 +631,15 @@ static int smscore_load_firmware_family2(struct smscore_device_t *coredev,
  * @return 0 on success, <0 on error.
  */
 static int smscore_load_firmware_from_file(struct smscore_device_t *coredev,
-		char *filename, loadfirmware_t loadfirmware_handler) {
+					   char *filename,
+					   loadfirmware_t loadfirmware_handler)
+{
 	int rc = -ENOENT;
-	u8 *fw_buf = NULL;
-	u32 fw_buf_size = 0;
-
-#ifdef REQUEST_FIRMWARE_SUPPORTED
 	const struct firmware *fw;
+	u8 *fw_buffer;
 
-	if (loadfirmware_handler == NULL && !(coredev->device_flags
-			& SMS_DEVICE_FAMILY2))
+	if (loadfirmware_handler == NULL && !(coredev->device_flags &
+					      SMS_DEVICE_FAMILY2))
 		return -EINVAL;
 
 	rc = request_firmware(&fw, filename, coredev->device);
@@ -648,38 +648,26 @@ static int smscore_load_firmware_from_file(struct smscore_device_t *coredev,
 		return rc;
 	}
 	sms_info("read FW %s, size=%zd", filename, fw->size);
-	printk(KERN_INFO "read FW %s, size=%zd\n", filename, fw->size);
-	fw_buf = kmalloc(ALIGN(fw->size, SMS_ALLOC_ALIGNMENT),
-				GFP_KERNEL | GFP_DMA);
-	if (!fw_buf) {
+	fw_buffer = kmalloc(ALIGN(fw->size, SMS_ALLOC_ALIGNMENT),
+			    GFP_KERNEL | GFP_DMA);
+	if (fw_buffer) {
+		memcpy(fw_buffer, fw->data, fw->size);
+
+		rc = (coredev->device_flags & SMS_DEVICE_FAMILY2) ?
+		      smscore_load_firmware_family2(coredev,
+						    fw_buffer,
+						    fw->size) :
+		      loadfirmware_handler(coredev->context,
+					   fw_buffer, fw->size);
+
+		kfree(fw_buffer);
+	} else {
 		sms_info("failed to allocate firmware buffer");
-		return -ENOMEM;
+		rc = -ENOMEM;
 	}
-	memcpy(fw_buf, fw->data, fw->size);
-	fw_buf_size = fw->size;
-#else
-	if (!coredev->fw_buf) {
-		sms_info("missing fw file buffer");
-		return -EINVAL;
-	}
-	fw_buf = coredev->fw_buf;
-	fw_buf_size = coredev->fw_buf_size;
-	sms_info("fw_buf_size = %d\n", fw_buf_size);
-#endif
 
-	rc = (coredev->device_flags & SMS_DEVICE_FAMILY2) ?
-		smscore_load_firmware_family2(coredev, fw_buf, fw_buf_size)
-		: loadfirmware_handler(coredev->context, fw_buf,
-		fw_buf_size);
-
-	kfree(fw_buf);
-
-#ifdef REQUEST_FIRMWARE_SUPPORTED
 	release_firmware(fw);
-#else
-	coredev->fw_buf = NULL;
-	coredev->fw_buf_size = 0;
-#endif
+
 	return rc;
 }
 
@@ -718,15 +706,14 @@ void smscore_unregister_device(struct smscore_device_t *coredev)
 		}
 		if (num_buffers == coredev->num_buffers)
 			break;
-
 		if (++retry > 10) {
 			sms_info("exiting although "
-					"not all buffers released.");
+				 "not all buffers released.");
 			break;
 		}
 
 		sms_info("waiting for %d buffer(s)",
-				coredev->num_buffers - num_buffers);
+			 coredev->num_buffers - num_buffers);
 		msleep(100);
 	}
 
@@ -746,36 +733,35 @@ void smscore_unregister_device(struct smscore_device_t *coredev)
 
 	sms_info("device %p destroyed", coredev);
 }
+EXPORT_SYMBOL_GPL(smscore_unregister_device);
 
-/*##w21558, Removed.*/
-/*
 static int smscore_detect_mode(struct smscore_device_t *coredev)
 {
 	void *buffer = kmalloc(sizeof(struct SmsMsgHdr_ST) + SMS_DMA_ALIGNMENT,
-			GFP_KERNEL | GFP_DMA);
+			       GFP_KERNEL | GFP_DMA);
 	struct SmsMsgHdr_ST *msg =
-			(struct SmsMsgHdr_ST *) SMS_ALIGN_ADDRESS(buffer);
+		(struct SmsMsgHdr_ST *) SMS_ALIGN_ADDRESS(buffer);
 	int rc;
 
 	if (!buffer)
 		return -ENOMEM;
 
 	SMS_INIT_MSG(msg, MSG_SMS_GET_VERSION_EX_REQ,
-			sizeof(struct SmsMsgHdr_ST));
+		     sizeof(struct SmsMsgHdr_ST));
 
-	smsendian_handle_tx_message((struct SmsMsgHdr_ST *)msg);
 	rc = smscore_sendrequest_and_wait(coredev, msg, msg->msgLength,
-			&coredev->version_ex_done);
+					  &coredev->version_ex_done);
 	if (rc == -ETIME) {
 		sms_err("MSG_SMS_GET_VERSION_EX_REQ failed first try");
 
 		if (wait_for_completion_timeout(&coredev->resume_done,
-				msecs_to_jiffies(5000))) {
-			rc = smscore_sendrequest_and_wait(coredev, msg,
-				msg->msgLength, &coredev->version_ex_done);
+						msecs_to_jiffies(5000))) {
+			rc = smscore_sendrequest_and_wait(
+				coredev, msg, msg->msgLength,
+				&coredev->version_ex_done);
 			if (rc < 0)
 				sms_err("MSG_SMS_GET_VERSION_EX_REQ failed "
-						"second try, rc %d", rc);
+					"second try, rc %d", rc);
 		} else
 			rc = -ETIME;
 	}
@@ -784,27 +770,30 @@ static int smscore_detect_mode(struct smscore_device_t *coredev)
 
 	return rc;
 }
-*/
 
 static char *smscore_fw_lkup[][SMS_NUM_OF_DEVICE_TYPES] = {
-/*Stellar               NOVA A0         Nova B0         VEGA */
-/*DVBT*/
-{ "none", "dvb_nova_12mhz.inp", "dvb_nova_12mhz_b0.inp", "none" },
-/*DVBH*/
-{ "none", "dvb_nova_12mhz.inp", "dvb_nova_12mhz_b0.inp", "none" },
-/*TDMB*/
-{ "none", "tdmb_nova_12mhz.inp", "tdmb_nova_12mhz_b0.inp", "none" },
-/*DABIP*/{ "none", "none", "none", "none" },
-/*BDA*/
-{ "none", "dvb_nova_12mhz.inp", "dvb_nova_12mhz_b0.inp", "none" },
-/*ISDBT*/
-{ "none", "isdbt_nova_12mhz.inp", "isdbt_nova_12mhz_b0.inp", "none" },
-/*ISDBTBDA*/
-{ "none", "isdbt_nova_12mhz.inp", "isdbt_nova_12mhz_b0.inp", "none" },
-/*CMMB*/{ "none", "none", "none", "cmmb_vega_12mhz.inp" } };
+	/*Stellar		NOVA A0		Nova B0		VEGA*/
+	/*DVBT*/
+	{"none", "dvb_nova_12mhz.inp", "dvb_nova_12mhz_b0.inp", "none"},
+	/*DVBH*/
+	{"none", "dvb_nova_12mhz.inp", "dvb_nova_12mhz_b0.inp", "none"},
+	/*TDMB*/
+	{"none", "tdmb_nova_12mhz.inp", "tdmb_nova_12mhz_b0.inp", "none"},
+	/*DABIP*/
+	{"none", "none", "none", "none"},
+	/*BDA*/
+	{"none", "dvb_nova_12mhz.inp", "dvb_nova_12mhz_b0.inp", "none"},
+	/*ISDBT*/
+	{"none", "isdbt_nova_12mhz.inp", "isdbt_nova_12mhz_b0.inp", "none"},
+	/*ISDBTBDA*/
+	{"none", "isdbt_nova_12mhz.inp", "isdbt_nova_12mhz_b0.inp", "none"},
+	/*CMMB*/
+	{"none", "none", "none", "cmmb_vega_12mhz.inp"}
+};
 
-static inline char *sms_get_fw_name(struct smscore_device_t *coredev, int mode,
-		enum sms_device_type_st type) {
+static inline char *sms_get_fw_name(struct smscore_device_t *coredev,
+				    int mode, enum sms_device_type_st type)
+{
 	char **fw = sms_get_board(smscore_get_board_id(coredev))->fw;
 	return (fw && fw[mode]) ? fw[mode] : smscore_fw_lkup[mode][type];
 }
@@ -821,25 +810,19 @@ static inline char *sms_get_fw_name(struct smscore_device_t *coredev, int mode,
  */
 int smscore_set_device_mode(struct smscore_device_t *coredev, int mode)
 {
-/*##w21558, Removed*/
-/*
 	void *buffer;
-*/
 	int rc = 0;
 	enum sms_device_type_st type;
 
 	sms_debug("set device mode to %d", mode);
-	printk(KERN_INFO "%s: set device mode to %d\n", __func__, mode);
 	if (coredev->device_flags & SMS_DEVICE_FAMILY2) {
-		if (mode < DEVICE_MODE_DVBT || mode > DEVICE_MODE_RAW_TUNER) {
+		if (mode < DEVICE_MODE_DVBT || mode >= DEVICE_MODE_RAW_TUNER) {
 			sms_err("invalid mode specified %d", mode);
 			return -EINVAL;
 		}
 
 		smscore_registry_setmode(coredev->devpath, mode);
 
-/*##w21558, Removed*/
-/*
 		if (!(coredev->device_flags & SMS_DEVICE_NOT_READY)) {
 			rc = smscore_detect_mode(coredev);
 			if (rc < 0) {
@@ -847,11 +830,9 @@ int smscore_set_device_mode(struct smscore_device_t *coredev, int mode)
 				return rc;
 			}
 		}
-*/
 
 		if (coredev->mode == mode) {
 			sms_info("device mode %d already set", mode);
-			printk(KERN_INFO "device mode %d already set", mode);
 			return 0;
 		}
 
@@ -862,54 +843,50 @@ int smscore_set_device_mode(struct smscore_device_t *coredev, int mode)
 			fw_filename = sms_get_fw_name(coredev, mode, type);
 
 			rc = smscore_load_firmware_from_file(coredev,
-					fw_filename, NULL);
+							     fw_filename, NULL);
 			if (rc < 0) {
 				sms_warn("error %d loading firmware: %s, "
-					"trying again with default firmware",
-					rc, fw_filename);
+					 "trying again with default firmware",
+					 rc, fw_filename);
 
 				/* try again with the default firmware */
 				fw_filename = smscore_fw_lkup[mode][type];
 				rc = smscore_load_firmware_from_file(coredev,
-						fw_filename, NULL);
+							     fw_filename, NULL);
 
 				if (rc < 0) {
 					sms_warn("error %d loading "
-							"firmware: %s", rc,
-							fw_filename);
+						 "firmware: %s", rc,
+						 fw_filename);
 					return rc;
 				}
 			}
-			sms_info("firmware download success: %s", fw_filename);
+			sms_log("firmware download success: %s", fw_filename);
 		} else
 			sms_info("mode %d supported by running "
-					"firmware", mode);
+				 "firmware", mode);
 
-/*##w21558, Removed*/
-/*
 		buffer = kmalloc(sizeof(struct SmsMsgData_ST) +
-				SMS_DMA_ALIGNMENT, GFP_KERNEL | GFP_DMA);
+				 SMS_DMA_ALIGNMENT, GFP_KERNEL | GFP_DMA);
 		if (buffer) {
 			struct SmsMsgData_ST *msg =
-					(struct SmsMsgData_ST *)
+				(struct SmsMsgData_ST *)
 					SMS_ALIGN_ADDRESS(buffer);
 
 			SMS_INIT_MSG(&msg->xMsgHeader, MSG_SMS_INIT_DEVICE_REQ,
-					sizeof(struct SmsMsgData_ST));
+				     sizeof(struct SmsMsgData_ST));
 			msg->msgData[0] = mode;
 
-			smsendian_handle_tx_message((struct SmsMsgHdr_ST *)msg);
-			rc = smscore_sendrequest_and_wait(coredev, msg,
-					msg->xMsgHeader. msgLength,
-					&coredev->init_device_done);
+			rc = smscore_sendrequest_and_wait(
+				coredev, msg, msg->xMsgHeader.msgLength,
+				&coredev->init_device_done);
 
 			kfree(buffer);
 		} else {
 			sms_err("Could not allocate buffer for "
-					"init device message.");
+				"init device message.");
 			rc = -ENOMEM;
 		}
-*/
 	} else {
 		if (mode < DEVICE_MODE_DVBT || mode > DEVICE_MODE_DVBT_BDA) {
 			sms_err("invalid mode specified %d", mode);
@@ -920,7 +897,7 @@ int smscore_set_device_mode(struct smscore_device_t *coredev, int mode)
 
 		if (coredev->detectmode_handler)
 			coredev->detectmode_handler(coredev->context,
-					&coredev->mode);
+						    &coredev->mode);
 
 		if (coredev->mode != mode && coredev->setmode_handler)
 			rc = coredev->setmode_handler(coredev->context, mode);
@@ -937,81 +914,6 @@ int smscore_set_device_mode(struct smscore_device_t *coredev, int mode)
 }
 
 /**
- * calls device handler to get fw file name
- *
- * @param coredev pointer to a coredev object returned by
- *                smscore_register_device
- * @param filename pointer to user buffer to fill the file name
- *
- * @return 0 on success, <0 on error.
- */
-int smscore_get_fw_filename(struct smscore_device_t *coredev, int mode,
-		char *filename) {
-	int rc = 0;
-	enum sms_device_type_st type;
-	char tmpname[200];
-
-	type = smscore_registry_gettype(coredev->devpath);
-
-#ifdef REQUEST_FIRMWARE_SUPPORTED
-	/* driver not need file system services */
-	tmpname[0] = '\0';
-#else
-	sprintf(tmpname, "%s/%s", DEFAULT_FW_FILE_PATH,
-			smscore_fw_lkup[mode][type]);
-#endif
-	if (copy_to_user(filename, tmpname, strlen(tmpname) + 1)) {
-		sms_err("Failed copy file path to user buffer\n");
-		return -EFAULT;
-	}
-	return rc;
-}
-
-/**
- * calls device handler to keep fw buff for later use
- *
- * @param coredev pointer to a coredev object returned by
- *                smscore_register_device
- * @param ufwbuf  pointer to user fw buffer
- * @param size    size in bytes of buffer
- *
- * @return 0 on success, <0 on error.
- */
-int smscore_send_fw_file(struct smscore_device_t *coredev, u8 *ufwbuf,
-		int size) {
-	int rc = 0;
-
-	/* free old buffer */
-	if (coredev->fw_buf != NULL) {
-		kfree(coredev->fw_buf);
-		coredev->fw_buf = NULL;
-	}
-
-	coredev->fw_buf = kmalloc(ALIGN(size, SMS_ALLOC_ALIGNMENT), GFP_KERNEL
-			| GFP_DMA);
-	if (!coredev->fw_buf) {
-		sms_info("Failed allocate FW buffer memory\n");
-		return -EFAULT;
-	}
-
-	if (copy_from_user(coredev->fw_buf, ufwbuf, size)) {
-		sms_info("Failed copy FW from user buffer\n");
-		kfree(coredev->fw_buf);
-		return -EFAULT;
-	}
-	coredev->fw_buf_size = size;
-
-	return rc;
-}
-
-/* ##w21558, Added */
-int smscore_reset_device_mode(struct smscore_device_t *coredev)
-{
-  coredev->mode = -1;
-  return 0;
-}
-
-/**
  * calls device handler to get current mode of operation
  *
  * @param coredev pointer to a coredev object returned by
@@ -1023,6 +925,7 @@ int smscore_get_device_mode(struct smscore_device_t *coredev)
 {
 	return coredev->mode;
 }
+EXPORT_SYMBOL_GPL(smscore_get_device_mode);
 
 /**
  * find client by response id & type within the clients list.
@@ -1034,26 +937,28 @@ int smscore_get_device_mode(struct smscore_device_t *coredev)
  * @param id client id (SMS_DONT_CARE for all id)
  *
  */
-static struct smscore_client_t *smscore_find_client(
-		struct smscore_device_t *coredev, int data_type, int id) {
+static struct
+smscore_client_t *smscore_find_client(struct smscore_device_t *coredev,
+				      int data_type, int id)
+{
 	struct smscore_client_t *client = NULL;
 	struct list_head *next, *first;
 	unsigned long flags;
 	struct list_head *firstid, *nextid;
 
+
 	spin_lock_irqsave(&coredev->clientslock, flags);
 	first = &coredev->clients;
-	for (next = first->next; (next != first) && !client;
-			next = next->next) {
-		firstid = &((struct smscore_client_t *) next)->idlist;
-		for (nextid = firstid->next; nextid != firstid;
-				nextid = nextid->next) {
-			if ((((struct smscore_idlist_t *) nextid)->id == id)
-					&& (((struct smscore_idlist_t *)
-						 nextid)->data_type
-						== data_type
-						|| (((struct smscore_idlist_t *)
-						nextid)->data_type == 0))) {
+	for (next = first->next;
+	     (next != first) && !client;
+	     next = next->next) {
+		firstid = &((struct smscore_client_t *)next)->idlist;
+		for (nextid = firstid->next;
+		     nextid != firstid;
+		     nextid = nextid->next) {
+			if ((((struct smscore_idlist_t *)nextid)->id == id) &&
+			    (((struct smscore_idlist_t *)nextid)->data_type == data_type ||
+			    (((struct smscore_idlist_t *)nextid)->data_type == 0))) {
 				client = (struct smscore_client_t *) next;
 				break;
 			}
@@ -1078,7 +983,6 @@ void smscore_onresponse(struct smscore_device_t *coredev,
 			+ cb->offset);
 	struct smscore_client_t *client;
 	int rc = -EBUSY;
-
 	static unsigned long last_sample_time; /* = 0; */
 	static int data_total; /* = 0; */
 	unsigned long time_now = jiffies_to_msecs(jiffies);
@@ -1087,16 +991,15 @@ void smscore_onresponse(struct smscore_device_t *coredev,
 		last_sample_time = time_now;
 
 	if (time_now - last_sample_time > 10000) {
-		sms_info("\ndata rate %d bytes/secs",
-				(int)((data_total * 1000) /
-						(time_now - last_sample_time)));
+		sms_debug("\ndata rate %d bytes/secs",
+			  (int)((data_total * 1000) /
+				(time_now - last_sample_time)));
 
 		last_sample_time = time_now;
 		data_total = 0;
 	}
 
 	data_total += cb->size;
-
 	/* Do we need to re-route? */
 	if ((phdr->msgType == MSG_SMS_HO_PER_SLICES_IND) ||
 			(phdr->msgType == MSG_SMS_TRANSMISSION_IND)) {
@@ -1109,32 +1012,29 @@ void smscore_onresponse(struct smscore_device_t *coredev,
 
 	/* If no client registered for type & id,
 	 * check for control client where type is not registered */
-	if (client) {
+	if (client)
 		rc = client->onresponse_handler(client->context, cb);
-  }
-	if (rc < 0) {
-		smsendian_handle_rx_message((struct SmsMsgData_ST *)phdr);
 
+	if (rc < 0) {
 		switch (phdr->msgType) {
-		case MSG_SMS_GET_VERSION_EX_RES: {
+		case MSG_SMS_GET_VERSION_EX_RES:
+		{
 			struct SmsVersionRes_ST *ver =
-					(struct SmsVersionRes_ST *) phdr;
-			sms_info("MSG_SMS_GET_VERSION_EX_RES "
-					"id %d prots 0x%x ver %d.%d",
-					ver->FirmwareId,
-					ver->SupportedProtocols,
-					ver->RomVersionMajor,
-					ver->RomVersionMinor);
+				(struct SmsVersionRes_ST *) phdr;
+			sms_debug("MSG_SMS_GET_VERSION_EX_RES "
+				  "id %d prots 0x%x ver %d.%d",
+				  ver->FirmwareId, ver->SupportedProtocols,
+				  ver->RomVersionMajor, ver->RomVersionMinor);
 
 			coredev->mode = ver->FirmwareId == 255 ?
-					DEVICE_MODE_NONE : ver->FirmwareId;
+				DEVICE_MODE_NONE : ver->FirmwareId;
 			coredev->modes_supported = ver->SupportedProtocols;
 
 			complete(&coredev->version_ex_done);
 			break;
 		}
 		case MSG_SMS_INIT_DEVICE_RES:
-			printk(KERN_INFO "%s: MSG_SMS_INIT_DEVICE_RES\n", __func__);
+			sms_debug("MSG_SMS_INIT_DEVICE_RES");
 			complete(&coredev->init_device_done);
 			break;
 		case MSG_SW_RELOAD_START_RES:
@@ -1148,7 +1048,7 @@ void smscore_onresponse(struct smscore_device_t *coredev,
 			sms_debug("MSG_SW_RELOAD_EXEC_RES");
 			break;
 		case MSG_SMS_SWDOWNLOAD_TRIGGER_RES:
-			sms_info("MSG_SMS_SWDOWNLOAD_TRIGGER_RES");
+			sms_debug("MSG_SMS_SWDOWNLOAD_TRIGGER_RES");
 			complete(&coredev->trigger_done);
 			break;
 		case MSG_SMS_SLEEP_RESUME_COMP_IND:
@@ -1181,22 +1081,15 @@ void smscore_onresponse(struct smscore_device_t *coredev,
 				+ sizeof(struct SmsMsgHdr_ST)),
 				(int)phdr->msgLength
 				- sizeof(struct SmsMsgHdr_ST));
-      break;
-
-    case MSG_SMS_SPI_INT_LINE_SET_RES:
-      sms_info("MSG_SMS_SPI_INT_LINE_SET_RES\n");
 			break;
+
 		default:
-/*
-			sms_info("no client (%p) or error (%d), "
-					"type:%d dstid:%d", client, rc,
-					phdr->msgType, phdr->msgDstId);
-*/
 			break;
 		}
 		smscore_putbuffer(coredev, cb);
 	}
 }
+EXPORT_SYMBOL_GPL(smscore_onresponse);
 
 /**
  * return pointer to next free buffer descriptor from core pool
@@ -1227,13 +1120,14 @@ struct smscore_buffer_t *smscore_getbuffer(struct smscore_device_t *coredev)
 
 	finish_wait(&coredev->buffer_mng_waitq, &wait);
 
-		cb = (struct smscore_buffer_t *) coredev->buffers.next;
-		list_del(&cb->entry);
+	cb = (struct smscore_buffer_t *) coredev->buffers.next;
+	list_del(&cb->entry);
 
 	spin_unlock_irqrestore(&coredev->bufferslock, flags);
 
 	return cb;
 }
+EXPORT_SYMBOL_GPL(smscore_getbuffer);
 
 /**
  * return buffer descriptor to a pool
@@ -1248,9 +1142,12 @@ void smscore_putbuffer(struct smscore_device_t *coredev,
 	wake_up_interruptible(&coredev->buffer_mng_waitq);
 	list_add_locked(&cb->entry, &coredev->buffers, &coredev->bufferslock);
 }
+EXPORT_SYMBOL_GPL(smscore_putbuffer);
 
 static int smscore_validate_client(struct smscore_device_t *coredev,
-		struct smscore_client_t *client, int data_type, int id) {
+				   struct smscore_client_t *client,
+				   int data_type, int id)
+{
 	struct smscore_idlist_t *listentry;
 	struct smscore_client_t *registered_client;
 
@@ -1293,13 +1190,11 @@ static int smscore_validate_client(struct smscore_device_t *coredev,
  * @return 0 on success, <0 on error.
  */
 int smscore_register_client(struct smscore_device_t *coredev,
-		struct smsclient_params_t *params,
-				struct smscore_client_t **client) {
+			    struct smsclient_params_t *params,
+			    struct smscore_client_t **client)
+{
 	struct smscore_client_t *newclient;
 	/* check that no other channel with same parameters exists */
-	sms_info("entering....smscore_register_client \n");
-
-
 	if (smscore_find_client(coredev, params->data_type,
 				params->initial_id)) {
 		sms_err("Client already exist.");
@@ -1320,13 +1215,14 @@ int smscore_register_client(struct smscore_device_t *coredev,
 	list_add_locked(&newclient->entry, &coredev->clients,
 			&coredev->clientslock);
 	smscore_validate_client(coredev, newclient, params->data_type,
-			params->initial_id);
+				params->initial_id);
 	*client = newclient;
-	sms_debug("Register new client %p DT=%d ID=%d",
-		params->context, params->data_type, params->initial_id);
+	sms_debug("%p %d %d", params->context, params->data_type,
+		  params->initial_id);
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(smscore_register_client);
 
 /**
  * frees smsclient object and all subclients associated with it
@@ -1342,9 +1238,10 @@ void smscore_unregister_client(struct smscore_client_t *client)
 
 	spin_lock_irqsave(&coredev->clientslock, flags);
 
+
 	while (!list_empty(&client->idlist)) {
 		struct smscore_idlist_t *identry =
-				(struct smscore_idlist_t *) client->idlist.next;
+			(struct smscore_idlist_t *) client->idlist.next;
 		list_del(&identry->entry);
 		kfree(identry);
 	}
@@ -1356,6 +1253,7 @@ void smscore_unregister_client(struct smscore_client_t *client)
 
 	spin_unlock_irqrestore(&coredev->clientslock, flags);
 }
+EXPORT_SYMBOL_GPL(smscore_unregister_client);
 
 /**
  * verifies that source id is not taken by another client,
@@ -1368,8 +1266,9 @@ void smscore_unregister_client(struct smscore_client_t *client)
  *
  * @return 0 on success, <0 on error.
  */
-int smsclient_sendrequest(struct smscore_client_t *client, void *buffer,
-		size_t size) {
+int smsclient_sendrequest(struct smscore_client_t *client,
+			  void *buffer, size_t size)
+{
 	struct smscore_device_t *coredev;
 	struct SmsMsgHdr_ST *phdr = (struct SmsMsgHdr_ST *) buffer;
 	int rc;
@@ -1388,64 +1287,87 @@ int smsclient_sendrequest(struct smscore_client_t *client, void *buffer,
 	}
 
 	rc = smscore_validate_client(client->coredev, client, 0,
-			phdr->msgSrcId);
+				     phdr->msgSrcId);
 	if (rc < 0)
 		return rc;
 
 	return coredev->sendrequest_handler(coredev->context, buffer, size);
 }
+EXPORT_SYMBOL_GPL(smsclient_sendrequest);
 
-#ifdef SMS_HOSTLIB_SUBSYS
-/**
- * return the size of large (common) buffer
- *
- * @param coredev pointer to a coredev object from clients hotplug
- *
- * @return size (in bytes) of the buffer
- */
-int smscore_get_common_buffer_size(struct smscore_device_t *coredev)
+
+/* old GPIO managments implementation */
+int smscore_configure_gpio(struct smscore_device_t *coredev, u32 pin,
+			   struct smscore_config_gpio *pinconfig)
 {
-	return coredev->common_buffer_size;
+	struct {
+		struct SmsMsgHdr_ST hdr;
+		u32 data[6];
+	} msg;
+
+	if (coredev->device_flags & SMS_DEVICE_FAMILY2) {
+		msg.hdr.msgSrcId = DVBT_BDA_CONTROL_MSG_ID;
+		msg.hdr.msgDstId = HIF_TASK;
+		msg.hdr.msgFlags = 0;
+		msg.hdr.msgType  = MSG_SMS_GPIO_CONFIG_EX_REQ;
+		msg.hdr.msgLength = sizeof(msg);
+
+		msg.data[0] = pin;
+		msg.data[1] = pinconfig->pullupdown;
+
+		/* Convert slew rate for Nova: Fast(0) = 3 / Slow(1) = 0; */
+		msg.data[2] = pinconfig->outputslewrate == 0 ? 3 : 0;
+
+		switch (pinconfig->outputdriving) {
+		case SMS_GPIO_OUTPUTDRIVING_16mA:
+			msg.data[3] = 7; /* Nova - 16mA */
+			break;
+		case SMS_GPIO_OUTPUTDRIVING_12mA:
+			msg.data[3] = 5; /* Nova - 11mA */
+			break;
+		case SMS_GPIO_OUTPUTDRIVING_8mA:
+			msg.data[3] = 3; /* Nova - 7mA */
+			break;
+		case SMS_GPIO_OUTPUTDRIVING_4mA:
+		default:
+			msg.data[3] = 2; /* Nova - 4mA */
+			break;
+		}
+
+		msg.data[4] = pinconfig->direction;
+		msg.data[5] = 0;
+	} else /* TODO: SMS_DEVICE_FAMILY1 */
+		return -EINVAL;
+
+	return coredev->sendrequest_handler(coredev->context,
+					    &msg, sizeof(msg));
 }
 
-/**
- * maps common buffer (if supported by platform)
- *
- * @param coredev pointer to a coredev object from clients hotplug
- * @param vma pointer to vma struct from mmap handler
- *
- * @return 0 on success, <0 on error.
- */
-int smscore_map_common_buffer(struct smscore_device_t *coredev,
-		struct vm_area_struct *vma)
+int smscore_set_gpio(struct smscore_device_t *coredev, u32 pin, int level)
 {
-	unsigned long end = vma->vm_end,
-	start = vma->vm_start,
-	size = PAGE_ALIGN(coredev->common_buffer_size);
+	struct {
+		struct SmsMsgHdr_ST hdr;
+		u32 data[3];
+	} msg;
 
-	if (!(vma->vm_flags & (VM_READ | VM_SHARED)) ||
-			(vma->vm_flags & VM_WRITE)) {
-		sms_err("invalid vm flags");
+	if (pin > MAX_GPIO_PIN_NUMBER)
 		return -EINVAL;
-	}
 
-	if ((end - start) != size) {
-		sms_err("invalid size %d expected %d",
-				(int)(end - start), (int)size);
-		return -EINVAL;
-	}
+	msg.hdr.msgSrcId = DVBT_BDA_CONTROL_MSG_ID;
+	msg.hdr.msgDstId = HIF_TASK;
+	msg.hdr.msgFlags = 0;
+	msg.hdr.msgType  = MSG_SMS_GPIO_SET_LEVEL_REQ;
+	msg.hdr.msgLength = sizeof(msg);
 
-	if (remap_pfn_range(vma, start,
-			coredev->common_buffer_phys >> PAGE_SHIFT,
-			size, pgprot_noncached(vma->vm_page_prot))) {
-		sms_err("remap_page_range failed");
-		return -EAGAIN;
-	}
+	msg.data[0] = pin;
+	msg.data[1] = level ? 1 : 0;
+	msg.data[2] = 0;
 
-	return 0;
+	return coredev->sendrequest_handler(coredev->context,
+					    &msg, sizeof(msg));
 }
-#endif /* SMS_HOSTLIB_SUBSYS */
 
+/* new GPIO management implementation */
 static int GetGpioPinParams(u32 PinNum, u32 *pTranslatedPinNum,
 		u32 *pGroupNum, u32 *pGroupCfg) {
 
@@ -1500,8 +1422,8 @@ int smscore_gpio_configure(struct smscore_device_t *coredev, u8 PinNum,
 		struct smscore_gpio_config *pGpioConfig) {
 
 	u32 totalLen;
-	u32 TranslatedPinNum;
-	u32 GroupNum;
+	u32 TranslatedPinNum = 0;
+	u32 GroupNum = 0;
 	u32 ElectricChar;
 	u32 groupCfg;
 	void *buffer;
@@ -1681,7 +1603,6 @@ static int __init smscore_module_init(void)
 {
 	int rc = 0;
 
-	sms_info("entering... smscore_module_init....\n");
 	INIT_LIST_HEAD(&g_smscore_notifyees);
 	INIT_LIST_HEAD(&g_smscore_devices);
 	kmutex_init(&g_smscore_deviceslock);
@@ -1689,127 +1610,16 @@ static int __init smscore_module_init(void)
 	INIT_LIST_HEAD(&g_smscore_registry);
 	kmutex_init(&g_smscore_registrylock);
 
-	/* Register sub system adapter objects */
-
-#ifdef SMS_NET_SUBSYS
-	/* NET Register */
-	rc = smsnet_register();
-	if (rc) {
-		sms_err("Error registering Siano's network client.\n");
-		goto smsnet_error;
-	}
-#endif
-
-#ifdef SMS_HOSTLIB_SUBSYS
-	/* Char interface Register */
-	rc = smschar_register();
-	if (rc) {
-		sms_err("Error registering Siano's char device client.\n");
-		goto smschar_error;
-	}
-#endif
-
-#ifdef SMS_DVB3_SUBSYS
-	/* DVB v.3 Register */
-	rc = smsdvb_register();
-	if (rc) {
-		sms_err("Error registering DVB client.\n");
-		goto smsdvb_error;
-	}
-#endif
-
-	/* Register interfaces objects */
-
-#ifdef SMS_USB_DRV
-	/* USB Register */
-	rc = smsusb_register();
-	if (rc) {
-		sms_err("Error registering USB bus driver.\n");
-		goto sms_bus_drv_error;
-	}
-#endif
-
-#ifdef SMS_SDIO_DRV
-	/* SDIO Register */
-	rc = smssdio_register();
-	if (rc) {
-		sms_err("Error registering SDIO bus driver.\n");
-		goto sms_bus_drv_error;
-	}
-#endif
-
-#ifdef SMS_SPI_DRV
-	/* SPI Register */
-	rc = smsspi_register();
-	if (rc) {
-		sms_err("Error registering Intel PXA310 SPI bus driver.\n");
-		goto sms_bus_drv_error;
-	}
-#endif
-
-	return rc;
-
-sms_bus_drv_error:
-#ifdef SMS_DVB3_SUBSYS
-	smsdvb_unregister();
-smsdvb_error:
-#endif
-
-#ifdef SMS_HOSTLIB_SUBSYS
-	smschar_unregister();
-smschar_error:
-#endif
-
-#ifdef SMS_NET_SUBSYS
-	smsnet_unregister();
-smsnet_error:
-#endif
-
-	/*sms_err("rc %d", rc);*/
-	printk(KERN_INFO "%s, rc %d\n", __func__, rc);
-
 	return rc;
 }
 
 static void __exit smscore_module_exit(void)
 {
-  printk(KERN_INFO "%s is called.\n", __func__);
-
-#ifdef SMS_NET_SUBSYS
-	/* Net Unregister */
-	smsnet_unregister();
-#endif
-
-#ifdef SMS_HOSTLIB_SUBSYS
-	/* Char interface Unregister */
-	smschar_unregister();
-#endif
-
-#ifdef SMS_DVB3_SUBSYS
-	/* DVB v.3 unregister */
-	smsdvb_unregister();
-#endif
-
-	/* Unegister interfaces objects */
-#ifdef SMS_USB_DRV
-	/* USB unregister */
-	smsusb_unregister();
-#endif
-
-#ifdef SMS_SDIO_DRV
-	/* SDIO unegister */
-	smssdio_unregister();
-#endif
-#ifdef SMS_SPI_DRV
-	/* SPI unegister */
-	smsspi_unregister();
-#endif
-
 	kmutex_lock(&g_smscore_deviceslock);
 	while (!list_empty(&g_smscore_notifyees)) {
 		struct smscore_device_notifyee_t *notifyee =
-		(struct smscore_device_notifyee_t *)
-		g_smscore_notifyees.next;
+			(struct smscore_device_notifyee_t *)
+				g_smscore_notifyees.next;
 
 		list_del(&notifyee->entry);
 		kfree(notifyee);
@@ -1819,20 +1629,20 @@ static void __exit smscore_module_exit(void)
 	kmutex_lock(&g_smscore_registrylock);
 	while (!list_empty(&g_smscore_registry)) {
 		struct smscore_registry_entry_t *entry =
-		(struct smscore_registry_entry_t *)
-		g_smscore_registry.next;
+			(struct smscore_registry_entry_t *)
+				g_smscore_registry.next;
 
 		list_del(&entry->entry);
 		kfree(entry);
 	}
 	kmutex_unlock(&g_smscore_registrylock);
 
-	sms_debug("end");
+	sms_debug("");
 }
 
 module_init(smscore_module_init);
 module_exit(smscore_module_exit);
 
-MODULE_DESCRIPTION("Siano MDTV Core module - Version 2.0.1");
+MODULE_DESCRIPTION("Siano MDTV Core module");
 MODULE_AUTHOR("Siano Mobile Silicon, Inc. (uris@siano-ms.com)");
 MODULE_LICENSE("GPL");

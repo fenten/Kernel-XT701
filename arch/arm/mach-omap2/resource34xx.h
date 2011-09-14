@@ -21,19 +21,17 @@
 #ifndef __ARCH_ARM_MACH_OMAP2_RESOURCE_H
 #define __ARCH_ARM_MACH_OMAP2_RESOURCE_H
 
-#include <mach/resource.h>
 #include <linux/clk.h>
-#include <mach/clock.h>
-#include <mach/powerdomain.h>
-#include <mach/omap-pm.h>
-#include <mach/omap34xx.h>
 
-extern int sr_voltagescale_vcbypass(u32 t_opp, u32 c_opp, u8 t_vsel, u8 c_vsel);
-extern void lock_scratchpad_sem();
-extern void unlock_scratchpad_sem();
-extern int _resource_request(struct shared_resource *resp, struct device *dev,
-unsigned long level);
-extern int _resource_release(struct shared_resource *resp, struct device *dev);
+#include <plat/resource.h>
+#include <plat/powerdomain.h>
+#include <plat/resource.h>
+#include <plat/clock.h>
+#include <plat/omap-pm.h>
+#include <plat/omap34xx.h>
+
+extern void lock_scratchpad_sem(void);
+extern void unlock_scratchpad_sem(void);
 
 /*
  * mpu_latency/core_latency are used to control the cpuidle C state.
@@ -52,6 +50,7 @@ static struct shared_resource_ops lat_res_ops = {
 static struct shared_resource mpu_latency = {
 	.name 		= "mpu_latency",
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.flags		= RES_TYPE_LATENCY,
 	.resource_data  = &mpu_qos_req_added,
 	.ops 		= &lat_res_ops,
 };
@@ -59,6 +58,7 @@ static struct shared_resource mpu_latency = {
 static struct shared_resource core_latency = {
 	.name 		= "core_latency",
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.flags		= RES_TYPE_LATENCY,
 	.resource_data	= &core_qos_req_added,
 	.ops 		= &lat_res_ops,
 };
@@ -94,6 +94,7 @@ static struct shared_resource_ops pd_lat_res_ops = {
 static struct shared_resource core_pwrdm_latency = {
 	.name		= "core_pwrdm_latency",
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.flags		= RES_TYPE_LATENCY,
 	.resource_data	= &core_qos_req_added,
 	.ops		= &lat_res_ops,
 };
@@ -109,6 +110,7 @@ static struct pd_latency_db iva2_pwrdm_lat_db = {
 static struct shared_resource iva2_pwrdm_latency = {
 	.name		= "iva2_pwrdm_latency",
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.flags		= RES_TYPE_LATENCY,
 	.resource_data	= &iva2_pwrdm_lat_db,
 	.ops		= &pd_lat_res_ops,
 };
@@ -132,6 +134,7 @@ static struct pd_latency_db sgx_pwrdm_lat_db = {
 static struct shared_resource gfx_pwrdm_latency = {
 	.name		= "gfx_pwrdm_latency",
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430ES1),
+	.flags		= RES_TYPE_LATENCY,
 	.resource_data	= &gfx_pwrdm_lat_db,
 	.ops		= &pd_lat_res_ops,
 };
@@ -139,6 +142,7 @@ static struct shared_resource gfx_pwrdm_latency = {
 static struct shared_resource sgx_pwrdm_latency = {
 	.name 		= "sgx_pwrdm_latency",
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_GE_OMAP3430ES2),
+	.flags		= RES_TYPE_LATENCY,
 	.resource_data  = &sgx_pwrdm_lat_db,
 	.ops		= &pd_lat_res_ops,
 };
@@ -154,6 +158,7 @@ static struct pd_latency_db dss_pwrdm_lat_db = {
 static struct shared_resource dss_pwrdm_latency = {
 	.name		= "dss_pwrdm_latency",
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.flags		= RES_TYPE_LATENCY,
 	.resource_data	= &dss_pwrdm_lat_db,
 	.ops		= &pd_lat_res_ops,
 };
@@ -169,6 +174,7 @@ static struct pd_latency_db cam_pwrdm_lat_db = {
 static struct shared_resource cam_pwrdm_latency = {
 	.name		= "cam_pwrdm_latency",
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.flags		= RES_TYPE_LATENCY,
 	.resource_data	= &cam_pwrdm_lat_db,
 	.ops		= &pd_lat_res_ops,
 };
@@ -184,6 +190,7 @@ static struct pd_latency_db per_pwrdm_lat_db = {
 static struct shared_resource per_pwrdm_latency = {
 	.name		= "per_pwrdm_latency",
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.flags		= RES_TYPE_LATENCY,
 	.resource_data	= &per_pwrdm_lat_db,
 	.ops		= &pd_lat_res_ops,
 };
@@ -199,6 +206,7 @@ static struct pd_latency_db neon_pwrdm_lat_db = {
 static struct shared_resource neon_pwrdm_latency = {
 	.name		= "neon_pwrdm_latency",
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.flags		= RES_TYPE_LATENCY,
 	.resource_data	= &neon_pwrdm_lat_db,
 	.ops		= &pd_lat_res_ops,
 };
@@ -214,6 +222,7 @@ static struct pd_latency_db usbhost_pwrdm_lat_db = {
 static struct shared_resource usbhost_pwrdm_latency = {
 	.name		= "usbhost_pwrdm_latency",
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_GE_OMAP3430ES2),
+	.flags		= RES_TYPE_LATENCY,
 	.resource_data  = &usbhost_pwrdm_lat_db,
 	.ops		= &pd_lat_res_ops,
 };
@@ -229,6 +238,7 @@ static struct pd_latency_db emu_pwrdm_lat_db = {
 static struct shared_resource emu_pwrdm_latency = {
 	.name           = "emu_pwrdm",
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.flags		= RES_TYPE_LATENCY,
 	.resource_data  = &emu_pwrdm_lat_db,
 	.ops		= &pd_lat_res_ops,
 };
@@ -254,6 +264,7 @@ static struct shared_resource_ops opp_res_ops = {
 static struct shared_resource vdd1_opp = {
 	.name           = "vdd1_opp",
 	.omap_chip      = OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.flags          = RES_TYPE_PERFORMANCE,
 	.ops            = &opp_res_ops,
 };
 
@@ -267,6 +278,7 @@ static struct bus_throughput_db l3_throughput_db = {
 static struct shared_resource vdd2_opp = {
 	.name           = "vdd2_opp",
 	.omap_chip      = OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.flags          = RES_TYPE_PERFORMANCE,
 	.resource_data  = &l3_throughput_db,
 	.ops            = &opp_res_ops,
 };
@@ -282,6 +294,7 @@ static struct shared_resource_ops freq_res_ops = {
 static struct shared_resource mpu_freq = {
 	.name           = "mpu_freq",
 	.omap_chip      = OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.flags		= RES_TYPE_PERFORMANCE,
 	.resource_data  = &linked_res,
 	.ops            = &freq_res_ops,
 };
@@ -289,6 +302,7 @@ static struct shared_resource mpu_freq = {
 static struct shared_resource dsp_freq = {
 	.name           = "dsp_freq",
 	.omap_chip      = OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.flags		= RES_TYPE_PERFORMANCE,
 	.resource_data  = &linked_res,
 	.ops            = &freq_res_ops,
 };

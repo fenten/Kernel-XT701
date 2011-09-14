@@ -27,10 +27,11 @@
 #include <linux/debugfs.h>
 #include <linux/uaccess.h>
 #include <linux/module.h>
-#include <mach/control.h>
-#include <mach/mux.h>
-#include <mach/gpio.h>
-#include <mach/board.h>
+#include <linux/gpio.h>
+
+#include <plat/control.h>
+#include <plat/mux.h>
+#include <plat/board.h>
 
 #define ETK_GPIO_BEGIN		12
 #define ETK_GPIO(i)		(ETK_GPIO_BEGIN + i)

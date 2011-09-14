@@ -5,6 +5,9 @@
  *
  * Author: Juha Yrjola
  *
+ * Copyright (C) 2009 Texas Instruments
+ * Added OMAP4 support - Santosh Shilimkar <santosh.shilimkar@ti.com>
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
@@ -21,9 +24,9 @@
 #include <linux/module.h>
 
 #include <asm/mach-types.h>
-#include <mach/gpmc.h>
+#include <plat/gpmc.h>
 
-#include <mach/sdrc.h>
+#include <plat/sdrc.h>
 
 /* GPMC register offsets */
 #define GPMC_REVISION		0x00
@@ -36,6 +39,10 @@
 #define GPMC_ERR_TYPE		0x48
 #define GPMC_CONFIG		0x50
 #define GPMC_STATUS		0x54
+#define GPMC_PREFETCH_CONFIG1	0x1e0
+#define GPMC_PREFETCH_CONFIG2	0x1e4
+#define GPMC_PREFETCH_CONTROL	0x1ec
+#define GPMC_PREFETCH_STATUS	0x1f0
 #define GPMC_ECC_CONFIG		0x1f4
 #define GPMC_ECC_CONTROL	0x1f8
 #define GPMC_ECC_SIZE_CONFIG	0x1fc
@@ -49,6 +56,11 @@
 
 #define GPMC_CHUNK_SHIFT	24		/* 16 MB */
 #define GPMC_SECTION_SHIFT	28		/* 128 MB */
+
+#define PREFETCH_FIFOTHRESHOLD	(0x40 << 8)
+#define CS_NUM_SHIFT		24
+#define ENABLE_PREFETCH		(0x1 << 7)
+#define DMA_MPU_MODE		2
 
 /* Structure to save gpmc cs context */
 struct gpmc_cs_config {
@@ -81,12 +93,20 @@ static struct resource	gpmc_mem_root;
 static struct resource	gpmc_cs_mem[GPMC_CS_NUM];
 static DEFINE_SPINLOCK(gpmc_mem_lock);
 static unsigned		gpmc_cs_map;
-static struct omap3_gpmc_regs gpmc_context;
 
-void __iomem *gpmc_base;
+static void __iomem *gpmc_base;
 
 static struct clk *gpmc_l3_clk;
 
+static void gpmc_write_reg(int idx, u32 val)
+{
+	__raw_writel(val, gpmc_base + idx);
+}
+
+static u32 gpmc_read_reg(int idx)
+{
+	return __raw_readl(gpmc_base + idx);
+}
 
 void gpmc_cs_write_reg(int cs, int idx, u32 val)
 {
@@ -268,7 +288,7 @@ static void gpmc_cs_enable_mem(int cs, u32 base, u32 size)
 	l = (base >> GPMC_CHUNK_SHIFT) & 0x3f;
 	l &= ~(0x0f << 8);
 	l |= ((mask >> GPMC_CHUNK_SHIFT) & 0x0f) << 8;
-	l |= 1 << 6;		/* CSVALID */
+	l |= GPMC_CONFIG7_CSVALID;
 	gpmc_cs_write_reg(cs, GPMC_CS_CONFIG7, l);
 }
 
@@ -277,7 +297,7 @@ static void gpmc_cs_disable_mem(int cs)
 	u32 l;
 
 	l = gpmc_cs_read_reg(cs, GPMC_CS_CONFIG7);
-	l &= ~(1 << 6);		/* CSVALID */
+	l &= ~GPMC_CONFIG7_CSVALID;
 	gpmc_cs_write_reg(cs, GPMC_CS_CONFIG7, l);
 }
 
@@ -297,7 +317,7 @@ static int gpmc_cs_mem_enabled(int cs)
 	u32 l;
 
 	l = gpmc_cs_read_reg(cs, GPMC_CS_CONFIG7);
-	return l & (1 << 6);
+	return l & GPMC_CONFIG7_CSVALID;
 }
 
 int gpmc_cs_set_reserved(int cs, int reserved)
@@ -373,7 +393,7 @@ int gpmc_cs_request(int cs, unsigned long size, unsigned long *base)
 	if (r < 0)
 		goto out;
 
-	gpmc_cs_enable_mem(cs, res->start, res->end - res->start + 1);
+	gpmc_cs_enable_mem(cs, res->start, resource_size(res));
 	*base = res->start;
 	gpmc_cs_set_reserved(cs, 1);
 out:
@@ -385,7 +405,7 @@ EXPORT_SYMBOL(gpmc_cs_request);
 void gpmc_cs_free(int cs)
 {
 	spin_lock(&gpmc_mem_lock);
-	if (cs >= GPMC_CS_NUM || !gpmc_cs_reserved(cs)) {
+	if (cs >= GPMC_CS_NUM || cs < 0 || !gpmc_cs_reserved(cs)) {
 		printk(KERN_ERR "Trying to free non-reserved GPMC CS%d\n", cs);
 		BUG();
 		spin_unlock(&gpmc_mem_lock);
@@ -398,18 +418,63 @@ void gpmc_cs_free(int cs)
 }
 EXPORT_SYMBOL(gpmc_cs_free);
 
-#ifdef CONFIG_MTD_NAND_OMAP_PREFETCH
-/*
- * gpmc_prefetch_init - configures default configuration for prefetch engine
+/**
+ * gpmc_prefetch_enable - configures and starts prefetch transfer
+ * @cs: nand cs (chip select) number
+ * @dma_mode: dma mode enable (1) or disable (0)
+ * @u32_count: number of bytes to be transferred
+ * @is_write: prefetch read(0) or write post(1) mode
  */
-static void gpmc_prefetch_init(void)
+int gpmc_prefetch_enable(int cs, int dma_mode,
+				unsigned int u32_count, int is_write)
 {
-	/* Setting the default threshold to 64 */
-	gpmc_write_reg(GPMC_PREFETCH_CONTROL, 0x0);
-	gpmc_write_reg(GPMC_PREFETCH_CONFIG1, GPMC_PREFETCH_CONFIG1_INIT);
-	gpmc_write_reg(GPMC_PREFETCH_CONFIG2, 0x0);
+	uint32_t prefetch_config1;
+
+	if (!(gpmc_read_reg(GPMC_PREFETCH_CONTROL))) {
+		/* Set the amount of bytes to be prefetched */
+		gpmc_write_reg(GPMC_PREFETCH_CONFIG2, u32_count);
+
+		/* Set dma/mpu mode, the prefetch read / post write and
+		 * enable the engine. Set which cs is has requested for.
+		 */
+		prefetch_config1 = ((cs << CS_NUM_SHIFT) |
+					PREFETCH_FIFOTHRESHOLD |
+					ENABLE_PREFETCH |
+					(dma_mode << DMA_MPU_MODE) |
+					(0x1 & is_write));
+		gpmc_write_reg(GPMC_PREFETCH_CONFIG1, prefetch_config1);
+	} else {
+		return -EBUSY;
+	}
+	/*  Start the prefetch engine */
+	gpmc_write_reg(GPMC_PREFETCH_CONTROL, 0x1);
+
+	return 0;
 }
-#endif
+EXPORT_SYMBOL(gpmc_prefetch_enable);
+
+/**
+ * gpmc_prefetch_reset - disables and stops the prefetch engine
+ */
+void gpmc_prefetch_reset(void)
+{
+	/* Stop the PFPW engine */
+	gpmc_write_reg(GPMC_PREFETCH_CONTROL, 0x0);
+
+	/* Reset/disable the PFPW engine */
+	gpmc_write_reg(GPMC_PREFETCH_CONFIG1, 0x0);
+}
+EXPORT_SYMBOL(gpmc_prefetch_reset);
+
+/**
+ * gpmc_prefetch_status - reads prefetch status of engine
+ */
+int  gpmc_prefetch_status(void)
+{
+	return gpmc_read_reg(GPMC_PREFETCH_STATUS);
+}
+EXPORT_SYMBOL(gpmc_prefetch_status);
+
 static void __init gpmc_mem_init(void)
 {
 	int cs;
@@ -451,6 +516,9 @@ void __init gpmc_init(void)
 	} else if (cpu_is_omap34xx()) {
 		ck = "gpmc_fck";
 		l = OMAP34XX_GPMC_BASE;
+	} else if (cpu_is_omap44xx()) {
+		ck = "gpmc_fck";
+		l = OMAP44XX_GPMC_BASE;
 	}
 
 	gpmc_l3_clk = clk_get(NULL, ck);
@@ -473,15 +541,12 @@ void __init gpmc_init(void)
 	l &= 0x03 << 3;
 	l |= (0x02 << 3) | (1 << 0);
 	gpmc_write_reg(GPMC_SYSCONFIG, l);
-
-#ifdef CONFIG_MTD_NAND_OMAP_PREFETCH
-	gpmc_prefetch_init();
-	printk(KERN_INFO "GPMC Prefetch is enabled....\n");
-#endif
 	gpmc_mem_init();
 }
 
 #ifdef CONFIG_ARCH_OMAP3
+static struct omap3_gpmc_regs gpmc_context;
+
 void omap3_gpmc_save_context()
 {
 	int i;
@@ -493,9 +558,7 @@ void omap3_gpmc_save_context()
 	gpmc_context.prefetch_config2 = gpmc_read_reg(GPMC_PREFETCH_CONFIG2);
 	gpmc_context.prefetch_control = gpmc_read_reg(GPMC_PREFETCH_CONTROL);
 	for (i = 0; i < GPMC_CS_NUM; i++) {
-		gpmc_context.cs_context[i].is_valid =
-				(gpmc_cs_read_reg(i, GPMC_CS_CONFIG7))
-							& GPMC_CONFIG7_CSVALID;
+		gpmc_context.cs_context[i].is_valid = gpmc_cs_mem_enabled(i);
 		if (gpmc_context.cs_context[i].is_valid) {
 			gpmc_context.cs_context[i].config1 =
 				gpmc_cs_read_reg(i, GPMC_CS_CONFIG1);

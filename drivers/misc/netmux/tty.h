@@ -1,7 +1,7 @@
 /******************************************************************************
  * NetMUX tty.h                                                               *
  *                                                                            *
- * Copyright (C) Motorola 2006-2007                                           *
+ * Copyright (C) 2006-2010 Motorola, Inc.                                     *
  *                                                                            *
  * Redistribution and use in source and binary forms, with or without         *
  * modification, are permitted provided that the following conditions are     *
@@ -37,6 +37,7 @@
  *                           field to the TTY_CHANNELDATA structure           *
  *   2007/02/01  Motorola    Added mux_channel_queue_space                    *
  *   2007/12/05  Motorola    Change kernel file as kernel upgrade             *
+ *   2010/04/28  Motorola    Format cleanup                                   *
  ******************************************************************************/
 
 /* tty.h is responsible for setting up a method of communication between the  */
@@ -60,7 +61,7 @@
 #include <linux/poll.h>
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 
 /*
@@ -80,7 +81,8 @@
 
 
 /*
- * TTY_CHANNELDATA defines a structure to bind channels to a certain configuration
+ * TTY_CHANNELDATA defines a structure to bind channels
+ * to a certain configuration
  * A brief description is provided below.
  *
  * commbuff represents a commbuff currently being received
@@ -93,34 +95,34 @@
  * host_byte_credit is the default number of bytes that can be received
  * host_send_credit is the default number of sends that can be received
  * modem_flags is modified on an ioctl
- * mux_channel_queue_space is the current amount of space available in the mux channel queue
+ * mux_channel_queue_space is the current amount of space available
+ * 	in the mux channel queue
  * process_queue holds a list of commbuffs to be transmitted
  * event_wait defines a structure that a tty device can sleep on
  * close_wait defines a structure that a close operation can sleep on
  * device_file is the name of the file entry in /dev
  */
-typedef struct TTY_CHANNELDATA
-{
-    COMMBUFF* commbuff;
+typedef struct TTY_CHANNELDATA {
+	COMMBUFF *commbuff;
 
-    int32 refcount;
-    int32 state;
-    int32 client_interface;
-    int32 burstsize;
-    int32 maxdata;
-    int32 data_amount;
-    int32 host_byte_credit;
-    int32 host_send_credit;
-    int32 modem_flags;
-    int32 mux_channel_queue_space;
+	int32 refcount;
+	int32 state;
+	int32 client_interface;
+	int32 burstsize;
+	int32 maxdata;
+	int32 data_amount;
+	int32 host_byte_credit;
+	int32 host_send_credit;
+	int32 modem_flags;
+	int32 mux_channel_queue_space;
 
-    COMMBUFFQUEUE process_queue;
+	COMMBUFFQUEUE process_queue;
 
-    wait_queue_head_t event_wait;
-    wait_queue_head_t close_wait;
+	wait_queue_head_t event_wait;
+	wait_queue_head_t close_wait;
 
-    sint8 device_file[PACKET_MAXNAME_LENGTH];
-}TTY_CHANNELDATA;
+	sint8 device_file[PACKET_MAXNAME_LENGTH];
+} TTY_CHANNELDATA;
 
 /*
  * TTY_INTERFACE declares a structure to manage tty channel data pointers
@@ -134,39 +136,40 @@ typedef struct TTY_CHANNELDATA
  * device_directory is the directory within /dev to create devices
  * interface_name is the name of this interface
  */
-typedef struct TTYINTERFACE
-{
-    int32 channel_min;
-    int32 channel_max;
-    int32 host_interface;
+typedef struct TTYINTERFACE {
+	int32 channel_min;
+	int32 channel_max;
+	int32 host_interface;
 
-    TTY_CHANNELDATA* channel_data;
-    MUX*             mux;
-    CRITICALSECTION  lock;
+	TTY_CHANNELDATA *channel_data;
+	MUX *mux;
+	CRITICALSECTION lock;
 
-    sint8  device_directory[PACKET_MAXNAME_LENGTH];
-    sint8  interface_name[PACKET_MAXNAME_LENGTH];
+	sint8 device_directory[PACKET_MAXNAME_LENGTH];
+	sint8 interface_name[PACKET_MAXNAME_LENGTH];
 
-    struct tty_driver driver;
-}TTYINTERFACE;
+	struct tty_driver driver;
+} TTYINTERFACE;
 
 
 /*
  * Define various functions used by the tty interface
  */
 
-int32 TTYInform  (void*, void*);
-int32 TTYReceive (COMMBUFF*, void*);
+int32 TTYInform(void *, void *);
+int32 TTYReceive(COMMBUFF *, void *);
 
-int32 CreateTTYInterface  (sint8*, sint8*, int32, int32, int32, MUX*, TTYINTERFACE**);
-int32 DestroyTTYInterface (TTYINTERFACE*);
+int32 CreateTTYInterface(sint8 *, sint8 *, int32, int32, int32, MUX *,
+			 TTYINTERFACE **);
+int32 DestroyTTYInterface(TTYINTERFACE *);
 
-int          TTYOpen         (struct tty_struct*, struct file*);
-void         TTYClose        (struct tty_struct*, struct file*);
-ssize_t      TTYWrite        (struct tty_struct*, const unsigned char*, int);
-int          TTYDataInBuffer (struct tty_struct*);
-int          TTYWriteRoom    (struct tty_struct*);
-int          TTYIOCtl        (struct tty_struct*, struct file*, unsigned int, unsigned long);
+int TTYOpen(struct tty_struct *, struct file *);
+void TTYClose(struct tty_struct *, struct file *);
+ssize_t TTYWrite(struct tty_struct *, const unsigned char *, int);
+int TTYDataInBuffer(struct tty_struct *);
+int TTYWriteRoom(struct tty_struct *);
+int TTYIOCtl(struct tty_struct *, struct file *, unsigned int,
+	     unsigned long);
 
 
 #endif

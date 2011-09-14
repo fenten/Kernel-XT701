@@ -22,7 +22,7 @@
 #ifndef OMAP_ISP_PREVIEW_H
 #define OMAP_ISP_PREVIEW_H
 
-#include <mach/isp_user.h>
+#include <plat/isp_user.h>
 /* Isp query control structure */
 
 #define ISPPRV_BRIGHT_STEP		0x1
@@ -32,10 +32,10 @@
 #define ISPPRV_BRIGHT_UNITS		0x7
 
 #define ISPPRV_CONTRAST_STEP		0x1
-#define ISPPRV_CONTRAST_DEF		0x4
+#define ISPPRV_CONTRAST_DEF		0x10
 #define ISPPRV_CONTRAST_LOW		0x0
-#define ISPPRV_CONTRAST_HIGH		0xF
-#define ISPPRV_CONTRAST_UNITS		0x4
+#define ISPPRV_CONTRAST_HIGH		0x30
+#define ISPPRV_CONTRAST_UNITS		0x1
 
 #define NO_AVE				0x0
 #define AVE_2_PIX			0x1
@@ -212,6 +212,8 @@ struct prev_params {
  * @red_gamma: Pointer to red gamma correction table.
  * @green_gamma: Pointer to green gamma correction table.
  * @blue_gamma: Pointer to blue gamma correction table.
+ * @prev_cfa: Pointer to color filter array configuration.
+ * @prev_wbal: Pointer to colour and digital gain configuration.
  */
 struct isptables_update {
 	u16 update;
@@ -221,6 +223,8 @@ struct isptables_update {
 	u32 *red_gamma;
 	u32 *green_gamma;
 	u32 *blue_gamma;
+	struct ispprev_cfa *prev_cfa;
+	struct ispprev_wbal *prev_wbal;
 };
 
 void isppreview_config_shadow_registers(void);
@@ -230,6 +234,9 @@ int isppreview_request(void);
 int isppreview_free(void);
 
 int isppreview_config_datapath(enum preview_input input,
+			       enum preview_output output);
+
+int isppreview_update_datapath(enum preview_input input,
 			       enum preview_output output);
 
 void isppreview_config_ycpos(enum preview_ycpos_mode mode);
@@ -333,17 +340,9 @@ struct prev_params *isppreview_get_config(void);
 
 void isppreview_print_status(void);
 
-#ifndef CONFIG_ARCH_OMAP3410
 void isppreview_save_context(void);
-#else
-static inline void isppreview_save_context(void) {}
-#endif
 
-#ifndef CONFIG_ARCH_OMAP3410
 void isppreview_restore_context(void);
-#else
-static inline void isppreview_restore_context(void) {}
-#endif
 
 int omap34xx_isp_preview_config(void *userspace_add);
 

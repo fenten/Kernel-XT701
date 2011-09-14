@@ -39,6 +39,32 @@ static bool update_timing;
 static bool update_ctrl;
 static bool uses_videoport;
 
+/* Structure for saving/restoring CSI2 module registers*/
+static struct isp_reg ispcsi2_reg_list[] = {
+	{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_SYSCONFIG, 0},
+	{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_SYSSTATUS, 0},
+	/*{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_IRQSTATUS, 0},*/
+	{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_IRQENABLE, 0},
+	{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_CTRL, 0},
+	{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_DBG_H, 0},
+	{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_GNQ, 0},
+	{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_COMPLEXIO_CFG1, 0},
+	/*{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_COMPLEXIO1_IRQSTATUS, 0},*/
+	{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_SHORT_PACKET, 0},
+	{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_COMPLEXIO1_IRQENABLE, 0},
+	{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_CTX_CTRL1(0), 0},
+	{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_CTX_CTRL2(0), 0},
+	{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_CTX_DAT_OFST(0), 0},
+	{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_CTX_DAT_PING_ADDR(0), 0},
+	{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_CTX_DAT_PONG_ADDR(0), 0},
+	{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_CTX_IRQENABLE(0), 0},
+	/*{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_CTX_IRQSTATUS(0), 0},*/
+	{OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_CTX_CTRL3(0), 0},
+	{OMAP3_ISP_IOMEM_CSI2PHY, ISPCSI2PHY_CFG0, 0},
+	{OMAP3_ISP_IOMEM_CSI2PHY, ISPCSI2PHY_CFG1, 0},
+	{0, ISP_TOK_TERM, 0}
+};
+
 /**
  * isp_csi2_complexio_lanes_config - Configuration of CSI2 ComplexIO lanes.
  * @reqcfg: Pointer to structure containing desired lane configuration
@@ -699,6 +725,21 @@ int isp_csi2_ctrl_get(void)
 	currctrl_u->if_enable = false;
 
 	update_ctrl = false;
+	return 0;
+}
+
+/**
+ * isp_csi2_ctrl_phy_if_enable - Enable/disable physical interface
+ *
+ * Always returns 0.
+ **/
+int isp_csi2_ctrl_phy_if_enable(u8 enable)
+{
+	if (enable)
+		isp_reg_or(OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_CTRL, 0x1);
+	else
+		isp_reg_and(OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_CTRL, ~0x1);
+
 	return 0;
 }
 
@@ -1766,6 +1807,7 @@ int isp_csi2_timings_get_all(void)
 void isp_csi2_isr(void)
 {
 	u32 csi2_irqstatus, cpxio1_irqstatus, ctxirqstatus;
+	static u32 print_count;
 
 	csi2_irqstatus = isp_reg_readl(OMAP3_ISP_IOMEM_CSI2A,
 				       ISPCSI2_IRQSTATUS);
@@ -1797,8 +1839,16 @@ void isp_csi2_isr(void)
 	if (csi2_irqstatus & ISPCSI2_IRQSTATUS_ECC_CORRECTION_IRQ)
 		printk(KERN_DEBUG "CSI2: ECC correction done\n");
 
-	if (csi2_irqstatus & ISPCSI2_IRQSTATUS_ECC_NO_CORRECTION_IRQ)
-		printk(KERN_ERR "CSI2: ECC correction failed\n");
+	if (csi2_irqstatus & ISPCSI2_IRQSTATUS_ECC_NO_CORRECTION_IRQ) {
+		/* avoid spurious printing - can lock up kernel */
+		if ((print_count % 1000) == 0)
+			printk(KERN_ERR "CSI2: ECC correction failed (X %d)\n",
+			       print_count);
+		print_count++;
+#if defined(CONFIG_VIDEO_MIPI_DLI_TEST)
+		ecc_counter++;
+#endif
+	}
 
 	if (csi2_irqstatus & ISPCSI2_IRQSTATUS_COMPLEXIO2_ERR_IRQ)
 		printk(KERN_ERR "CSI2: ComplexIO #2 failed\n");
@@ -1952,9 +2002,17 @@ int isp_csi2_reset(void)
 	u8 soft_reset_retries = 0;
 	int i;
 
+	memset(&current_csi2_cfg, 0, sizeof(current_csi2_cfg));
+	memset(&current_csi2_cfg_update, 0, sizeof(current_csi2_cfg_update));
+
 	reg = isp_reg_readl(OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_SYSCONFIG);
 	reg |= ISPCSI2_SYSCONFIG_SOFT_RESET_RESET;
 	isp_reg_writel(reg, OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_SYSCONFIG);
+
+	if (cpu_is_omap3630())
+		isp_reg_or(OMAP3_ISP_IOMEM_CSI2A,
+			ISPCSI2_COMPLEXIO_CFG1,
+			ISPCSI2_COMPLEXIO_CFG1_RESET_CTRL_DEASSERTED);
 
 	do {
 		reg = isp_reg_readl(OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_SYSSTATUS) &
@@ -1971,10 +2029,26 @@ int isp_csi2_reset(void)
 		return -EBUSY;
 	}
 
+	i = 100;
+	do {
+		reg = isp_reg_readl(OMAP3_ISP_IOMEM_CSI2PHY, ISPCSI2PHY_CFG1) &
+		      ISPCSI2PHY_CFG1_RESETDONECTRLCLK_MASK;
+		if (reg == ISPCSI2PHY_CFG1_RESETDONECTRLCLK_MASK)
+			break;
+		udelay(100);
+	} while (--i > 0);
+
+	if (i == 0) {
+		printk(KERN_ERR
+			"CSI2: Reset for CSI2_96M_FCLK domain Failed!\n");
+		return -EBUSY;
+	}
+
 	reg = isp_reg_readl(OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_SYSCONFIG);
 	reg &= ~ISPCSI2_SYSCONFIG_MSTANDBY_MODE_MASK;
-	reg |= ISPCSI2_SYSCONFIG_MSTANDBY_MODE_NO;
+	reg |= ISPCSI2_SYSCONFIG_MSTANDBY_MODE_SMART;
 	reg &= ~ISPCSI2_SYSCONFIG_AUTO_IDLE_MASK;
+	reg |= ISPCSI2_SYSCONFIG_AUTO_IDLE_AUTO;
 	isp_reg_writel(reg, OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_SYSCONFIG);
 
 	uses_videoport = false;
@@ -1995,8 +2069,8 @@ int isp_csi2_reset(void)
 	isp_csi2_phy_get();
 	isp_csi2_timings_get_all();
 
-	isp_csi2_complexio_power_autoswitch(true);
 	isp_csi2_complexio_power(ISP_CSI2_POWER_ON);
+	isp_csi2_complexio_power_autoswitch(true);
 
 	isp_csi2_timings_config_forcerxmode(1, true);
 	isp_csi2_timings_config_stopstate_cnt(1, 0x1FF);
@@ -2116,6 +2190,26 @@ void isp_csi2_regdump(void)
 	       isp_reg_readl(OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_CTRL));
 	printk(KERN_DEBUG "---------------------------------------\n");
 }
+
+/**
+ * ispcsi2_save_context - Saves the values of the CSI1 module registers
+ **/
+void ispcsi2_save_context(void)
+{
+	/* printk(KERN_DEBUG "Saving csi2 context\n"); */
+	isp_save_context(ispcsi2_reg_list);
+}
+EXPORT_SYMBOL(ispcsi2_save_context);
+
+/**
+ * ispcsi2_restore_context - Restores the values of the CSI2 module registers
+ **/
+void ispcsi2_restore_context(void)
+{
+	/* printk(KERN_DEBUG "Restoring csi2 context\n"); */
+	isp_restore_context(ispcsi2_reg_list);
+}
+EXPORT_SYMBOL(ispcsi2_restore_context);
 
 /**
  * isp_csi2_cleanup - Routine for module driver cleanup

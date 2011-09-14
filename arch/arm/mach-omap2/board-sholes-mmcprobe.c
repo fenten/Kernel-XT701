@@ -24,13 +24,13 @@
 #include <asm/mach/arch.h>
 #include <asm/setup.h>
 
-#include <mach/board-sholes.h>
-#include <mach/hardware.h>
-#include <mach/gpio.h>
-#include <mach/mux.h>
-#include <mach/board.h>
-#include <mach/common.h>
-#include <mach/control.h>
+#include <plat/board-sholes.h>
+#include <plat/hardware.h>
+#include <plat/gpio.h>
+#include <plat/mux.h>
+#include <plat/board.h>
+#include <plat/common.h>
+#include <plat/control.h>
 #include <linux/delay.h>
 
 #define CH_BASE_GPIO 120

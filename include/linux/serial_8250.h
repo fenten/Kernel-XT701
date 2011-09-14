@@ -2,7 +2,6 @@
  *  linux/include/linux/serial_8250.h
  *
  *  Copyright (C) 2004 Russell King
- *  Copyright (C) 2009 Motorola, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -15,11 +14,6 @@
 #include <linux/serial_core.h>
 #include <linux/platform_device.h>
 
-#ifdef CONFIG_SERIAL_OMAP3430_HW_FLOW_CONTROL
-#define SERIAL8250_AUTO_RTS 0x01
-#define SERIAL8250_AUTO_CTS 0x02
-#endif
-
 /*
  * This is the platform device platform_data structure
  */
@@ -28,6 +22,7 @@ struct plat_serial8250_port {
 	void __iomem	*membase;	/* ioremap cookie or NULL */
 	resource_size_t	mapbase;	/* resource base */
 	unsigned int	irq;		/* interrupt number */
+	unsigned long	irqflags;	/* request_irq flags */
 	unsigned int	uartclk;	/* UART clock rate */
 	void            *private_data;
 	unsigned char	regshift;	/* register shift */
@@ -37,9 +32,6 @@ struct plat_serial8250_port {
 	unsigned int	type;		/* If UPF_FIXED_TYPE */
 	unsigned int	(*serial_in)(struct uart_port *, int);
 	void		(*serial_out)(struct uart_port *, int, int);
-#ifdef CONFIG_SERIAL_OMAP3430_HW_FLOW_CONTROL
-	unsigned char   rtscts;     /* bit0: rts, bit1: cts */
-#endif
 };
 
 /*

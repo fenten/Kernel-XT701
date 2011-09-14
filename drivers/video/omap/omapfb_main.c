@@ -27,10 +27,10 @@
 #include <linux/platform_device.h>
 #include <linux/mm.h>
 #include <linux/uaccess.h>
-#include <linux/omapfb.h>
 
-#include <mach/dma.h>
+#include <plat/dma.h>
 
+#include "omapfb.h"
 #include "lcdc.h"
 #include "dispc.h"
 
@@ -219,19 +219,19 @@ static int ctrl_change_mode(struct fb_info *fbi)
 	if (r < 0)
 		return r;
 
-	if (fbdev->ctrl->set_rotate != NULL)
-		if((r = fbdev->ctrl->set_rotate(var->rotate)) < 0)
+	if (fbdev->ctrl->set_rotate != NULL) {
+		r = fbdev->ctrl->set_rotate(var->rotate);
+		if (r < 0)
 			return r;
+	}
 
-	if ((fbdev->ctrl->set_scale != NULL) && (plane->idx > 0))
+	if (fbdev->ctrl->set_scale != NULL)
 		r = fbdev->ctrl->set_scale(plane->idx,
 				   var->xres, var->yres,
 				   plane->info.out_width,
 				   plane->info.out_height);
-	if (r < 0)
-		return r;
 
-	return 0;
+	return r;
 }
 
 /*
@@ -348,7 +348,7 @@ static int omapfb_blank(int blank, struct fb_info *fbi)
 
 	omapfb_rqueue_lock(fbdev);
 	switch (blank) {
-	case VESA_NO_BLANKING:
+	case FB_BLANK_UNBLANK:
 		if (fbdev->state == OMAPFB_SUSPENDED) {
 			if (fbdev->ctrl->resume)
 				fbdev->ctrl->resume();
@@ -359,7 +359,7 @@ static int omapfb_blank(int blank, struct fb_info *fbi)
 				do_update = 1;
 		}
 		break;
-	case VESA_POWERDOWN:
+	case FB_BLANK_POWERDOWN:
 		if (fbdev->state == OMAPFB_ACTIVE) {
 			fbdev->panel->disable(fbdev->panel);
 			if (fbdev->ctrl->suspend)
@@ -393,7 +393,7 @@ static void omapfb_sync(struct fb_info *fbi)
  * Set fb_info.fix fields and also updates fbdev.
  * When calling this fb_info.var must be set up already.
  */
-static void set_fb_fix(struct fb_info *fbi)
+static void set_fb_fix(struct fb_info *fbi, int from_init)
 {
 	struct fb_fix_screeninfo *fix = &fbi->fix;
 	struct fb_var_screeninfo *var = &fbi->var;
@@ -403,8 +403,16 @@ static void set_fb_fix(struct fb_info *fbi)
 
 	rg = &plane->fbdev->mem_desc.region[plane->idx];
 	fbi->screen_base	= rg->vaddr;
-	fix->smem_start		= rg->paddr;
-	fix->smem_len		= rg->size;
+
+	if (!from_init) {
+		mutex_lock(&fbi->mm_lock);
+		fix->smem_start		= rg->paddr;
+		fix->smem_len		= rg->size;
+		mutex_unlock(&fbi->mm_lock);
+	} else {
+		fix->smem_start		= rg->paddr;
+		fix->smem_len		= rg->size;
+	}
 
 	fix->type = FB_TYPE_PACKED_PIXELS;
 	bpp = var->bits_per_pixel;
@@ -702,7 +710,7 @@ static int omapfb_set_par(struct fb_info *fbi)
 	int r = 0;
 
 	omapfb_rqueue_lock(fbdev);
-	set_fb_fix(fbi);
+	set_fb_fix(fbi, 0);
 	r = ctrl_change_mode(fbi);
 	omapfb_rqueue_unlock(fbdev);
 
@@ -902,15 +910,17 @@ static int omapfb_setup_mem(struct fb_info *fbi, struct omapfb_mem_info *mi)
 		if (old_size != size) {
 			if (size) {
 				memcpy(&fbi->var, new_var, sizeof(fbi->var));
-				set_fb_fix(fbi);
+				set_fb_fix(fbi, 0);
 			} else {
 				/*
 				 * Set these explicitly to indicate that the
 				 * plane memory is dealloce'd, the other
 				 * screen parameters in var / fix are invalid.
 				 */
+				mutex_lock(&fbi->mm_lock);
 				fbi->fix.smem_start = 0;
 				fbi->fix.smem_len = 0;
+				mutex_unlock(&fbi->mm_lock);
 			}
 		}
 	}
@@ -1273,7 +1283,7 @@ static struct fb_ops omapfb_ops = {
 static ssize_t omapfb_show_caps_num(struct device *dev,
 				    struct device_attribute *attr, char *buf)
 {
-	struct omapfb_device *fbdev = (struct omapfb_device *)dev->driver_data;
+	struct omapfb_device *fbdev = dev_get_drvdata(dev);
 	int plane;
 	size_t size;
 	struct omapfb_caps caps;
@@ -1293,7 +1303,7 @@ static ssize_t omapfb_show_caps_num(struct device *dev,
 static ssize_t omapfb_show_caps_text(struct device *dev,
 				     struct device_attribute *attr, char *buf)
 {
-	struct omapfb_device *fbdev = (struct omapfb_device *)dev->driver_data;
+	struct omapfb_device *fbdev = dev_get_drvdata(dev);
 	int i;
 	struct omapfb_caps caps;
 	int plane;
@@ -1340,7 +1350,7 @@ static DEVICE_ATTR(caps_text, 0444, omapfb_show_caps_text, NULL);
 static ssize_t omapfb_show_panel_name(struct device *dev,
 				      struct device_attribute *attr, char *buf)
 {
-	struct omapfb_device *fbdev = (struct omapfb_device *)dev->driver_data;
+	struct omapfb_device *fbdev = dev_get_drvdata(dev);
 
 	return snprintf(buf, PAGE_SIZE, "%s\n", fbdev->panel->name);
 }
@@ -1349,7 +1359,7 @@ static ssize_t omapfb_show_bklight_level(struct device *dev,
 					 struct device_attribute *attr,
 					 char *buf)
 {
-	struct omapfb_device *fbdev = (struct omapfb_device *)dev->driver_data;
+	struct omapfb_device *fbdev = dev_get_drvdata(dev);
 	int r;
 
 	if (fbdev->panel->get_bklight_level) {
@@ -1364,7 +1374,7 @@ static ssize_t omapfb_store_bklight_level(struct device *dev,
 					  struct device_attribute *attr,
 					  const char *buf, size_t size)
 {
-	struct omapfb_device *fbdev = (struct omapfb_device *)dev->driver_data;
+	struct omapfb_device *fbdev = dev_get_drvdata(dev);
 	int r;
 
 	if (fbdev->panel->set_bklight_level) {
@@ -1383,7 +1393,7 @@ static ssize_t omapfb_store_bklight_level(struct device *dev,
 static ssize_t omapfb_show_bklight_max(struct device *dev,
 				       struct device_attribute *attr, char *buf)
 {
-	struct omapfb_device *fbdev = (struct omapfb_device *)dev->driver_data;
+	struct omapfb_device *fbdev = dev_get_drvdata(dev);
 	int r;
 
 	if (fbdev->panel->get_bklight_level) {
@@ -1416,7 +1426,7 @@ static struct attribute_group panel_attr_grp = {
 static ssize_t omapfb_show_ctrl_name(struct device *dev,
 				     struct device_attribute *attr, char *buf)
 {
-	struct omapfb_device *fbdev = (struct omapfb_device *)dev->driver_data;
+	struct omapfb_device *fbdev = dev_get_drvdata(dev);
 
 	return snprintf(buf, PAGE_SIZE, "%s\n", fbdev->ctrl->name);
 }
@@ -1500,7 +1510,7 @@ static int fbinfo_init(struct omapfb_device *fbdev, struct fb_info *info)
 	var->bits_per_pixel = fbdev->panel->bpp;
 
 	set_fb_var(info, var);
-	set_fb_fix(info);
+	set_fb_fix(info, 1);
 
 	r = fb_alloc_cmap(&info->cmap, 16, 0);
 	if (r != 0)
@@ -1842,7 +1852,7 @@ static int omapfb_suspend(struct platform_device *pdev, pm_message_t mesg)
 	struct omapfb_device *fbdev = platform_get_drvdata(pdev);
 
 	if (fbdev != NULL)
-		omapfb_blank(VESA_POWERDOWN, fbdev->fb_info[0]);
+		omapfb_blank(FB_BLANK_POWERDOWN, fbdev->fb_info[0]);
 	return 0;
 }
 
@@ -1852,7 +1862,7 @@ static int omapfb_resume(struct platform_device *pdev)
 	struct omapfb_device *fbdev = platform_get_drvdata(pdev);
 
 	if (fbdev != NULL)
-		omapfb_blank(VESA_NO_BLANKING, fbdev->fb_info[0]);
+		omapfb_blank(FB_BLANK_UNBLANK, fbdev->fb_info[0]);
 	return 0;
 }
 

@@ -53,6 +53,7 @@ struct input_absinfo {
 	__s32 maximum;
 	__s32 fuzz;
 	__s32 flat;
+	__s32 resolution;
 };
 
 #define EVIOCGVERSION		_IOR('E', 0x01, int)			/* get driver version */
@@ -446,6 +447,7 @@ struct input_absinfo {
 #define BTN_STYLUS2		0x14c
 #define BTN_TOOL_DOUBLETAP	0x14d
 #define BTN_TOOL_TRIPLETAP	0x14e
+#define BTN_TOOL_QUADTAP	0x14f	/* Four fingers on trackpad */
 
 #define BTN_WHEEL		0x150
 #define BTN_GEAR_DOWN		0x150
@@ -593,6 +595,8 @@ struct input_absinfo {
 #define KEY_NUMERIC_STAR	0x20a
 #define KEY_NUMERIC_POUND	0x20b
 
+#define KEY_CAMERA_FOCUS	0x210
+
 /* We avoid low common keys in module aliases so they don't get huge. */
 #define KEY_MIN_INTERESTING	KEY_MUTE
 #define KEY_MAX			0x2ff
@@ -655,6 +659,7 @@ struct input_absinfo {
 #define ABS_MT_POSITION_Y	0x36	/* Center Y ellipse position */
 #define ABS_MT_TOOL_TYPE	0x37	/* Type of touching device */
 #define ABS_MT_BLOB_ID		0x38	/* Group a set of packets as a blob */
+#define ABS_MT_TRACKING_ID	0x39	/* Unique ID of initiated contact */
 
 #define ABS_MAX			0x3f
 #define ABS_CNT			(ABS_MAX+1)
@@ -673,6 +678,10 @@ struct input_absinfo {
 #define SW_DOCK			0x05  /* set = plugged into dock */
 #define SW_LINEOUT_INSERT	0x06  /* set = inserted */
 #define SW_JACK_PHYSICAL_INSERT 0x07  /* set = mechanical switch set */
+#define SW_VIDEOOUT_INSERT	0x08  /* set = inserted */
+#define SW_CAMERA_LENS_COVER	0x09  /* set = lens covered */
+#define SW_KEYPAD_SLIDE		0x0a  /* set = keypad slide out */
+#define SW_FRONT_PROXIMITY	0x0b  /* set = front proximity sensor active */
 #define SW_MAX			0x0f
 #define SW_CNT			(SW_MAX+1)
 
@@ -1106,6 +1115,7 @@ struct input_dev {
 	int absmin[ABS_MAX + 1];
 	int absfuzz[ABS_MAX + 1];
 	int absflat[ABS_MAX + 1];
+	int absres[ABS_MAX + 1];
 
 	int (*open)(struct input_dev *dev);
 	void (*close)(struct input_dev *dev);
@@ -1118,7 +1128,7 @@ struct input_dev {
 	struct mutex mutex;
 
 	unsigned int users;
-	int going_away;
+	bool going_away;
 
 	struct device dev;
 
@@ -1372,6 +1382,10 @@ extern struct class input_class;
  * methods; erase() is optional. set_gain() and set_autocenter() need
  * only be implemented if driver sets up FF_GAIN and FF_AUTOCENTER
  * bits.
+ *
+ * Note that playback(), set_gain() and set_autocenter() are called with
+ * dev->event_lock spinlock held and interrupts off and thus may not
+ * sleep.
  */
 struct ff_device {
 	int (*upload)(struct input_dev *dev, struct ff_effect *effect,

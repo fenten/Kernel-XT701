@@ -29,7 +29,7 @@
 
  /**
  * hp3a_unlocked_ioctl - I/O control function for hp3a module
- * @inode: Inode structure associated with the Resizer Wrapper.
+ * @inode: Inode structure associated with the hp3a Wrapper.
  * @file: File structure associated with the hp3a driver.
  * @cmd: Type of command to execute.
  * @arg: Argument to send to requested command.
@@ -123,6 +123,7 @@ long hp3a_unlocked_ioctl(struct file *file, unsigned int cmd,
 		if (index < fh->buffer_count && index > -1) {
 			ibuffer = &(fh->buffers[index]);
 			if (ibuffer->isp_addr == 0) {
+		#if defined(CONFIG_VIDEO_OLDOMAP3)
 				ibuffer->isp_addr =
 					ispmmu_map_pages(ibuffer->pages,
 					NR_PAGES((unsigned long)ibuffer->user_addr,
@@ -132,6 +133,18 @@ long hp3a_unlocked_ioctl(struct file *file, unsigned int cmd,
 						"isp mmu fail to map memory\n");
 					return -EFAULT;
 				}
+		#else
+				ibuffer->isp_addr =
+					ispmmu_vmap_pages(ibuffer->pages,
+					NR_PAGES((unsigned long)ibuffer->user_addr,
+					ibuffer->buffer_size));
+				if (IS_ERR((void *)ibuffer->isp_addr)) {
+					ibuffer->isp_addr = 0;
+					dev_err(device->dev , \
+						"isp mmu fail to map memory\n");
+					return -EFAULT;
+				}
+		#endif
 			}
 			flush_dcache_ibuffer(ibuffer);
 			ret = hp3a_enqueue_irqsave(&g_tc.af_stat_queue,
@@ -150,6 +163,7 @@ long hp3a_unlocked_ioctl(struct file *file, unsigned int cmd,
 		if (index < fh->buffer_count && index > -1) {
 			ibuffer = &(fh->buffers[index]);
 			if (ibuffer->isp_addr == 0) {
+		#if defined(CONFIG_VIDEO_OLDOMAP3)
 				ibuffer->isp_addr =
 					ispmmu_map_pages(ibuffer->pages,
 					NR_PAGES((unsigned long)ibuffer->user_addr,
@@ -159,6 +173,18 @@ long hp3a_unlocked_ioctl(struct file *file, unsigned int cmd,
 						"isp mmu fail to map memory\n");
 					return -EFAULT;
 				}
+		#else
+				ibuffer->isp_addr =
+					ispmmu_vmap_pages(ibuffer->pages,
+					NR_PAGES((unsigned long)ibuffer->user_addr,
+					ibuffer->buffer_size));
+				if (IS_ERR((void *)ibuffer->isp_addr)) {
+					ibuffer->isp_addr = 0;
+					dev_err(device->dev , \
+						"isp mmu fail to map memory\n");
+					return -EFAULT;
+				}
+		#endif
 			}
 			ret = hp3a_enqueue_irqsave(&g_tc.raw_frame_queue,
 				&ibuffer);

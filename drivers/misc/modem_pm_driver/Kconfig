@@ -21,7 +21,7 @@
 menu "Motorola Modem PM Driver"
 
 config MODEM_PM_DRIVER
-        tristate
-        default y
+        tristate "Motorola modem pm driver"
+        default m
 
 endmenu

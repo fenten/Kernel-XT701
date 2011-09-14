@@ -1,5 +1,5 @@
 #
-ccflags-y = -DLINUX -D__linux__ -Idrivers/gpu/pvr -Idrivers/gpu/pvr/omap3430 \
+ccflags-y = -DLINUX -D__linux__ -Idrivers/gpu/pvr -Idrivers/gpu/pvr/omap3 \
 	-DANDROID \
 	-DPVR_BUILD_DIR="\"omap3430_android\"" \
 	-DSGX_DYNAMIC_TIMING_INFO \
@@ -79,8 +79,8 @@ pvr_common-y := \
 	bridged_pvr_bridge.o \
 	perproc.o \
 	lists.o \
-	omap3430/sysconfig.o \
-	omap3430/sysutils.o
+	omap3/sysconfig.o \
+	omap3/sysutils.o
 
 
 sgx-y    :=  \

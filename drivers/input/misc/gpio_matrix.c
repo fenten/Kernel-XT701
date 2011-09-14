@@ -222,7 +222,7 @@ static irqreturn_t gpio_keypad_irq_handler(int irq_in, void *dev_id)
 		return IRQ_HANDLED;
 
 	for (i = 0; i < mi->ninputs; i++)
-		disable_irq(gpio_to_irq(mi->input_gpios[i]));
+		disable_irq_nosync(gpio_to_irq(mi->input_gpios[i]));
 	for (i = 0; i < mi->noutputs; i++) {
 		if (gpio_keypad_flags & GPIOKPF_DRIVE_INACTIVE)
 			gpio_set_value(mi->output_gpios[i],
@@ -269,13 +269,11 @@ static int gpio_keypad_request_irqs(struct gpio_kp *kp)
 				"irq %d\n", mi->input_gpios[i], irq);
 			goto err_request_irq_failed;
 		}
-#ifndef CONFIG_DISABLE_IRQ_WAKE_KPD
 		err = set_irq_wake(irq, 1);
 		if (err) {
 			pr_err("gpiomatrix: set_irq_wake failed for input %d, "
 				"irq %d\n", mi->input_gpios[i], irq);
 		}
-#endif
 		disable_irq(irq);
 	}
 	return 0;

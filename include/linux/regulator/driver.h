@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2007, 2008 Wolfson Microelectronics PLC.
  *
- * Author: Liam Girdwood <lg@opensource.wolfsonmicro.com>
+ * Author: Liam Girdwood <lrg@slimlogic.co.uk>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -35,12 +35,10 @@ enum regulator_status {
 /**
  * struct regulator_ops - regulator operations.
  *
- * This struct describes regulator operations which can be implemented by
- * regulator chip drivers.
- *
- * @enable: Enable the regulator.
- * @disable: Disable the regulator.
- * @is_enabled: Return 1 if the regulator is enabled, 0 otherwise.
+ * @enable: Configure the regulator as enabled.
+ * @disable: Configure the regulator as disabled.
+ * @is_enabled: Return 1 if the regulator is enabled, 0 if not.
+ *		May also return negative errno.
  *
  * @set_voltage: Set the voltage for the regulator within the range specified.
  *               The driver should select the voltage closest to min_uV.
@@ -51,10 +49,12 @@ enum regulator_status {
  *	regulator_desc.n_voltages.  Voltages may be reported in any order.
  *
  * @set_current_limit: Configure a limit for a current-limited regulator.
- * @get_current_limit: Get the limit for a current-limited regulator.
+ * @get_current_limit: Get the configured limit for a current-limited regulator.
  *
- * @set_mode: Set the operating mode for the regulator.
- * @get_mode: Get the current operating mode for the regulator.
+ * @set_mode: Set the configured operating mode for the regulator.
+ * @get_mode: Get the configured operating mode for the regulator.
+ * @get_status: Return actual (not as-configured) status of regulator, as a
+ *	REGULATOR_STATUS value (or negative errno)
  * @get_optimum_mode: Get the most efficient operating mode for the regulator
  *                    when running with the specified parameters.
  *
@@ -66,6 +66,9 @@ enum regulator_status {
  *                       suspended.
  * @set_suspend_mode: Set the operating mode for the regulator when the
  *                    system is suspended.
+ *
+ * This struct describes regulator operations which can be implemented by
+ * regulator chip drivers.
  */
 struct regulator_ops {
 
@@ -93,6 +96,7 @@ struct regulator_ops {
 	/* report regulator status ... most other accessors report
 	 * control inputs, this reports results of combining inputs
 	 * from Linux (and other sources) with the actual load.
+	 * returns REGULATOR_STATUS_* or negative errno.
 	 */
 	int (*get_status)(struct regulator_dev *);
 
@@ -146,8 +150,43 @@ struct regulator_desc {
 	struct module *owner;
 };
 
+/*
+ * struct regulator_dev
+ *
+ * Voltage / Current regulator class device. One for each
+ * regulator.
+ *
+ * This should *not* be used directly by anything except the regulator
+ * core and notification injection (which should take the mutex and do
+ * no other direct access).
+ */
+struct regulator_dev {
+	struct regulator_desc *desc;
+	int use_count;
+	int open_count;
+	int exclusive;
+
+	/* lists we belong to */
+	struct list_head list; /* list of all regulators */
+	struct list_head slist; /* list of supplied regulators */
+
+	/* lists we own */
+	struct list_head consumer_list; /* consumers we supply */
+	struct list_head supply_list; /* regulators we supply */
+
+	struct blocking_notifier_head notifier;
+	struct mutex mutex; /* consumer lock */
+	struct module *owner;
+	struct device dev;
+	struct regulation_constraints *constraints;
+	struct regulator_dev *supply;	/* for tree */
+
+	void *reg_data;		/* regulator_dev data */
+};
+
 struct regulator_dev *regulator_register(struct regulator_desc *regulator_desc,
-	struct device *dev, void *driver_data);
+	struct device *dev, struct regulator_init_data *init_data,
+	void *driver_data);
 void regulator_unregister(struct regulator_dev *rdev);
 
 int regulator_notifier_call_chain(struct regulator_dev *rdev,
@@ -156,6 +195,8 @@ int regulator_notifier_call_chain(struct regulator_dev *rdev,
 void *rdev_get_drvdata(struct regulator_dev *rdev);
 struct device *rdev_get_dev(struct regulator_dev *rdev);
 int rdev_get_id(struct regulator_dev *rdev);
+
+int regulator_mode_to_status(unsigned int);
 
 void *regulator_get_init_drvdata(struct regulator_init_data *reg_init_data);
 

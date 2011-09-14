@@ -236,8 +236,6 @@ static inline void SMC_outsl(struct smc911x_local *lp, int reg,
  * Use a DMA for RX and TX packets.
  */
 #include <linux/dma-mapping.h>
-#include <asm/dma.h>
-#include <mach/pxa-regs.h>
 
 static dma_addr_t rx_dmabuf, tx_dmabuf;
 static int rx_dmalen, tx_dmalen;
@@ -689,7 +687,6 @@ smc_pxa_dma_outsl(struct smc911x_local *lp, u_long physaddr,
 #define CHIP_9215	0x115A
 #define CHIP_9217	0x117A
 #define CHIP_9218	0x118A
-#define CHIP_9221	0x9221
 
 struct chip_id {
 	u16 id;
@@ -705,7 +702,6 @@ static const struct chip_id chip_ids[] =  {
 	{ CHIP_9215, "LAN9215" },
 	{ CHIP_9217, "LAN9217" },
 	{ CHIP_9218, "LAN9218" },
-	{ CHIP_9221, "LAN9221" },
 	{ 0, NULL },
 };
 

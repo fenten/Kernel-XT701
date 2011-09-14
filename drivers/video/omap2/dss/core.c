@@ -32,8 +32,8 @@
 #include <linux/io.h>
 #include <linux/device.h>
 
-#include <mach/display.h>
-#include <mach/clock.h>
+#include <plat/display.h>
+#include <plat/clock.h>
 
 #include "dss.h"
 
@@ -125,7 +125,7 @@ static void restore_all_ctx(void)
 }
 
 /* CLOCKS */
-void dss_dump_clocks(struct seq_file *s)
+static void core_dump_clocks(struct seq_file *s)
 {
 	int i;
 	struct clk *clocks[5] = {
@@ -136,9 +136,9 @@ void dss_dump_clocks(struct seq_file *s)
 		core.dss_96m_fck
 	};
 
-	seq_printf(s, "- dss -\n");
+	seq_printf(s, "- CORE -\n");
 
-	seq_printf(s, "internal clk count\t%u\n", core.num_clks_enabled);
+	seq_printf(s, "internal clk count\t\t%u\n", core.num_clks_enabled);
 
 	for (i = 0; i < 5; i++) {
 		if (!clocks[i])
@@ -178,23 +178,23 @@ static int dss_get_clocks(void)
 	core.dss_54m_fck = NULL;
 	core.dss_96m_fck = NULL;
 
-	r = dss_get_clock(&core.dss_ick, "dss_ick");
+	r = dss_get_clock(&core.dss_ick, "ick");
 	if (r)
 		goto err;
 
-	r = dss_get_clock(&core.dss1_fck, "dss1_alwon_fck");
+	r = dss_get_clock(&core.dss1_fck, "dss1_fck");
 	if (r)
 		goto err;
 
-	r = dss_get_clock(&core.dss2_fck, "dss2_alwon_fck");
+	r = dss_get_clock(&core.dss2_fck, "dss2_fck");
 	if (r)
 		goto err;
 
-	r = dss_get_clock(&core.dss_54m_fck, "dss_tv_fck");
+	r = dss_get_clock(&core.dss_54m_fck, "tv_fck");
 	if (r)
 		goto err;
 
-	r = dss_get_clock(&core.dss_96m_fck, "dss_96m_fck");
+	r = dss_get_clock(&core.dss_96m_fck, "video_fck");
 	if (r)
 		goto err;
 
@@ -354,6 +354,7 @@ static void dss_clk_disable_all(void)
 #if defined(CONFIG_DEBUG_FS) && defined(CONFIG_OMAP2_DSS_DEBUG_SUPPORT)
 static void dss_debug_dump_clocks(struct seq_file *s)
 {
+	core_dump_clocks(s);
 	dss_dump_clocks(s);
 	dispc_dump_clocks(s);
 #ifdef CONFIG_OMAP2_DSS_DSI
@@ -445,8 +446,9 @@ static int omap_dss_probe(struct platform_device *pdev)
 #ifdef CONFIG_FB_OMAP_BOOTLOADER_INIT
 	/* DISPC_CONTROL */
 	skip_init = 1;
-	if (omap_readl(0x48050440) & 1)	/* LCD enabled? */
-		skip_init = 1;
+	if (pdata->default_device->phy.dsi.xfer_mode
+		== OMAP_DSI_XFER_VIDEO_MODE)
+		skip_init = 0;
 #endif
 
 	r = dss_init(skip_init);
@@ -606,6 +608,7 @@ static int omap_dss_remove(struct platform_device *pdev)
 static void omap_dss_shutdown(struct platform_device *pdev)
 {
 	DSSDBG("shutdown\n");
+	dss_disable_all_devices();
 }
 
 static int omap_dss_suspend(struct platform_device *pdev, pm_message_t state)
@@ -909,7 +912,7 @@ static int __init omap_dss_init2(void)
 }
 
 core_initcall(omap_dss_init);
-device_initcall(omap_dss_init2);
+device_initcall_sync(omap_dss_init2);
 #endif
 
 MODULE_AUTHOR("Tomi Valkeinen <tomi.valkeinen@nokia.com>");

@@ -558,9 +558,7 @@ struct yaffs_DeviceStruct {
 
 	int useHeaderFileSize;	/* Flag to determine if we should use file sizes from the header */
 
-	int emptyLostAndFound;  /* Flasg to determine if lst+found should be
-				 * emptied on init
-				 */
+	int emptyLostAndFound;  /* Flasg to determine if lst+found should be emptied on init */
 
 	int useNANDECC;		/* Flag to decide whether or not to use NANDECC */
 

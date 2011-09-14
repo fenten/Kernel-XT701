@@ -15,9 +15,9 @@
 #include <linux/kernel.h>
 #include <linux/io.h>
 
-#include <mach/common.h>
-#include <mach/control.h>
-#include <mach/sdrc.h>
+#include <plat/common.h>
+#include <plat/control.h>
+#include <plat/sdrc.h>
 #include "cm-regbits-34xx.h"
 #include "prm-regbits-34xx.h"
 #include "cm.h"
@@ -188,7 +188,7 @@ void omap3_clear_scratchpad_contents(void)
 	u32 max_offset = OMAP343X_SCRATCHPAD_ROM_OFFSET;
 	u32 *v_addr;
 	u32 offset = 0;
-	v_addr = OMAP2_IO_ADDRESS(OMAP343X_SCRATCHPAD_ROM);
+	v_addr = OMAP2_L4_IO_ADDRESS(OMAP343X_SCRATCHPAD_ROM);
 	if (prm_read_mod_reg(OMAP3430_GR_MOD, OMAP3_PRM_RSTST_OFFSET) &
 		OMAP3430_GLOBAL_COLD_RST) {
 		for ( ; offset <= max_offset; offset += 0x4)
@@ -209,8 +209,7 @@ void omap3_save_scratchpad_contents(void)
 
 	/* Populate the Scratchpad contents */
 	scratchpad_contents.boot_config_ptr = 0x0;
-	if (omap_rev() != OMAP3430_REV_ES3_0 &&
-					omap_rev() != OMAP3430_REV_ES3_1)
+	if (omap_rev() < OMAP3430_REV_ES3_0)
 		scratchpad_contents.public_restore_ptr =
 			virt_to_phys(get_restore_pointer());
 	else
@@ -312,7 +311,7 @@ void omap3_save_scratchpad_contents(void)
 	arm_context_addr = virt_to_phys(omap3_arm_context);
 
 	/* Copy all the contents to the scratchpad location */
-	scratchpad_address = OMAP2_IO_ADDRESS(OMAP343X_SCRATCHPAD);
+	scratchpad_address = OMAP2_L4_IO_ADDRESS(OMAP343X_SCRATCHPAD);
 	memcpy_toio(scratchpad_address, &scratchpad_contents,
 		 sizeof(scratchpad_contents));
 	/* Scratchpad contents being 32 bits, a divide by 4 done here */

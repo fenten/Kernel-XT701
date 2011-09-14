@@ -32,7 +32,6 @@
 #define INTC_MIR_CLEAR0		0x0088
 #define INTC_MIR_SET0		0x008c
 #define INTC_PENDING_IRQ0	0x0098
-
 /* Number of IRQ state bits in each MIR register */
 #define IRQ_BITS_PER_REG	32
 
@@ -89,9 +88,9 @@ static int omap_check_spurious(unsigned int irq)
 	u32 sir, spurious;
 
 	sir = intc_bank_read_reg(&irq_banks[0], INTC_SIR);
-	spurious = sir >> 6;
+	spurious = sir >> 7;
 
-	if (spurious > 1) {
+	if (spurious) {
 		printk(KERN_WARNING "Spurious irq %i: 0x%08x, please flush "
 					"posted write for irq %i\n",
 					irq, sir, previous_irq);
@@ -150,7 +149,6 @@ static struct irq_chip omap_irq_chip = {
 	.ack	= omap_mask_ack_irq,
 	.mask	= omap_mask_irq,
 	.unmask	= omap_unmask_irq,
-	.disable = omap_mask_irq,
 };
 
 static void __init omap_irq_bank_init_one(struct omap_irq_bank *bank)
@@ -169,11 +167,8 @@ static void __init omap_irq_bank_init_one(struct omap_irq_bank *bank)
 	while (!(intc_bank_read_reg(bank, INTC_SYSSTATUS) & 0x1))
 		/* Wait for reset to complete */;
 
-	/*
-	 * Disable autoidle, intc appears to lockup when hammered (from cpuidle)
-	 * with PER-RET & CORE-ON state.
-	 */
-	intc_bank_write_reg(0, bank, INTC_SYSCONFIG);
+	/* Enable autoidle */
+	intc_bank_write_reg(1 << 0, bank, INTC_SYSCONFIG);
 }
 
 int omap_irq_pending(void)
@@ -184,15 +179,11 @@ int omap_irq_pending(void)
 		struct omap_irq_bank *bank = irq_banks + i;
 		int irq;
 
-		for (irq = 0; irq < bank->nr_irqs; irq += IRQ_BITS_PER_REG) {
-			int offset = irq & (~(IRQ_BITS_PER_REG - 1));
-
-			if (intc_bank_read_reg(bank, (INTC_PENDING_IRQ0 +
-						      offset)))
+		for (irq = 0; irq < bank->nr_irqs; irq += 32)
+			if (intc_bank_read_reg(bank, INTC_PENDING_IRQ0 +
+					       ((irq >> 5) << 5)))
 				return 1;
-		}
 	}
-
 	return 0;
 }
 
@@ -203,12 +194,20 @@ void __init omap_init_irq(void)
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(irq_banks); i++) {
+		unsigned long base;
 		struct omap_irq_bank *bank = irq_banks + i;
 
 		if (cpu_is_omap24xx())
-			bank->base_reg = OMAP2_IO_ADDRESS(OMAP24XX_IC_BASE);
+			base = OMAP24XX_IC_BASE;
 		else if (cpu_is_omap34xx())
-			bank->base_reg = OMAP2_IO_ADDRESS(OMAP34XX_IC_BASE);
+			base = OMAP34XX_IC_BASE;
+
+		/* Static mapping, never released */
+		bank->base_reg = ioremap(base, SZ_4K);
+		if (!bank->base_reg) {
+			printk(KERN_ERR "Could not ioremap irq bank%i\n", i);
+			continue;
+		}
 
 		omap_irq_bank_init_one(bank);
 
@@ -227,7 +226,7 @@ void __init omap_init_irq(void)
 }
 
 #ifdef CONFIG_ARCH_OMAP3
-void omap3_intc_save_context(void)
+void omap_intc_save_context(void)
 {
 	int ind = 0, i = 0;
 	for (ind = 0; ind < ARRAY_SIZE(irq_banks); ind++) {
@@ -250,7 +249,7 @@ void omap3_intc_save_context(void)
 	}
 }
 
-void omap3_intc_restore_context(void)
+void omap_intc_restore_context(void)
 {
 	int ind = 0, i = 0;
 
@@ -274,5 +273,23 @@ void omap3_intc_restore_context(void)
 				 &irq_banks[0], INTC_MIR0 + (0x20 * i));
 	}
 	/* MIRs are saved and restore with other PRCM registers */
+}
+
+void omap3_intc_suspend(void)
+{
+	/* A pending interrupt would prevent OMAP from entering suspend */
+	omap_ack_irq(0);
+}
+
+void omap3_intc_prepare_idle(void)
+{
+	/* Disable autoidle as it can stall interrupt controller */
+	intc_bank_write_reg(0, &irq_banks[0], INTC_SYSCONFIG);
+}
+
+void omap3_intc_resume_idle(void)
+{
+	/* Re-enable autoidle */
+	intc_bank_write_reg(1, &irq_banks[0], INTC_SYSCONFIG);
 }
 #endif /* CONFIG_ARCH_OMAP3 */

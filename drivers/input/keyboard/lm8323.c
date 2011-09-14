@@ -128,15 +128,16 @@
 
 struct lm8323_pwm {
 	int			id;
-	int			enabled;
 	int			fade_time;
 	int			brightness;
 	int			desired_brightness;
-	int			running;
+	bool			enabled;
+	bool			running;
 	/* pwm lock */
 	struct mutex		lock;
 	struct work_struct	work;
 	struct led_classdev	cdev;
+	struct lm8323_chip	*chip;
 };
 
 struct lm8323_chip {
@@ -145,18 +146,16 @@ struct lm8323_chip {
 	struct i2c_client	*client;
 	struct work_struct	work;
 	struct input_dev	*idev;
-	unsigned		kp_enabled:1;
-	unsigned		pm_suspend:1;
+	bool			kp_enabled;
+	bool			pm_suspend;
 	unsigned		keys_down;
 	char			phys[32];
-	s16			keymap[LM8323_KEYMAP_SIZE];
+	unsigned short		keymap[LM8323_KEYMAP_SIZE];
 	int			size_x;
 	int			size_y;
 	int			debounce_time;
 	int			active_time;
-	struct lm8323_pwm	pwm1;
-	struct lm8323_pwm	pwm2;
-	struct lm8323_pwm	pwm3;
+	struct lm8323_pwm	pwm[LM8323_NUM_PWMS];
 };
 
 #define client_to_lm8323(c)	container_of(c, struct lm8323_chip, client)
@@ -164,20 +163,6 @@ struct lm8323_chip {
 #define work_to_lm8323(w)	container_of(w, struct lm8323_chip, work)
 #define cdev_to_pwm(c)		container_of(c, struct lm8323_pwm, cdev)
 #define work_to_pwm(w)		container_of(w, struct lm8323_pwm, work)
-
-static struct lm8323_chip *pwm_to_lm8323(struct lm8323_pwm *pwm)
-{
-	switch (pwm->id) {
-	case 1:
-		return container_of(pwm, struct lm8323_chip, pwm1);
-	case 2:
-		return container_of(pwm, struct lm8323_chip, pwm2);
-	case 3:
-		return container_of(pwm, struct lm8323_chip, pwm3);
-	default:
-		return NULL;
-	}
-}
 
 #define LM8323_MAX_DATA 8
 
@@ -290,27 +275,24 @@ static void process_keys(struct lm8323_chip *lm)
 	}
 	key_fifo[ret] = 0;
 
-	while ((event = key_fifo[i])) {
+	while ((event = key_fifo[i++])) {
 		u8 key = lm8323_whichkey(event);
 		int isdown = lm8323_ispress(event);
-		s16 keycode = lm->keymap[key];
+		unsigned short keycode = lm->keymap[key];
 
-		if (likely(keycode > 0)) {
-			dev_vdbg(&lm->client->dev, "key 0x%02x %s\n", key,
-			      isdown ? "down" : "up");
-			if (likely(lm->kp_enabled)) {
-				input_report_key(lm->idev, keycode, isdown);
-				input_sync(lm->idev);
-			}
-			if (isdown)
-				lm->keys_down++;
-			else
-				lm->keys_down--;
-		} else {
-			dev_err(&lm->client->dev, "keycode 0x%02x not mapped "
-				"to any key\n", key);
+		dev_vdbg(&lm->client->dev, "key 0x%02x %s\n",
+			 key, isdown ? "down" : "up");
+
+		if (lm->kp_enabled) {
+			input_event(lm->idev, EV_MSC, MSC_SCAN, key);
+			input_report_key(lm->idev, keycode, isdown);
+			input_sync(lm->idev);
 		}
-		i++;
+
+		if (isdown)
+			lm->keys_down++;
+		else
+			lm->keys_down--;
 	}
 
 	/*
@@ -381,7 +363,7 @@ static int lm8323_configure(struct lm8323_chip *lm)
 static void pwm_done(struct lm8323_pwm *pwm)
 {
 	mutex_lock(&pwm->lock);
-	pwm->running = 0;
+	pwm->running = false;
 	if (pwm->desired_brightness != pwm->brightness)
 		schedule_work(&pwm->work);
 	mutex_unlock(&pwm->lock);
@@ -395,6 +377,7 @@ static void lm8323_work(struct work_struct *work)
 {
 	struct lm8323_chip *lm = work_to_lm8323(work);
 	u8 ints;
+	int i;
 
 	mutex_lock(&lm->lock);
 
@@ -414,17 +397,12 @@ static void lm8323_work(struct work_struct *work)
 						  "reinitialising\n");
 			lm8323_configure(lm);
 		}
-		if (ints & INT_PWM1) {
-			dev_vdbg(&lm->client->dev, "pwm1 engine completed\n");
-			pwm_done(&lm->pwm1);
-		}
-		if (ints & INT_PWM2) {
-			dev_vdbg(&lm->client->dev, "pwm2 engine completed\n");
-			pwm_done(&lm->pwm2);
-		}
-		if (ints & INT_PWM3) {
-			dev_vdbg(&lm->client->dev, "pwm3 engine completed\n");
-			pwm_done(&lm->pwm3);
+		for (i = 0; i < LM8323_NUM_PWMS; i++) {
+			if (ints & (1 << (INT_PWM1 + i))) {
+				dev_vdbg(&lm->client->dev,
+					 "pwm%d engine completed\n", i);
+				pwm_done(&lm->pwm[i]);
+			}
 		}
 	}
 
@@ -459,9 +437,7 @@ static int lm8323_read_id(struct lm8323_chip *lm, u8 *buf)
 
 static void lm8323_write_pwm_one(struct lm8323_pwm *pwm, int pos, u16 cmd)
 {
-	struct lm8323_chip *lm = pwm_to_lm8323(pwm);
-
-	lm8323_write(lm, 4, LM8323_CMD_PWM_WRITE, (pos << 2) | pwm->id,
+	lm8323_write(pwm->chip, 4, LM8323_CMD_PWM_WRITE, (pos << 2) | pwm->id,
 		     (cmd & 0xff00) >> 8, cmd & 0x00ff);
 }
 
@@ -474,15 +450,14 @@ static void lm8323_write_pwm_one(struct lm8323_pwm *pwm, int pos, u16 cmd)
 static void lm8323_write_pwm(struct lm8323_pwm *pwm, int kill,
 			     int len, const u16 *cmds)
 {
-	struct lm8323_chip *lm = pwm_to_lm8323(pwm);
 	int i;
 
 	for (i = 0; i < len; i++)
 		lm8323_write_pwm_one(pwm, i, cmds[i]);
 
 	lm8323_write_pwm_one(pwm, i++, PWM_END(kill));
-	lm8323_write(lm, 2, LM8323_CMD_START_PWM, pwm->id);
-	pwm->running = 1;
+	lm8323_write(pwm->chip, 2, LM8323_CMD_START_PWM, pwm->id);
+	pwm->running = true;
 }
 
 static void lm8323_pwm_work(struct work_struct *work)
@@ -500,10 +475,8 @@ static void lm8323_pwm_work(struct work_struct *work)
 	 * case we will be called again when the previous PWM script
 	 * finishes.
 	 */
-	if (pwm->running || pwm->desired_brightness == pwm->brightness) {
-		mutex_unlock(&pwm->lock);
-		return;
-	}
+	if (pwm->running || pwm->desired_brightness == pwm->brightness)
+		goto out;
 
 	kill = (pwm->desired_brightness == 0);
 	up = (pwm->desired_brightness > pwm->brightness);
@@ -537,8 +510,9 @@ static void lm8323_pwm_work(struct work_struct *work)
 	}
 
 	lm8323_write_pwm(pwm, kill, num_cmds, pwm_cmds);
-
 	pwm->brightness = pwm->desired_brightness;
+
+ out:
 	mutex_unlock(&pwm->lock);
 }
 
@@ -546,7 +520,7 @@ static void lm8323_pwm_set_brightness(struct led_classdev *led_cdev,
 				      enum led_brightness brightness)
 {
 	struct lm8323_pwm *pwm = cdev_to_pwm(led_cdev);
-	struct lm8323_chip *lm = pwm_to_lm8323(pwm);
+	struct lm8323_chip *lm = pwm->chip;
 
 	mutex_lock(&pwm->lock);
 	pwm->desired_brightness = brightness;
@@ -582,7 +556,7 @@ static ssize_t lm8323_pwm_store_time(struct device *dev,
 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
 	struct lm8323_pwm *pwm = cdev_to_pwm(led_cdev);
 	int ret;
-	int time;
+	unsigned long time;
 
 	ret = strict_strtoul(buf, 10, &time);
 	/* Numbers only, please. */
@@ -598,28 +572,22 @@ static DEVICE_ATTR(time, 0644, lm8323_pwm_show_time, lm8323_pwm_store_time);
 static int init_pwm(struct lm8323_chip *lm, int id, struct device *dev,
 		    const char *name)
 {
-	struct lm8323_pwm *pwm = NULL;
+	struct lm8323_pwm *pwm;
 
 	BUG_ON(id > 3);
 
-	switch (id) {
-	case 1:
-		pwm = &lm->pwm1;
-		break;
-	case 2:
-		pwm = &lm->pwm2;
-		break;
-	case 3:
-		pwm = &lm->pwm3;
-		break;
-	}
+	pwm = &lm->pwm[id - 1];
 
 	pwm->id = id;
 	pwm->fade_time = 0;
 	pwm->brightness = 0;
 	pwm->desired_brightness = 0;
-	pwm->running = 0;
+	pwm->running = false;
+	pwm->enabled = false;
+	INIT_WORK(&pwm->work, lm8323_pwm_work);
 	mutex_init(&pwm->lock);
+	pwm->chip = lm;
+
 	if (name) {
 		pwm->cdev.name = name;
 		pwm->cdev.brightness_set = lm8323_pwm_set_brightness;
@@ -628,15 +596,12 @@ static int init_pwm(struct lm8323_chip *lm, int id, struct device *dev,
 			return -1;
 		}
 		if (device_create_file(pwm->cdev.dev,
-					     &dev_attr_time) < 0) {
+					&dev_attr_time) < 0) {
 			dev_err(dev, "couldn't register time attribute\n");
 			led_classdev_unregister(&pwm->cdev);
 			return -1;
 		}
-		INIT_WORK(&pwm->work, lm8323_pwm_work);
-		pwm->enabled = 1;
-	} else {
-		pwm->enabled = 0;
+		pwm->enabled = true;
 	}
 
 	return 0;
@@ -658,7 +623,7 @@ static ssize_t lm8323_set_disable(struct device *dev,
 {
 	struct lm8323_chip *lm = dev_get_drvdata(dev);
 	int ret;
-	int i;
+	unsigned long i;
 
 	ret = strict_strtoul(buf, 10, &i);
 
@@ -670,47 +635,51 @@ static ssize_t lm8323_set_disable(struct device *dev,
 }
 static DEVICE_ATTR(disable_kp, 0644, lm8323_show_disable, lm8323_set_disable);
 
-static int lm8323_probe(struct i2c_client *client,
-		const struct i2c_device_id *id)
+static int __devinit lm8323_probe(struct i2c_client *client,
+				  const struct i2c_device_id *id)
 {
-	struct lm8323_platform_data *pdata;
+	struct lm8323_platform_data *pdata = client->dev.platform_data;
 	struct input_dev *idev;
 	struct lm8323_chip *lm;
-	int i, err = 0;
+	int i, err;
 	unsigned long tmo;
 	u8 data[2];
 
-	lm = kzalloc(sizeof *lm, GFP_KERNEL);
-	if (!lm)
-		return -ENOMEM;
-
-	i2c_set_clientdata(client, lm);
-	lm->client = client;
-	pdata = client->dev.platform_data;
 	if (!pdata || !pdata->size_x || !pdata->size_y) {
 		dev_err(&client->dev, "missing platform_data\n");
-		err = -EINVAL;
-		goto fail2;
+		return -EINVAL;
 	}
+
+	if (pdata->size_x > 8) {
+		dev_err(&client->dev, "invalid x size %d specified\n",
+			pdata->size_x);
+		return -EINVAL;
+	}
+
+	if (pdata->size_y > 12) {
+		dev_err(&client->dev, "invalid y size %d specified\n",
+			pdata->size_y);
+		return -EINVAL;
+	}
+
+	lm = kzalloc(sizeof *lm, GFP_KERNEL);
+	idev = input_allocate_device();
+	if (!lm || !idev) {
+		err = -ENOMEM;
+		goto fail1;
+	}
+
+	i2c_set_clientdata(client, lm);
+
+	lm->client = client;
+	lm->idev = idev;
+	mutex_init(&lm->lock);
+	INIT_WORK(&lm->work, lm8323_work);
 
 	lm->size_x = pdata->size_x;
-	if (lm->size_x > 8) {
-		dev_err(&client->dev, "invalid x size %d specified\n",
-				lm->size_x);
-		err = -EINVAL;
-		goto fail2;
-	}
-
 	lm->size_y = pdata->size_y;
-	if (lm->size_y > 12) {
-		dev_err(&client->dev, "invalid y size %d specified\n",
-				lm->size_y);
-		err = -EINVAL;
-		goto fail2;
-	}
-
 	dev_vdbg(&client->dev, "Keypad size: %d x %d\n",
-			lm->size_x, lm->size_y);
+		 lm->size_x, lm->size_y);
 
 	lm->debounce_time = pdata->debounce_time;
 	lm->active_time = pdata->active_time;
@@ -726,115 +695,100 @@ static int lm8323_probe(struct i2c_client *client,
 
 		if (time_after(jiffies, tmo)) {
 			dev_err(&client->dev,
-					"timeout waiting for initialisation\n");
+				"timeout waiting for initialisation\n");
 			break;
 		}
 
 		msleep(1);
 	}
+
 	lm8323_configure(lm);
 
 	/* If a true probe check the device */
 	if (lm8323_read_id(lm, data) != 0) {
 		dev_err(&client->dev, "device not found\n");
 		err = -ENODEV;
-		goto fail2;
+		goto fail1;
 	}
 
-	if (init_pwm(lm, 1, &client->dev, pdata->pwm1_name) < 0)
-		goto fail3;
-	if (init_pwm(lm, 2, &client->dev, pdata->pwm2_name) < 0)
-		goto fail4;
-	if (init_pwm(lm, 3, &client->dev, pdata->pwm3_name) < 0)
-		goto fail5;
+	for (i = 0; i < LM8323_NUM_PWMS; i++) {
+		err = init_pwm(lm, i + 1, &client->dev, pdata->pwm_names[i]);
+		if (err < 0)
+			goto fail2;
+	}
 
-	mutex_init(&lm->lock);
-	INIT_WORK(&lm->work, lm8323_work);
+	lm->kp_enabled = true;
+	err = device_create_file(&client->dev, &dev_attr_disable_kp);
+	if (err < 0)
+		goto fail2;
+
+	idev->name = pdata->name ? : "LM8323 keypad";
+	snprintf(lm->phys, sizeof(lm->phys),
+		 "%s/input-kp", dev_name(&client->dev));
+	idev->phys = lm->phys;
+
+	idev->evbit[0] = BIT(EV_KEY) | BIT(EV_MSC);
+	__set_bit(MSC_SCAN, idev->mscbit);
+	for (i = 0; i < LM8323_KEYMAP_SIZE; i++) {
+		__set_bit(pdata->keymap[i], idev->keybit);
+		lm->keymap[i] = pdata->keymap[i];
+	}
+	__clear_bit(KEY_RESERVED, idev->keybit);
+
+	if (pdata->repeat)
+		__set_bit(EV_REP, idev->evbit);
+
+	err = input_register_device(idev);
+	if (err) {
+		dev_dbg(&client->dev, "error registering input device\n");
+		goto fail3;
+	}
 
 	err = request_irq(client->irq, lm8323_irq,
 			  IRQF_TRIGGER_FALLING | IRQF_DISABLED,
 			  "lm8323", lm);
 	if (err) {
 		dev_err(&client->dev, "could not get IRQ %d\n", client->irq);
-		goto fail6;
+		goto fail4;
 	}
 
 	device_init_wakeup(&client->dev, 1);
 	enable_irq_wake(client->irq);
 
-	lm->kp_enabled = 1;
-	err = device_create_file(&client->dev, &dev_attr_disable_kp);
-	if (err < 0)
-		goto fail7;
-
-	idev = input_allocate_device();
-	if (!idev) {
-		err = -ENOMEM;
-		goto fail8;
-	}
-
-	if (pdata->name)
-		idev->name = pdata->name;
-	else
-		idev->name = "LM8323 keypad";
-	snprintf(lm->phys, sizeof(lm->phys), "%s/input-kp", client->dev.bus_id);
-	idev->phys = lm->phys;
-
-	lm->keys_down = 0;
-	idev->evbit[0] = BIT(EV_KEY);
-	for (i = 0; i < LM8323_KEYMAP_SIZE; i++) {
-		if (pdata->keymap[i] > 0)
-			__set_bit(pdata->keymap[i], idev->keybit);
-
-		lm->keymap[i] = pdata->keymap[i];
-	}
-
-	if (pdata->repeat)
-		__set_bit(EV_REP, idev->evbit);
-
-	lm->idev = idev;
-	err = input_register_device(idev);
-	if (err) {
-		dev_dbg(&client->dev, "error registering input device\n");
-		goto fail8;
-	}
-
 	return 0;
 
-fail8:
-	device_remove_file(&client->dev, &dev_attr_disable_kp);
-fail7:
-	free_irq(client->irq, lm);
-fail6:
-	if (lm->pwm3.enabled)
-		led_classdev_unregister(&lm->pwm3.cdev);
-fail5:
-	if (lm->pwm2.enabled)
-		led_classdev_unregister(&lm->pwm2.cdev);
 fail4:
-	if (lm->pwm1.enabled)
-		led_classdev_unregister(&lm->pwm1.cdev);
+	input_unregister_device(idev);
+	idev = NULL;
 fail3:
+	device_remove_file(&client->dev, &dev_attr_disable_kp);
 fail2:
+	while (--i >= 0)
+		if (lm->pwm[i].enabled)
+			led_classdev_unregister(&lm->pwm[i].cdev);
+fail1:
+	input_free_device(idev);
 	kfree(lm);
 	return err;
 }
 
-static int lm8323_remove(struct i2c_client *client)
+static int __devexit lm8323_remove(struct i2c_client *client)
 {
 	struct lm8323_chip *lm = i2c_get_clientdata(client);
+	int i;
 
 	disable_irq_wake(client->irq);
 	free_irq(client->irq, lm);
 	cancel_work_sync(&lm->work);
+
 	input_unregister_device(lm->idev);
+
 	device_remove_file(&lm->client->dev, &dev_attr_disable_kp);
-	if (lm->pwm3.enabled)
-		led_classdev_unregister(&lm->pwm3.cdev);
-	if (lm->pwm2.enabled)
-		led_classdev_unregister(&lm->pwm2.cdev);
-	if (lm->pwm1.enabled)
-		led_classdev_unregister(&lm->pwm1.cdev);
+
+	for (i = 0; i < 3; i++)
+		if (lm->pwm[i].enabled)
+			led_classdev_unregister(&lm->pwm[i].cdev);
+
 	kfree(lm);
 
 	return 0;
@@ -848,20 +802,18 @@ static int lm8323_remove(struct i2c_client *client)
 static int lm8323_suspend(struct i2c_client *client, pm_message_t mesg)
 {
 	struct lm8323_chip *lm = i2c_get_clientdata(client);
+	int i;
 
 	set_irq_wake(client->irq, 0);
 	disable_irq(client->irq);
 
 	mutex_lock(&lm->lock);
-	lm->pm_suspend = 1;
+	lm->pm_suspend = true;
 	mutex_unlock(&lm->lock);
 
-	if (lm->pwm1.enabled)
-		led_classdev_suspend(&lm->pwm1.cdev);
-	if (lm->pwm2.enabled)
-		led_classdev_suspend(&lm->pwm2.cdev);
-	if (lm->pwm3.enabled)
-		led_classdev_suspend(&lm->pwm3.cdev);
+	for (i = 0; i < 3; i++)
+		if (lm->pwm[i].enabled)
+			led_classdev_suspend(&lm->pwm[i].cdev);
 
 	return 0;
 }
@@ -869,17 +821,15 @@ static int lm8323_suspend(struct i2c_client *client, pm_message_t mesg)
 static int lm8323_resume(struct i2c_client *client)
 {
 	struct lm8323_chip *lm = i2c_get_clientdata(client);
+	int i;
 
 	mutex_lock(&lm->lock);
-	lm->pm_suspend = 0;
+	lm->pm_suspend = false;
 	mutex_unlock(&lm->lock);
 
-	if (lm->pwm1.enabled)
-		led_classdev_resume(&lm->pwm1.cdev);
-	if (lm->pwm2.enabled)
-		led_classdev_resume(&lm->pwm2.cdev);
-	if (lm->pwm3.enabled)
-		led_classdev_resume(&lm->pwm3.cdev);
+	for (i = 0; i < 3; i++)
+		if (lm->pwm[i].enabled)
+			led_classdev_resume(&lm->pwm[i].cdev);
 
 	enable_irq(client->irq);
 	set_irq_wake(client->irq, 1);
@@ -898,10 +848,10 @@ static const struct i2c_device_id lm8323_id[] = {
 
 static struct i2c_driver lm8323_i2c_driver = {
 	.driver = {
-		.name	 = "lm8323",
+		.name	= "lm8323",
 	},
 	.probe		= lm8323_probe,
-	.remove		= lm8323_remove,
+	.remove		= __devexit_p(lm8323_remove),
 	.suspend	= lm8323_suspend,
 	.resume		= lm8323_resume,
 	.id_table	= lm8323_id,

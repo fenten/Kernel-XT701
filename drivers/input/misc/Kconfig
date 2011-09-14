@@ -132,6 +132,17 @@ config INPUT_ATI_REMOTE2
 	  To compile this driver as a module, choose M here: the module will be
 	  called ati_remote2.
 
+config INPUT_KEYCHORD
+	tristate "Key chord input driver support"
+	help
+	  Say Y here if you want to enable the key chord driver
+	  accessible at /dev/keychord.  This driver can be used
+	  for receiving notifications when client specified key
+	  combinations are pressed.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called keychord.
+
 config INPUT_KEYSPAN_REMOTE
 	tristate "Keyspan DMR USB remote control (EXPERIMENTAL)"
 	depends on EXPERIMENTAL
@@ -222,6 +233,24 @@ config INPUT_SGI_BTNS
 	  To compile this driver as a module, choose M here: the
 	  module will be called sgi_btns.
 
+config INPUT_WINBOND_CIR
+	tristate "Winbond IR remote control"
+	depends on X86 && PNP
+	select NEW_LEDS
+	select LEDS_CLASS
+	select LEDS_TRIGGERS
+	select BITREVERSE
+	help
+	  Say Y here if you want to use the IR remote functionality found
+	  in some Winbond SuperI/O chips. Currently only the WPCD376I
+	  chip is supported (included in some Intel Media series motherboards).
+
+	  IR Receive and wake-on-IR from suspend and power-off is currently
+	  supported.
+
+	  To compile this driver as a module, choose M here: the module will be
+	  called winbond_cir.
+
 config INPUT_GPIO
 	tristate "GPIO driver support"
 	help
@@ -229,7 +258,7 @@ config INPUT_GPIO
 
 config HP_SDC_RTC
 	tristate "HP SDC Real Time Clock"
-	depends on GSC || HP300
+	depends on (GSC || HP300) && SERIO
 	select HP_SDC
 	help
 	  Say Y here if you want to support the built-in real time clock
@@ -242,41 +271,99 @@ config INPUT_PCF50633_PMU
 	 Say Y to include support for delivering  PMU events via  input
 	 layer on NXP PCF50633.
 
-config INPUT_KEYCHORD
-	tristate "Key chord input driver support"
+config INPUT_GPIO_ROTARY_ENCODER
+	tristate "Rotary encoders connected to GPIO pins"
+	depends on GPIOLIB && GENERIC_GPIO
 	help
-	  Say Y here if you want to enable the key chord driver
-	  accessible at /dev/keychord.  This driver can be used
-	  for receiving notifications when client specified key
-	  combinations are pressed.
+	  Say Y here to add support for rotary encoders connected to GPIO lines.
+	  Check file:Documentation/input/rotary-encoder.txt for more
+	  information.
 
 	  To compile this driver as a module, choose M here: the
-	  module will be called keychord.
+	  module will be called rotary_encoder.
 
-config INPUT_PROXIMITY_SFH7743
-	tristate "SFH7743 Proximity"
-	default n
+config INPUT_RB532_BUTTON
+	tristate "Mikrotik Routerboard 532 button interface"
+	depends on MIKROTIK_RB532
+	depends on GPIOLIB && GENERIC_GPIO
+	select INPUT_POLLDEV
 	help
-	  Say Y here if you wish to include the OSRAM SFH7743 proximity
-	  driver.
+	  Say Y here if you want support for the S1 button built into
+	  Mikrotik's Routerboard 532.
 
-	  If unsure, say N.
-	  To compile this driver a a module, choose M here.
+	  To compile this driver as a module, choose M here: the
+	  module will be called rb532_button.
+
+config INPUT_DM355EVM
+	tristate "TI DaVinci DM355 EVM Keypad and IR Remote"
+	depends on MFD_DM355EVM_MSP
+	help
+	  Supports the pushbuttons and IR remote used with
+	  the DM355 EVM board.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called dm355evm_keys.
+
+config INPUT_BFIN_ROTARY
+	tristate "Blackfin Rotary support"
+	depends on BF54x || BF52x
+	help
+	  Say Y here if you want to use the Blackfin Rotary.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called bfin-rotary.
+
+config INPUT_WM831X_ON
+	tristate "WM831X ON pin"
+	depends on MFD_WM831X
+	help
+	  Support the ON pin of WM831X PMICs as an input device
+	  reporting power button status.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called wm831x_on.
+
+config INPUT_PCAP
+	tristate "Motorola EZX PCAP misc input events"
+	depends on EZX_PCAP
+	help
+	  Say Y here if you want to use Power key and Headphone button
+	  on Motorola EZX phones.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called pcap_keys.
 
 config INPUT_HALLEFFECT_BU52014HV
 	tristate "BU52014HV Hall Effect Sensor"
-	default y
 	help
 	  Say Y here if you wish to include support for the BU52014HV hall
 	  effect sensor.
 
 	  If unsure, say N.
 
-config DISABLE_IRQ_WAKE_KPD
-	tristate "Disable IRQ wakeup on Keypad"
-	default y
+config INPUT_PROXIMITY_SFH7743
+	tristate "SFH7743 Proximity"
+	default n
 	help
-	  Say Y here if you wish not to let Keypad input wake up the phone
-	  from sleep state.
+ 	  Say Y here if you wish to include the OSRAM SFH7743 proximity
+	  driver.
+
+	  If unsure, say N.
+	  To compile this driver a a module, choose M here.
+
+config KEYBOARD_ADP5588
+	tristate "ADP5588 Keyboard"
+	default n
+	help
+	  ADP5588 Keyboard.
+
+config INPUT_ALS_IR_ISL29030
+	tristate "ISL29030 ALS & IR Sensor"
+	default n
+	help
+	  Say Y here if you wish to include support for the ISL29030 ALS
+	  and IR sensor.
+
+	  If unsure, say N.
 
 endif

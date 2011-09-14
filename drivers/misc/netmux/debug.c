@@ -1,7 +1,7 @@
 /******************************************************************************
  * NetMUX debug.c                                                             *
  *                                                                            *
- * Copyright (C) 2006-2007 Motorola, Inc.                                     *
+ * Copyright (C) 2006-2010 Motorola, Inc.                                     *
  *                                                                            *
  * Redistribution and use in source and binary forms, with or without         *
  * modification, are permitted provided that the following conditions are     *
@@ -34,6 +34,7 @@
  *   2006/09/28  Motorola    Initial version                                  *
  *   2007/05/01  Motorola    Change codes to ensure "shared" netmux           *
  *                           code is identical between AP and BP.             *
+ *   2010/04/28  Motorola    Format cleanup                                   *
  ******************************************************************************/
 
 /* debug.c provides functions that only get used when logging or debugging    */
@@ -57,52 +58,72 @@
  * Returns:
  * int32 -- the same value as code
  */
-int32 debug_error (sint8* function, sint8* file, int32 line, int32 code)
+int32 debug_error(sint8 *function, sint8 *file, int32 line, int32 code)
 {
-    switch(code)
-    {
-        case ERROR_NONE:
-        {
-            DEBUG("%s returned SUCCESS [%lu] at %s:%lu\n", function, code, file, line);
-        }break;
+	switch (code) {
+	case ERROR_NONE:
+		{
+			DEBUG
+			("%s returned SUCCESS [%lu] at %s:%lu\n",
+			function, code, file, line);
+		}
+		break;
 
-        case ERROR_INVALIDPARAMETER:
-        {
-            DEBUG("%s returned ERROR_INVALIDPARAMETER [%lu] at %s:%lu\n", function, code, file, line);
-        }break;
+	case ERROR_INVALIDPARAMETER:
+		{
+			DEBUG
+			("%s returned ERROR_INVALIDPARAMETER [%lu] at %s:%lu\n",
+			function, code, file, line);
+		}
+		break;
 
-        case ERROR_MEMORY:
-        {
-            DEBUG("%s returned ERROR_MEMORY [%lu] at %s:%lu\n", function, code, file, line);
-        }break;
+	case ERROR_MEMORY:
+		{
+			DEBUG
+			("%s returned ERROR_MEMORY [%lu] at %s:%lu\n",
+			function, code, file, line);
+		}
+		break;
 
-        case ERROR_OPERATIONFAILED:
-        {
-            DEBUG("%s returned ERROR_OPERATIONFAILED [%lu] at %s:%lu\n", function, code, file, line);
-        }break;
+	case ERROR_OPERATIONFAILED:
+		{
+			DEBUG
+			("%s returned ERROR_OPERATIONFAILED [%lu] at %s:%lu\n",
+			function, code, file, line);
+		}
+		break;
 
-        case ERROR_OPERATIONRESTRICTED:
-        {
-            DEBUG("%s returned ERROR_OPERATIONRESTRICTED [%lu] at %s:%lu\n", function, code, file, line);
-        }break;
+	case ERROR_OPERATIONRESTRICTED:
+		{
+			DEBUG
+			("%s returned ERROR_OPERATIONRESTRICTED  \
+			[%lu] at %s:%lu\n", function, code, file, line);
+		}
+		break;
 
-        case ERROR_INCOMPLETE:
-        {
-            DEBUG("%s returned ERROR_INCOMPLETE [%lu] at %s:%lu\n", function, code, file, line);
-        }break;
+	case ERROR_INCOMPLETE:
+		{
+			DEBUG
+			("%s returned ERROR_INCOMPLETE [%lu] at %s:%lu\n",
+			function, code, file, line);
+		}
+		break;
 
-        default:
-        {
-            DEBUG("%s returned UNKNOWN ERROR [%lu] at %s:%lu\n", function, code, file, line);
-        }break;
-    }
+	default:
+		{
+			DEBUG
+			("%s returned UNKNOWN ERROR [%lu] at %s:%lu\n",
+			function, code, file, line);
+		}
+		break;
+	}
 
-    return code;
+	return code;
 }
 
 /*
- * debug_ldp provides a mechanism to record the result of an error in 
- * the linkdriver protocol. This function is generally called at the 
+ * debug_ldp provides a mechanism to record the result of an error in
+ * the linkdriver protocol. This function is generally called at the
  * return of a function to assist in debugging any function failures.
  *
  * Params:
@@ -114,31 +135,41 @@ int32 debug_error (sint8* function, sint8* file, int32 line, int32 code)
  * Returns:
  * int32 -- the same value as code
  */
-int32 debug_ldp (sint8* function, sint8* file, int32 line, int32 code)
+int32 debug_ldp(sint8 *function, sint8 *file, int32 line, int32 code)
 {
-    switch(code)
-    {
-        case LDP_ERROR_NONE:
-        {
-            DEBUG("%s returned SUCCESS [%lu] at %s:%lu\n", function, code, file, line);
-        }break;
+	switch (code) {
+	case LDP_ERROR_NONE:
+		{
+			DEBUG
+			("%s returned SUCCESS [%lu] at %s:%lu\n",
+			function, code, file, line);
+		}
+		break;
 
-        case LDP_ERROR_FATAL:
-        {
-            DEBUG("%s returned LDP_ERROR_FATAL  [%lu] at %s:%lu\n", function, code, file, line);
-        }break;
+	case LDP_ERROR_FATAL:
+		{
+			DEBUG
+			("%s returned LDP_ERROR_FATAL [%lu] at %s:%lu\n",
+			function, code, file, line);
+		}
+		break;
 
-        case LDP_ERROR_RECOVERABLE:
-        {
-            DEBUG("%s returned LDP_ERROR_RECOVERABLE [%lu] at %s:%lu\n", function, code, file, line);
-        }break;
+	case LDP_ERROR_RECOVERABLE:
+		{
+			DEBUG
+			("%s returned LDP_ERROR_RECOVERABLE [%lu] at %s:%lu\n",
+			function, code, file, line);
+		}
+		break;
 
-        default:
-        {
-            DEBUG("%s returned UNKNOWN ERROR [%lu] at %s:%lu\n", function, code, file, line);
-        }break;
-    }
+	default:
+		{
+			DEBUG
+			("%s returned UNKNOWN ERROR [%lu] at %s:%lu\n",
+			function, code, file, line);
+		}
+		break;
+	}
 
-    return code;
+	return code;
 }
-

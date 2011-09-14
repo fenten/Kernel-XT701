@@ -34,6 +34,7 @@
 #include <asm/processor.h>
 #include <asm/system.h>
 #include <asm/thread_notify.h>
+#include <asm/stacktrace.h>
 #include <asm/mach/time.h>
 
 static const char *processor_modes[] = {
@@ -50,10 +51,6 @@ static const char *isa_modes[] = {
 extern void setup_mm_for_reboot(char mode);
 
 static volatile int hlt_counter;
-
-#ifdef CONFIG_NON_NESTED_FIQ
-static fiq_handler_t fiq_handler;
-#endif
 
 #include <mach/system.h>
 
@@ -86,7 +83,7 @@ static int __init hlt_setup(char *__unused)
 __setup("nohlt", nohlt_setup);
 __setup("hlt", hlt_setup);
 
-void arm_machine_restart(char mode)
+void arm_machine_restart(char mode, const char *cmd)
 {
 	/*
 	 * Clean and disable cache, and turn off interrupts
@@ -103,7 +100,7 @@ void arm_machine_restart(char mode)
 	/*
 	 * Now call the architecture specific reboot code.
 	 */
-	arch_reset(mode);
+	arch_reset(mode, cmd);
 
 	/*
 	 * Whoops - the architecture was unable to reboot.
@@ -117,13 +114,10 @@ void arm_machine_restart(char mode)
 /*
  * Function pointers to optional machine specific functions
  */
-void (*pm_idle)(void);
-EXPORT_SYMBOL(pm_idle);
-
 void (*pm_power_off)(void);
 EXPORT_SYMBOL(pm_power_off);
 
-void (*arm_pm_restart)(char str) = arm_machine_restart;
+void (*arm_pm_restart)(char str, const char *cmd) = arm_machine_restart;
 EXPORT_SYMBOL_GPL(arm_pm_restart);
 
 
@@ -133,20 +127,19 @@ EXPORT_SYMBOL_GPL(arm_pm_restart);
  */
 static void default_idle(void)
 {
-	if (hlt_counter)
-		cpu_relax();
-	else {
-		local_irq_disable();
-		if (!need_resched())
-			arch_idle();
-		local_irq_enable();
-	}
+	if (!need_resched())
+		arch_idle();
+	local_irq_enable();
 }
 
+void (*pm_idle)(void) = default_idle;
+EXPORT_SYMBOL(pm_idle);
+
 /*
- * The idle thread.  We try to conserve power, while trying to keep
- * overall latency low.  The architecture specific idle is passed
- * a value to indicate the level of "idleness" of the system.
+ * The idle thread, has rather strange semantics for calling pm_idle,
+ * but this is what x86 does and we need to do the same, so that
+ * things like cpuidle get called in the same way.  The only difference
+ * is that we always respect 'hlt_counter' to prevent low power idle.
  */
 void cpu_idle(void)
 {
@@ -154,21 +147,31 @@ void cpu_idle(void)
 
 	/* endless idle loop with no priority at all */
 	while (1) {
-		void (*idle)(void) = pm_idle;
-
+		tick_nohz_stop_sched_tick(1);
+		leds_event(led_idle_start);
+		while (!need_resched()) {
 #ifdef CONFIG_HOTPLUG_CPU
-		if (cpu_is_offline(smp_processor_id())) {
-			leds_event(led_idle_start);
-			cpu_die();
-		}
+			if (cpu_is_offline(smp_processor_id()))
+				cpu_die();
 #endif
 
-		if (!idle)
-			idle = default_idle;
-		leds_event(led_idle_start);
-		tick_nohz_stop_sched_tick(1);
-		while (!need_resched())
-			idle();
+			local_irq_disable();
+			if (hlt_counter) {
+				local_irq_enable();
+				cpu_relax();
+			} else {
+				stop_critical_timings();
+				pm_idle();
+				start_critical_timings();
+				/*
+				 * This will eventually be removed - pm_idle
+				 * functions should always return with IRQs
+				 * enabled.
+				 */
+				WARN_ON(irqs_disabled());
+				local_irq_enable();
+			}
+		}
 		leds_event(led_idle_end);
 		tick_nohz_restart_sched_tick();
 		preempt_enable_no_resched();
@@ -198,48 +201,10 @@ void machine_power_off(void)
 		pm_power_off();
 }
 
-void machine_restart(char * __unused)
+void machine_restart(char *cmd)
 {
-	arm_pm_restart(reboot_mode);
+	arm_pm_restart(reboot_mode, cmd);
 }
-
-#ifdef CONFIG_NON_NESTED_FIQ
-void set_fiq_handler(fiq_handler_t ufiq_handler)
-{
-	fiq_handler = ufiq_handler;
-}
-EXPORT_SYMBOL(set_fiq_handler);
-
-static int __emergency_fiq_action(struct pt_regs *regs)
-{
-	if (NULL == (void *)fiq_handler)
-		return -EINVAL;
-
-	fiq_handler(regs);
-
-	return 0;
-}
-asmlinkage void __exception asm_do_FIQ(struct pt_regs* regs)
-{
-	__emergency_fiq_action(regs);
-}
-
-int disable_abort;
-#define safe_probe_kernel_address(addr, retval) \
-	({			\
-		long val;	\
-		disable_abort = 1;	\
-		asm volatile("mrc p15, 0, %0, c5, c0, 0" : "=r" (val));	\
-		val &= ~0xF;						\
-		asm volatile("mcr p15, 0, %0, c5, c0, 0" : : "r" (val));\
-		barrier();						\
-		retval = *addr;						\
-		asm volatile("mrc p15, 0, %0, c5, c0, 0" : "=r" (val));	\
-		disable_abort = 0;					\
-		barrier();						\
-		(val & 0x8);						\
-	})
-#endif
 
 /*
  * dump a block of kernel memory from around the given address
@@ -276,11 +241,7 @@ static void show_data(unsigned long addr, int nbytes, const char *name)
 		printk("%04lx ", (unsigned long)p & 0xffff);
 		for (j = 0; j < 8; j++) {
 			u32	data;
-#ifndef CONFIG_NON_NESTED_FIQ
 			if (probe_kernel_address(p, data)) {
-#else
-			if (safe_probe_kernel_address(p, data)) {
-#endif
 				printk(" ********");
 			} else {
 				printk(" %08x", data);
@@ -440,6 +401,15 @@ copy_thread(unsigned long clone_flags, unsigned long stack_start,
 }
 
 /*
+ * Fill in the task's elfregs structure for a core dump.
+ */
+int dump_task_regs(struct task_struct *t, elf_gregset_t *elfregs)
+{
+	elf_core_copy_regs(elfregs, task_pt_regs(t));
+	return 1;
+}
+
+/*
  * fill in the fpe structure for a core dump...
  */
 int dump_fpu (struct pt_regs *regs, struct user_fp *fp)
@@ -453,16 +423,6 @@ int dump_fpu (struct pt_regs *regs, struct user_fp *fp)
 	return used_math != 0;
 }
 EXPORT_SYMBOL(dump_fpu);
-
-/*
- * Capture the user space registers if the task is not running (in user space)
- */
-int dump_task_regs(struct task_struct *tsk, elf_gregset_t *regs)
-{
-	struct pt_regs ptregs = *task_pt_regs(tsk);
-	elf_core_copy_regs(regs, &ptregs);
-	return 1;
-}
 
 /*
  * Shuffle the argument into the correct register before calling the
@@ -480,6 +440,23 @@ asm(	".section .text\n"
 "	.size	kernel_thread_helper, . - kernel_thread_helper\n"
 "	.previous");
 
+#ifdef CONFIG_ARM_UNWIND
+extern void kernel_thread_exit(long code);
+asm(	".section .text\n"
+"	.align\n"
+"	.type	kernel_thread_exit, #function\n"
+"kernel_thread_exit:\n"
+"	.fnstart\n"
+"	.cantunwind\n"
+"	bl	do_exit\n"
+"	nop\n"
+"	.fnend\n"
+"	.size	kernel_thread_exit, . - kernel_thread_exit\n"
+"	.previous");
+#else
+#define kernel_thread_exit	do_exit
+#endif
+
 /*
  * Create a kernel thread.
  */
@@ -491,9 +468,9 @@ pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
 
 	regs.ARM_r1 = (unsigned long)arg;
 	regs.ARM_r2 = (unsigned long)fn;
-	regs.ARM_r3 = (unsigned long)do_exit;
+	regs.ARM_r3 = (unsigned long)kernel_thread_exit;
 	regs.ARM_pc = (unsigned long)kernel_thread_helper;
-	regs.ARM_cpsr = SVC_MODE;
+	regs.ARM_cpsr = SVC_MODE | PSR_ENDSTATE | PSR_ISETSTATE;
 
 	return do_fork(flags|CLONE_VM|CLONE_UNTRACED, 0, &regs, 0, NULL, NULL);
 }
@@ -501,23 +478,21 @@ EXPORT_SYMBOL(kernel_thread);
 
 unsigned long get_wchan(struct task_struct *p)
 {
-	unsigned long fp, lr;
-	unsigned long stack_start, stack_end;
+	struct stackframe frame;
 	int count = 0;
 	if (!p || p == current || p->state == TASK_RUNNING)
 		return 0;
 
-	stack_start = (unsigned long)end_of_stack(p);
-	stack_end = (unsigned long)task_stack_page(p) + THREAD_SIZE;
-
-	fp = thread_saved_fp(p);
+	frame.fp = thread_saved_fp(p);
+	frame.sp = thread_saved_sp(p);
+	frame.lr = 0;			/* recovered from the stack */
+	frame.pc = thread_saved_pc(p);
 	do {
-		if (fp < stack_start || fp > stack_end)
+		int ret = unwind_frame(&frame);
+		if (ret < 0)
 			return 0;
-		lr = ((unsigned long *)fp)[-1];
-		if (!in_sched_functions(lr))
-			return lr;
-		fp = *(unsigned long *) (fp - 12);
+		if (!in_sched_functions(frame.pc))
+			return frame.pc;
 	} while (count ++ < 16);
 	return 0;
 }

@@ -125,8 +125,10 @@ struct usb_function {
 	void			(*suspend)(struct usb_function *);
 	void			(*resume)(struct usb_function *);
 
+	/* private: */
 	/* internals */
 	struct list_head		list;
+	struct device			*dev;
 };
 
 int usb_add_function(struct usb_configuration *, struct usb_function *);
@@ -220,6 +222,7 @@ struct usb_configuration {
 
 	struct usb_composite_dev	*cdev;
 
+	/* private: */
 	/* internals */
 	struct list_head	list;
 	struct list_head	functions;
@@ -245,6 +248,10 @@ int usb_add_config(struct usb_composite_dev *,
  *	value; it should return zero on successful initialization.
  * @unbind: Reverses @bind(); called as a side effect of unregistering
  *	this driver.
+ * @suspend: Notifies when the host stops sending USB traffic,
+ *	after function notifications
+ * @resume: Notifies configuration when the host restarts USB traffic,
+ *	before function notifications
  *
  * Devices default to reporting self powered operation.  Devices which rely
  * on bus powered operation should report this in their @bind() method.
@@ -262,6 +269,9 @@ struct usb_composite_driver {
 	const struct usb_device_descriptor	*dev;
 	struct usb_gadget_strings		**strings;
 
+	struct class		*class;
+	atomic_t		function_count;
+
 	/* REVISIT:  bind() functions can be marked __init, which
 	 * makes trouble for section mismatch analysis.  See if
 	 * we can't restructure things to avoid mismatching...
@@ -269,6 +279,12 @@ struct usb_composite_driver {
 
 	int			(*bind)(struct usb_composite_dev *);
 	int			(*unbind)(struct usb_composite_dev *);
+
+	/* global suspend hooks */
+	void			(*suspend)(struct usb_composite_dev *);
+	void			(*resume)(struct usb_composite_dev *);
+
+	void			(*enable_function)(struct usb_function *f, int enable);
 };
 
 extern int usb_composite_register(struct usb_composite_driver *);
@@ -314,6 +330,7 @@ struct usb_composite_dev {
 
 	struct usb_configuration	*config;
 
+	/* private: */
 	/* internals */
 	struct usb_device_descriptor	desc;
 	struct list_head		configs;

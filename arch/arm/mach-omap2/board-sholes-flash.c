@@ -37,10 +37,10 @@
 #include <linux/io.h>
 
 #include <asm/mach/flash.h>
-#include <mach/onenand.h>
-#include <mach/board.h>
-#include <mach/gpmc.h>
-#include <mach/nand.h>
+//#include <mach/onenand.h>
+#include <plat/board.h>
+#include <plat/gpmc.h>
+#include <plat/nand.h>
 
 #ifdef CONFIG_MOT_FEAT_MEM_TIMING_API
 #include "board-sholes-timing.h"
@@ -48,6 +48,8 @@
 
 #define NUM_GPMC_SUPPORTED_FREQ     2
 #define NAND_GPMC_CS                0
+#define GPMC_CS0_BASE  0x60
+#define GPMC_CS_SIZE   0x30
 
 #if defined(CONFIG_OMAP3_PM)
 /*

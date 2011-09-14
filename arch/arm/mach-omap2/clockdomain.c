@@ -22,19 +22,20 @@
 #include <linux/delay.h>
 #include <linux/clk.h>
 #include <linux/limits.h>
+#include <linux/err.h>
 
 #include <linux/io.h>
 
 #include <linux/bitops.h>
 
-#include <mach/clock.h>
+#include <plat/clock.h>
 
 #include "prm.h"
 #include "prm-regbits-24xx.h"
 #include "cm.h"
 
-#include <mach/powerdomain.h>
-#include <mach/clockdomain.h>
+#include <plat/powerdomain.h>
+#include <plat/clockdomain.h>
 
 /* clkdm_list contains all registered struct clockdomains */
 static LIST_HEAD(clkdm_list);
@@ -73,14 +74,11 @@ static void _autodep_lookup(struct clkdm_pwrdm_autodep *autodep)
 
 	pwrdm = pwrdm_lookup(autodep->pwrdm.name);
 	if (!pwrdm) {
-		pr_debug("clockdomain: _autodep_lookup: powerdomain %s "
-			 "does not exist\n", autodep->pwrdm.name);
-		WARN_ON(1);
-		return;
+		pr_err("clockdomain: autodeps: powerdomain %s does not exist\n",
+			 autodep->pwrdm.name);
+		pwrdm = ERR_PTR(-ENOENT);
 	}
 	autodep->pwrdm.ptr = pwrdm;
-
-	return;
 }
 
 /*
@@ -96,6 +94,9 @@ static void _clkdm_add_autodeps(struct clockdomain *clkdm)
 	struct clkdm_pwrdm_autodep *autodep;
 
 	for (autodep = autodeps; autodep->pwrdm.ptr; autodep++) {
+		if (IS_ERR(autodep->pwrdm.ptr))
+			continue;
+
 		if (!omap_chip_is(autodep->omap_chip))
 			continue;
 
@@ -121,6 +122,9 @@ static void _clkdm_del_autodeps(struct clockdomain *clkdm)
 	struct clkdm_pwrdm_autodep *autodep;
 
 	for (autodep = autodeps; autodep->pwrdm.ptr; autodep++) {
+		if (IS_ERR(autodep->pwrdm.ptr))
+			continue;
+
 		if (!omap_chip_is(autodep->omap_chip))
 			continue;
 
@@ -133,6 +137,36 @@ static void _clkdm_del_autodeps(struct clockdomain *clkdm)
 	}
 }
 
+/*
+ * _omap2_clkdm_set_hwsup - set the hwsup idle transition bit
+ * @clkdm: struct clockdomain *
+ * @enable: int 0 to disable, 1 to enable
+ *
+ * Internal helper for actually switching the bit that controls hwsup
+ * idle transitions for clkdm.
+ */
+static void _omap2_clkdm_set_hwsup(struct clockdomain *clkdm, int enable)
+{
+	u32 v;
+
+	if (cpu_is_omap24xx()) {
+		if (enable)
+			v = OMAP24XX_CLKSTCTRL_ENABLE_AUTO;
+		else
+			v = OMAP24XX_CLKSTCTRL_DISABLE_AUTO;
+	} else if (cpu_is_omap34xx()) {
+		if (enable)
+			v = OMAP34XX_CLKSTCTRL_ENABLE_AUTO;
+		else
+			v = OMAP34XX_CLKSTCTRL_DISABLE_AUTO;
+	} else {
+		BUG();
+	}
+
+	cm_rmw_mod_reg_bits(clkdm->clktrctrl_mask,
+			    v << __ffs(clkdm->clktrctrl_mask),
+			    clkdm->pwrdm.ptr->prcm_offs, CM_CLKSTCTRL);
+}
 
 static struct clockdomain *_clkdm_lookup(const char *name)
 {
@@ -204,8 +238,8 @@ int clkdm_register(struct clockdomain *clkdm)
 
 	pwrdm = pwrdm_lookup(clkdm->pwrdm.name);
 	if (!pwrdm) {
-		pr_debug("clockdomain: clkdm_register %s: powerdomain %s "
-			 "does not exist\n", clkdm->name, clkdm->pwrdm.name);
+		pr_err("clockdomain: %s: powerdomain %s does not exist\n",
+			clkdm->name, clkdm->pwrdm.name);
 		return -EINVAL;
 	}
 	clkdm->pwrdm.ptr = pwrdm;
@@ -215,7 +249,7 @@ int clkdm_register(struct clockdomain *clkdm)
 	if (_clkdm_lookup(clkdm->name)) {
 		ret = -EEXIST;
 		goto cr_unlock;
-	};
+	}
 
 	list_add(&clkdm->node, &clkdm_list);
 
@@ -452,8 +486,6 @@ int omap2_clkdm_wakeup(struct clockdomain *clkdm)
  */
 void omap2_clkdm_allow_idle(struct clockdomain *clkdm)
 {
-	u32 v;
-
 	if (!clkdm)
 		return;
 
@@ -469,18 +501,7 @@ void omap2_clkdm_allow_idle(struct clockdomain *clkdm)
 	if (atomic_read(&clkdm->usecount) > 0)
 		_clkdm_add_autodeps(clkdm);
 
-	if (cpu_is_omap24xx())
-		v = OMAP24XX_CLKSTCTRL_ENABLE_AUTO;
-	else if (cpu_is_omap34xx())
-		v = OMAP34XX_CLKSTCTRL_ENABLE_AUTO;
-	else
-		BUG();
-
-
-	cm_rmw_mod_reg_bits(clkdm->clktrctrl_mask,
-			    v << __ffs(clkdm->clktrctrl_mask),
-			    clkdm->pwrdm.ptr->prcm_offs,
-			    CM_CLKSTCTRL);
+	_omap2_clkdm_set_hwsup(clkdm, 1);
 
 	pwrdm_clkdm_state_switch(clkdm);
 }
@@ -496,8 +517,6 @@ void omap2_clkdm_allow_idle(struct clockdomain *clkdm)
  */
 void omap2_clkdm_deny_idle(struct clockdomain *clkdm)
 {
-	u32 v;
-
 	if (!clkdm)
 		return;
 
@@ -510,16 +529,7 @@ void omap2_clkdm_deny_idle(struct clockdomain *clkdm)
 	pr_debug("clockdomain: disabling automatic idle transitions for %s\n",
 		 clkdm->name);
 
-	if (cpu_is_omap24xx())
-		v = OMAP24XX_CLKSTCTRL_DISABLE_AUTO;
-	else if (cpu_is_omap34xx())
-		v = OMAP34XX_CLKSTCTRL_DISABLE_AUTO;
-	else
-		BUG();
-
-	cm_rmw_mod_reg_bits(clkdm->clktrctrl_mask,
-			    v << __ffs(clkdm->clktrctrl_mask),
-			    clkdm->pwrdm.ptr->prcm_offs, CM_CLKSTCTRL);
+	_omap2_clkdm_set_hwsup(clkdm, 0);
 
 	if (atomic_read(&clkdm->usecount) > 0)
 		_clkdm_del_autodeps(clkdm);
@@ -565,10 +575,14 @@ int omap2_clkdm_clk_enable(struct clockdomain *clkdm, struct clk *clk)
 	v = omap2_clkdm_clktrctrl_read(clkdm);
 
 	if ((cpu_is_omap34xx() && v == OMAP34XX_CLKSTCTRL_ENABLE_AUTO) ||
-	    (cpu_is_omap24xx() && v == OMAP24XX_CLKSTCTRL_ENABLE_AUTO))
+	    (cpu_is_omap24xx() && v == OMAP24XX_CLKSTCTRL_ENABLE_AUTO)) {
+		/* Disable HW transitions when we are changing deps */
+		_omap2_clkdm_set_hwsup(clkdm, 0);
 		_clkdm_add_autodeps(clkdm);
-	else
+		_omap2_clkdm_set_hwsup(clkdm, 1);
+	} else {
 		omap2_clkdm_wakeup(clkdm);
+	}
 
 	pwrdm_wait_transition(clkdm->pwrdm.ptr);
 	pwrdm_clkdm_state_switch(clkdm);
@@ -619,10 +633,14 @@ int omap2_clkdm_clk_disable(struct clockdomain *clkdm, struct clk *clk)
 	v = omap2_clkdm_clktrctrl_read(clkdm);
 
 	if ((cpu_is_omap34xx() && v == OMAP34XX_CLKSTCTRL_ENABLE_AUTO) ||
-	    (cpu_is_omap24xx() && v == OMAP24XX_CLKSTCTRL_ENABLE_AUTO))
+	    (cpu_is_omap24xx() && v == OMAP24XX_CLKSTCTRL_ENABLE_AUTO)) {
+		/* Disable HW transitions when we are changing deps */
+		_omap2_clkdm_set_hwsup(clkdm, 0);
 		_clkdm_del_autodeps(clkdm);
-	else
+		_omap2_clkdm_set_hwsup(clkdm, 1);
+	} else {
 		omap2_clkdm_sleep(clkdm);
+	}
 
 	pwrdm_clkdm_state_switch(clkdm);
 

@@ -33,8 +33,8 @@
 #include <mach/hardware.h>
 #include <asm/mach/map.h>
 
-#include <mach/board.h>
-#include <mach/sram.h>
+#include <plat/board.h>
+#include <plat/sram.h>
 
 #if defined(CONFIG_FB_OMAP) || defined(CONFIG_FB_OMAP_MODULE)
 
@@ -355,6 +355,16 @@ static inline int omap_init_fb(void)
 
 arch_initcall(omap_init_fb);
 
+void omapfb_reserve_sdram(void) {}
+unsigned long omapfb_reserve_sram(unsigned long sram_pstart,
+				  unsigned long sram_vstart,
+				  unsigned long sram_size,
+				  unsigned long start_avail,
+				  unsigned long size_avail)
+{
+	return 0;
+}
+
 #else
 
 void omapfb_reserve_sdram(void) {}
@@ -366,6 +376,5 @@ unsigned long omapfb_reserve_sram(unsigned long sram_pstart,
 {
 	return 0;
 }
-
 
 #endif

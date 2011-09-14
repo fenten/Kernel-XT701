@@ -18,7 +18,6 @@
 #include <linux/usb/serial.h>
 #include <linux/io.h>
 #include <mach/io.h>
-#include "../host/ehci-omap.h"
 
 static struct usb_device_id id_table[] = {
 	{USB_DEVICE_AND_INTERFACE_INFO(0x22b8, 0x2a63, 0x0a, 0, 0)},
@@ -33,6 +32,9 @@ MODULE_DEVICE_TABLE(usb, id_table);
  * so that, host iclk will not be disabled and BP
  * can re-enumerated on AP
  */
+#define OMAP_UHH_SYSCONFIG                              (0x48064010)
+#define OMAP_UHH_SYSCONFIG_AUTOIDLE_SHIFT    0
+
 static void omap_flashqsc_disable_uhh_smart_idle(void)
 {
 	u32 sysconfig;

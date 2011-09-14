@@ -1,7 +1,7 @@
 /******************************************************************************
  * NetMUX network.c                                                           *
  *                                                                            *
- * Copyright (C) Motorola 2006-2008                                           *
+ * Copyright (C) 2006-2010 Motorola, Inc.                                     *
  *                                                                            *
  * Redistribution and use in source and binary forms, with or without         *
  * modification, are permitted provided that the following conditions are     *
@@ -38,6 +38,8 @@
  *   2008/07/09  Motorola    upmerge to kernel 2.6.24 for TI 23.5             *
  *   2009/04/27  Motorola    Increment receive/transmit packet number         *
  *   2009/07/23  Motorola    Add wake lock functionality                      *
+ *   2009/10/05  Motorola    Support IPv6                                     *
+ *   2010/04/28  Motorola    Format cleanup                                   *
  ******************************************************************************/
 
 /* network.c defines an interface between a NetMUX and the Linux networking   */
@@ -49,6 +51,7 @@
 #include "config.h"
 #include "debug.h"
 #include <linux/wakelock.h>
+#include <linux/ip.h>
 
 extern struct wake_lock netmux_send_wakelock;
 
@@ -83,188 +86,247 @@ extern struct wake_lock netmux_send_wakelock;
  * param1 -- a custom pointer, in this case an INTERFACEINFORM struct
  * param2 -- a custom pointer, in this case a NETWORKINTERFACE struct
  */
-int32 NetworkInform (void* param1, void* param2)
+int32 NetworkInform(void *param1, void *param2)
 {
-    NETWORKINTERFACE*     network;
-    NETWORKDEVICE*        netdev;
-    NETWORKDEVICE**       priv_netdev;
-    INTERFACEINFORM*      informdata;
-    CONFIGPACKET*         configpacket;
-    ENABLECHANNEL_PACKET* enablechannel;
-    COMMBUFF*             transmit;
-    int32                 channel_count;
-    int32                 channel;
-    int32                 type;
-    int32                 result;
+	NETWORKINTERFACE *network;
+	NETWORKDEVICE *netdev;
+	NETWORKDEVICE **priv_netdev;
+	INTERFACEINFORM *informdata;
+	CONFIGPACKET *configpacket;
+	ENABLECHANNEL_PACKET *enablechannel;
+	COMMBUFF *transmit;
+	int32 channel_count;
+	int32 channel;
+	int32 type;
+	int32 result;
 
-    DEBUG("NetworkInform(0x%p, 0x%p)\n", param1, param2);
+	DEBUG("NetworkInform(0x%p, 0x%p)\n", param1, param2);
 
-    informdata = (INTERFACEINFORM*)param1;
-    network    = (NETWORKINTERFACE*)param2;
+	informdata = (INTERFACEINFORM *) param1;
+	network = (NETWORKINTERFACE *) param2;
 
-    switch(informdata->inform_type)
-    {
-        case INFORM_INTERFACE_CONFIGPACKET:
-        {
-            channel = ((CONFIGPACKET*)informdata->data)->channel;
+	switch (informdata->inform_type) {
+	case INFORM_INTERFACE_CONFIGPACKET:
+		{
+			channel =
+			    ((CONFIGPACKET *) informdata->data)->channel;
 
-            if(channel > network->channel_max || channel < network->channel_min)
-                return DEBUGERROR(ERROR_INVALIDPARAMETER);
+			if (channel > network->channel_max
+			    || channel < network->channel_min)
+				return DEBUGERROR(ERROR_INVALIDPARAMETER);
 
-            netdev       = &network->netdevs[channel-network->channel_min];
-            configpacket = (CONFIGPACKET*)informdata->data;
+			netdev =
+			    &network->netdevs[channel -
+					      network->channel_min];
+			configpacket = (CONFIGPACKET *) informdata->data;
 
-            netdev->netint           = network;
-            netdev->channel          = channel;
-            netdev->client_interface = configpacket->host_interface;
-            netdev->burstsize        = configpacket->client_burstsize;
-            netdev->maxdata          = configpacket->client_maxdata;
-            netdev->host_byte_credit = configpacket->client_byte_credit;
-            netdev->host_send_credit = configpacket->client_send_credit;
-            netdev->netdevice        = alloc_netdev(sizeof(struct NETWORKDEVICE*), configpacket->channel_name, NetworkInit);
-	    netdev->data_amount      = 0;
-	    netdev->mux_channel_queue_space = configpacket->client_maxdata;
+			netdev->netint = network;
+			netdev->channel = channel;
+			netdev->client_interface =
+			    configpacket->host_interface;
+			netdev->burstsize = configpacket->client_burstsize;
+			netdev->maxdata = configpacket->client_maxdata;
+			netdev->host_byte_credit =
+			    configpacket->client_byte_credit;
+			netdev->host_send_credit =
+			    configpacket->client_send_credit;
+			netdev->netdevice =
+			    alloc_netdev(sizeof(struct NETWORKDEVICE *),
+					 configpacket->channel_name,
+					 NetworkInit);
+			netdev->data_amount = 0;
+			netdev->mux_channel_queue_space =
+			    configpacket->client_maxdata;
 
-            priv_netdev = netdev_priv(netdev->netdevice);
-            *priv_netdev = netdev;
-            memset(&netdev->stats, 0, sizeof(struct net_device_stats));
+			priv_netdev = netdev_priv(netdev->netdevice);
+			*priv_netdev = netdev;
+			memset(&netdev->stats, 0,
+			       sizeof(struct net_device_stats));
 
-            init_waitqueue_head(&netdev->event_wait);
-            initialize_commbuff_queue(&netdev->process_queue);
-            
-            result = register_netdev(netdev->netdevice);
-            if(result)
-            {
-                netdev->state = NETWORK_STATE_DEFAULT;
-                destroy_commbuff_queue(&netdev->process_queue);
+			init_waitqueue_head(&netdev->event_wait);
+			initialize_commbuff_queue(&netdev->process_queue);
 
-                return DEBUGERROR(ERROR_INVALIDPARAMETER);
-            }
+			result = register_netdev(netdev->netdevice);
+			if (result) {
+				netdev->state = NETWORK_STATE_DEFAULT;
+				destroy_commbuff_queue(&netdev->
+						       process_queue);
 
-            netdev->state = NETWORK_STATE_CONFIGURED;
-        }break;
+				return DEBUGERROR(ERROR_INVALIDPARAMETER);
+			}
 
-        case INFORM_INTERFACE_DISABLEMUX:
-        {
-            channel_count = network->channel_max-network->channel_min+1;
-            for(channel = 0; channel < channel_count; channel++)
-            {
-                if(network->netdevs[channel].state)
-                {
-                    wake_up_interruptible(&network->netdevs[channel].event_wait);
+			netdev->state = NETWORK_STATE_CONFIGURED;
+		}
+		break;
 
-                    NetworkClose(network->netdevs[channel].netdevice);
+	case INFORM_INTERFACE_DISABLEMUX:
+		{
+			channel_count =
+			    network->channel_max - network->channel_min +
+			    1;
+			for (channel = 0; channel < channel_count;
+			     channel++) {
+				if (network->netdevs[channel].state) {
+					wake_up_interruptible(&network->
+							      netdevs
+							      [channel].
+							      event_wait);
 
-                    unregister_netdev(network->netdevs[channel].netdevice);
-                }
-            }
-        }break;
+					NetworkClose(network->
+						     netdevs[channel].
+						     netdevice);
 
-        case INFORM_INTERFACE_ENABLECHANNEL:
-        {
-            enablechannel = (ENABLECHANNEL_PACKET*)informdata->data;
-            type          = strip_end(enablechannel->acktype);
+					unregister_netdev(network->
+							  netdevs[channel].
+							  netdevice);
+				}
+			}
+		}
+		break;
 
-            if(type == COMMAND)
-            {
-                EnableChannel(
-                              client_end(FAILURE),
-                              enablechannel->channel,
-                              0,
-                              0,
-                              enablechannel->host_interface,
-                              enablechannel->client_interface,
-                              0,
-                              0,
-                              0,
-                              0,
-                              network->mux
-                             );
-            }
-            else if(type == SUCCESS)
-            {
-                channel = enablechannel->channel;
-                netdev  = &network->netdevs[channel-network->channel_min];
+	case INFORM_INTERFACE_ENABLECHANNEL:
+		{
+			enablechannel =
+			    (ENABLECHANNEL_PACKET *) informdata->data;
+			type = strip_end(enablechannel->acktype);
 
-                netdev->state = NETWORK_STATE_CONNECTED|NETWORK_STATE_EVENT;
+			if (type == COMMAND) {
+				EnableChannel(client_end(FAILURE),
+					      enablechannel->channel,
+					      0,
+					      0,
+					      enablechannel->
+					      host_interface,
+					      enablechannel->
+					      client_interface, 0, 0, 0, 0,
+					      network->mux);
+			} else if (type == SUCCESS) {
+				channel = enablechannel->channel;
+				netdev =
+				    &network->netdevs[channel -
+						      network->
+						      channel_min];
 
-                wake_up_interruptible(&netdev->event_wait);
-            }
-            else if(type == FAILURE)
-            {
-                channel = enablechannel->channel;
-                netdev  = &network->netdevs[channel-network->channel_min];
+				netdev->state =
+				    NETWORK_STATE_CONNECTED |
+				    NETWORK_STATE_EVENT;
 
-                netdev->state |= NETWORK_STATE_EVENT;
+				wake_up_interruptible(&netdev->event_wait);
+			} else if (type == FAILURE) {
+				channel = enablechannel->channel;
+				netdev =
+				    &network->netdevs[channel -
+						      network->
+						      channel_min];
 
-                wake_up_interruptible(&netdev->event_wait);
-            }
-        }break;
+				netdev->state |= NETWORK_STATE_EVENT;
 
-        case INFORM_INTERFACE_DISABLECHANNEL:
-        {
-            channel = ((DISABLECHANNEL_PACKET*)informdata->data)->channel;
+				wake_up_interruptible(&netdev->event_wait);
+			}
+		}
+		break;
 
-            NetworkClose(network->netdevs[channel-network->channel_min].netdevice);
-        }break;
+	case INFORM_INTERFACE_DISABLECHANNEL:
+		{
+			channel =
+			    ((DISABLECHANNEL_PACKET *) informdata->data)->
+			    channel;
 
-        case INFORM_INTERFACE_PREPSEND:
-        {
-            for(channel = 0; channel < network->channel_max-network->channel_min+1; channel++)
-            {
-                netdev = &network->netdevs[channel];
+			NetworkClose(network->
+				     netdevs[channel -
+					     network->channel_min].
+				     netdevice);
+		}
+		break;
 
-                enter_write_criticalsection(&network->lock);
+	case INFORM_INTERFACE_PREPSEND:
+		{
+			for (channel = 0;
+			     channel <
+			     network->channel_max - network->channel_min +
+			     1; channel++) {
+				netdev = &network->netdevs[channel];
 
-                if(netdev->state&NETWORK_STATE_CONNECTED && queue_length(&netdev->process_queue))
-                {
-                    do
-                    {
-                        transmit = dequeue_commbuff(&netdev->process_queue);
-			netdev->data_amount -= commbuff_length(transmit);
-			netdev->mux_channel_queue_space -= commbuff_length(transmit);
+				enter_write_criticalsection(&network->
+							    lock);
 
-                        result = SendData(channel+network->channel_min,
-                                          transmit,
-                                          NULL,
-                                          network->mux);
-                    }while(result == ERROR_NONE && queue_length(&netdev->process_queue));
+				if (netdev->state & NETWORK_STATE_CONNECTED
+				    && queue_length(&netdev->
+						    process_queue)) {
+					do {
+						transmit =
+						    dequeue_commbuff
+						    (&netdev->
+						     process_queue);
+						netdev->data_amount -=
+						    commbuff_length
+						    (transmit);
+						netdev->
+						    mux_channel_queue_space
+						    -=
+						    commbuff_length
+						    (transmit);
 
-                    if(result != ERROR_NONE)
-		    {
-                        queuefront_commbuff(transmit, &netdev->process_queue);
-			netdev->data_amount += commbuff_length(transmit);
-			netdev->mux_channel_queue_space += commbuff_length(transmit);
-                    }
-                }
+						result =
+						    SendData(channel +
+							     network->
+							     channel_min,
+							     transmit,
+							     NULL,
+							     network->mux);
+					} while (result == ERROR_NONE
+						 && queue_length(&netdev->
+							 process_queue));
 
-                exit_write_criticalsection(&network->lock);
-            }
-        }break;
+					if (result != ERROR_NONE) {
+						queuefront_commbuff
+						    (transmit,
+						     &netdev->
+						     process_queue);
+						netdev->data_amount +=
+						    commbuff_length
+						    (transmit);
+						netdev->
+						    mux_channel_queue_space
+						    +=
+						    commbuff_length
+						    (transmit);
+					}
+				}
 
-        case INFORM_INTERFACE_DATA:
-        {
-            channel = (int32)informdata->data;
-	    result = SendDataAvailable(channel, network->mux);
+				exit_write_criticalsection(&network->lock);
+			}
+		}
+		break;
 
-            enter_write_criticalsection(&network->lock);
+	case INFORM_INTERFACE_DATA:
+		{
+			channel = (int32) informdata->data;
+			result = SendDataAvailable(channel, network->mux);
 
-            netdev  = &network->netdevs[channel-network->channel_min];
-	    netdev->mux_channel_queue_space = result;
+			enter_write_criticalsection(&network->lock);
 
-            exit_write_criticalsection(&network->lock);
+			netdev =
+			    &network->netdevs[channel -
+					      network->channel_min];
+			netdev->mux_channel_queue_space = result;
 
-	    netif_wake_queue(netdev->netdevice);
+			exit_write_criticalsection(&network->lock);
 
-            if(netdev->state&NETWORK_STATE_CONNECTED && queue_length(&netdev->process_queue))
-                RunSend(network->mux);
+			netif_wake_queue(netdev->netdevice);
 
-        }break;
+			if (netdev->state & NETWORK_STATE_CONNECTED
+			    && queue_length(&netdev->process_queue))
+				RunSend(network->mux);
 
-        default:break;
-    }
+		}
+		break;
 
-    return DEBUGERROR(ERROR_NONE);
+	default:
+		break;
+	}
+
+	return DEBUGERROR(ERROR_NONE);
 }
 
 /*
@@ -277,39 +339,49 @@ int32 NetworkInform (void* param1, void* param2)
  * commbuff -- a pointer to the received data
  * param -- a custom pointer, in this case an INTERFACEINFORM struct
  */
-int32 NetworkReceive (COMMBUFF* commbuff, void* param)
+int32 NetworkReceive(COMMBUFF *commbuff, void *param)
 {
-    INTERFACEINFORM*  inform_data;
-    NETWORKINTERFACE* netint;
-    int32             channel;
+	INTERFACEINFORM *inform_data;
+	NETWORKINTERFACE *netint;
+	int32 channel;
+	struct iphdr *iph;
 
-    DEBUG("NetworkReceive(0x%p, 0x%p)\n", commbuff, param);
+	DEBUG("NetworkReceive(0x%p, 0x%p)\n", commbuff, param);
 
-    inform_data = (INTERFACEINFORM*)param;
+	inform_data = (INTERFACEINFORM *) param;
 
-    netint  = (NETWORKINTERFACE*)inform_data->inform_type;
-    channel = (int32)inform_data->data;
+	netint = (NETWORKINTERFACE *) inform_data->inform_type;
+	channel = (int32) inform_data->data;
 
-    commbuff->dev = netint->netdevs[channel-netint->channel_min].netdevice;
-    commbuff->protocol  = htons(ETH_P_IP);
-    commbuff->ip_summed = CHECKSUM_NONE;
-    commbuff->pkt_type  = PACKET_HOST;
-    commbuff->mac_header = commbuff->data;
+	commbuff->dev =
+	    netint->netdevs[channel - netint->channel_min].netdevice;
+	commbuff->ip_summed = CHECKSUM_NONE;
+	commbuff->pkt_type = PACKET_HOST;
+	commbuff->mac_header = commbuff->data;
+	/*Strip off MAC Header */
+	skb_pull(commbuff, commbuff->dev->hard_header_len);
+	/* Point to Network Layer Header */
+	iph = (struct iphdr *) commbuff->data;
+	/*Determine IP ver. Type  */
+	commbuff->protocol = (iph->version == 6) ?
+	    htons(ETH_P_IPV6) : htons(ETH_P_IP);
 
-    LOGCOMMBUFF_CH(channel, "NetworkReceive()-->", commbuff, commbuff_length(commbuff));
+	LOGCOMMBUFF_CH(channel, "NetworkReceive()-->", commbuff,
+		       commbuff_length(commbuff));
 
-    netint->netdevs[channel-netint->channel_min].stats.rx_bytes += commbuff_length(commbuff);
-    netint->netdevs[channel-netint->channel_min].stats.rx_packets++;
+	netint->netdevs[channel - netint->channel_min].stats.rx_bytes +=
+	    commbuff_length(commbuff);
+	netint->netdevs[channel - netint->channel_min].stats.rx_packets++;
 
-    /*
-     * To fix the behavior of a subpar kernel, we must call the commbuff
-     * destructor here, otherwise the Linux network stack overwrites
-     * the destructor on us.
-     */
-    detag_commbuff(commbuff);
-    netif_rx(commbuff);
+	/*
+	 * To fix the behavior of a subpar kernel, we must call the commbuff
+	 * destructor here, otherwise the Linux network stack overwrites
+	 * the destructor on us.
+	 */
+	detag_commbuff(commbuff);
+	netif_rx(commbuff);
 
-    return DEBUGERROR(ERROR_NONE);
+	return DEBUGERROR(ERROR_NONE);
 }
 
 /*
@@ -320,56 +392,64 @@ int32 NetworkReceive (COMMBUFF* commbuff, void* param)
  *
  * Params:
  * name -- the name of the interface
- * channel_min -- the inclusive lower bound of channel numbers assigned to the interface
- * channel_max -- the inclusive upper bound of channel numbers assigned to the interface
+ * channel_min -- the inclusive lower bound of channel numbers
+ * 	assigned to the interface
+ * channel_max -- the inclusive upper bound of channel numbers
+ *  	assigned to the interface
  * mux -- the mux object this interface is associated with
  * netint -- a pointer to a pointer to receive the newly created object
  */
-int32 CreateNetworkInterface (sint8* name, int32 channel_min, int32 channel_max, MUX* mux, NETWORKINTERFACE** netint)
+int32 CreateNetworkInterface(sint8 *name, int32 channel_min,
+			     int32 channel_max, MUX *mux,
+			     NETWORKINTERFACE **netint)
 {
-    NETWORKINTERFACE* newnetint;
-    int32             size;
-    int32             result;
+	NETWORKINTERFACE *newnetint;
+	int32 size;
+	int32 result;
 
-    DEBUG("CreateNetworkInterface(0x%p, %lu, %lu, 0x%p, 0x%p)\n", name, channel_min, channel_max, mux, netint);
+	DEBUG("CreateNetworkInterface(0x%p, %lu, %lu, 0x%p, 0x%p)\n", name,
+	      channel_min, channel_max, mux, netint);
 
-    if(!name || !mux || !netint)
-        return DEBUGERROR(ERROR_INVALIDPARAMETER);
+	if (!name || !mux || !netint)
+		return DEBUGERROR(ERROR_INVALIDPARAMETER);
 
-    if(channel_min > channel_max)
-        return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
+	if (channel_min > channel_max)
+		return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
 
-    if(channel_max >= mux->maxchannels)
-        return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
+	if (channel_max >= mux->maxchannels)
+		return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
 
-    if(strlen(name) >= PACKET_MAXNAME_LENGTH)
-        return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
+	if (strlen(name) >= PACKET_MAXNAME_LENGTH)
+		return DEBUGERROR(ERROR_OPERATIONRESTRICTED);
 
-    newnetint          = (NETWORKINTERFACE*)alloc_mem(sizeof(NETWORKINTERFACE));
-    size               = (channel_max-channel_min+1)*sizeof(NETWORKDEVICE);
-    newnetint->netdevs = (NETWORKDEVICE*)alloc_mem(size);
+	newnetint =
+	    (NETWORKINTERFACE *) alloc_mem(sizeof(NETWORKINTERFACE));
+	size = (channel_max - channel_min + 1) * sizeof(NETWORKDEVICE);
+	newnetint->netdevs = (NETWORKDEVICE *) alloc_mem(size);
 
-    memset(newnetint->netdevs, 0, size);
+	memset(newnetint->netdevs, 0, size);
 
-    newnetint->channel_max = channel_max;
-    newnetint->channel_min = channel_min;
-    newnetint->mux         = mux;
+	newnetint->channel_max = channel_max;
+	newnetint->channel_min = channel_min;
+	newnetint->mux = mux;
 
-    result = RegisterInterface(name, &NetworkInform, &NetworkReceive, (int32)newnetint, mux->interface_lib);
-    if(result != ERROR_NONE)
-    {
-        free_mem(newnetint->netdevs);
-        free_mem(newnetint);
+	result =
+	    RegisterInterface(name, &NetworkInform, &NetworkReceive,
+			      (int32) newnetint, mux->interface_lib);
+	if (result != ERROR_NONE) {
+		free_mem(newnetint->netdevs);
+		free_mem(newnetint);
 
-        return DEBUGERROR(result);
-    }
+		return DEBUGERROR(result);
+	}
 
-    QueryInterfaceIndex(name, mux->interface_lib, &newnetint->host_interface);
-    initialize_criticalsection_lock(&newnetint->lock);
+	QueryInterfaceIndex(name, mux->interface_lib,
+			    &newnetint->host_interface);
+	initialize_criticalsection_lock(&newnetint->lock);
 
-    *netint = newnetint;
+	*netint = newnetint;
 
-    return DEBUGERROR(ERROR_NONE);
+	return DEBUGERROR(ERROR_NONE);
 }
 
 /*
@@ -379,34 +459,43 @@ int32 CreateNetworkInterface (sint8* name, int32 channel_min, int32 channel_max,
  * Params:
  * netint -- the interface to be destroyed
  */
-int32 DestroyNetworkInterface (NETWORKINTERFACE* netint)
+int32 DestroyNetworkInterface(NETWORKINTERFACE *netint)
 {
-    int32 channel;
-    int32 channel_count;
+	int32 channel;
+	int32 channel_count;
 
-    DEBUG("DestroyNetworkInterface(0x%p)\n", netint);
+	DEBUG("DestroyNetworkInterface(0x%p)\n", netint);
 
-    channel_count = netint->channel_max-netint->channel_min+1;
-    for(channel = 0; channel < channel_count; channel++)
-    {
-        if(netint->netdevs[channel].state)
-        {
-            NetworkClose(netint->netdevs[channel].netdevice);
+	channel_count = netint->channel_max - netint->channel_min + 1;
+	for (channel = 0; channel < channel_count; channel++) {
+		if (netint->netdevs[channel].state) {
+			NetworkClose(netint->netdevs[channel].netdevice);
 
-            destroy_commbuff_queue(&netint->netdevs[channel].process_queue);
-            unregister_netdev(netint->netdevs[channel].netdevice);
-            free_netdev(netint->netdevs[channel].netdevice);
-        }
-    }
+			destroy_commbuff_queue(&netint->netdevs[channel].
+					       process_queue);
+			unregister_netdev(netint->netdevs[channel].
+					  netdevice);
+			free_netdev(netint->netdevs[channel].netdevice);
+		}
+	}
 
-    UnregisterInterface(netint->host_interface, netint->mux->interface_lib);
-    destroy_criticalsection_lock(&netint->lock);
+	UnregisterInterface(netint->host_interface,
+			    netint->mux->interface_lib);
+	destroy_criticalsection_lock(&netint->lock);
 
-    free_mem(netint->netdevs);
-    free_mem(netint);
+	free_mem(netint->netdevs);
+	free_mem(netint);
 
-    return DEBUGERROR(ERROR_NONE);
+	return DEBUGERROR(ERROR_NONE);
 }
+
+static const struct net_device_ops netmux_netdev_ops = {
+	.ndo_open = NetworkOpen,
+	.ndo_stop = NetworkClose,
+	.ndo_start_xmit = NetworkTransmit,
+	.ndo_get_stats = NetworkStats,
+};
+
 
 /*
  * NetworkInit is called by the linux whenever a network interface
@@ -417,21 +506,17 @@ int32 DestroyNetworkInterface (NETWORKINTERFACE* netint)
  * Params:
  * netdev -- structure to store the method of communication
  */
-void NetworkInit (struct net_device* netdev)
+void NetworkInit(struct net_device *netdev)
 {
-    DEBUG("NetworkInit(0x%p)\n", netdev);
+	DEBUG("NetworkInit(0x%p)\n", netdev);
 
-    netdev->hard_header_len = 0;
-    netdev->addr_len        = 0;
-    netdev->mtu             = 1500;
-    netdev->tx_queue_len    = 1000; /* determine appropriate value */
-    netdev->open            = &NetworkOpen;
-    netdev->stop            = &NetworkClose;
-    netdev->hard_start_xmit = &NetworkTransmit;
-    netdev->get_stats       = &NetworkStats;
-
-    netdev->flags             = IFF_NOARP;
-    netdev->type              = ARPHRD_NONE;
+	netdev->hard_header_len = 0;
+	netdev->addr_len = 0;
+	netdev->mtu = 1500;
+	netdev->tx_queue_len = 1000;	/* determine appropriate value */
+	netdev->netdev_ops = &netmux_netdev_ops;
+	netdev->flags = IFF_NOARP;
+	netdev->type = ARPHRD_NONE;
 }
 
 /*
@@ -442,51 +527,50 @@ void NetworkInit (struct net_device* netdev)
  * Params:
  * netdev -- a pointer to a net device
  */
-int NetworkOpen (struct net_device* netdev)
+int NetworkOpen(struct net_device *netdev)
 {
-    NETWORKDEVICE*     device;
-    NETWORKDEVICE**    priv_netdev;
-    int32              result;
+	NETWORKDEVICE *device;
+	NETWORKDEVICE **priv_netdev;
+	int32 result;
 
-    DEBUG("NetworkOpen(0x%p)\n", netdev);
+	DEBUG("NetworkOpen(0x%p)\n", netdev);
 
-    priv_netdev = netdev_priv(netdev);
-    device = *priv_netdev;
+	priv_netdev = netdev_priv(netdev);
+	device = *priv_netdev;
 
-    if(!(device->state&NETWORK_STATE_CONFIGURED))
-        return -EADDRNOTAVAIL;
+	if (!(device->state & NETWORK_STATE_CONFIGURED))
+		return -EADDRNOTAVAIL;
 
-    result = EnableChannel(host_end(COMMAND),
-                           device->channel,
-                           device->burstsize,
-                           device->maxdata,
-                           device->netint->host_interface,
-                           device->client_interface,
-                           device->host_byte_credit,
-                           device->host_send_credit,
-                           0,
-                           0,
-                           device->netint->mux);
+	result = EnableChannel(host_end(COMMAND),
+			       device->channel,
+			       device->burstsize,
+			       device->maxdata,
+			       device->netint->host_interface,
+			       device->client_interface,
+			       device->host_byte_credit,
+			       device->host_send_credit,
+			       0, 0, device->netint->mux);
 
-    if(result != ERROR_NONE)
-        return -ECONNABORTED;
+	if (result != ERROR_NONE)
+		return -ECONNABORTED;
 
-    /* Wake up when either one of two conditions occur:
-       1 - A response is received from the BP for our open request.
-       2 - The channel is not configured and running properly.
-       In case the latter is true an error will be returned eventually. */
-    wait_event_interruptible(device->event_wait,
-                            (device->state&NETWORK_STATE_EVENT) ||
-                            !(device->state&NETWORK_STATE_CONFIGURED));
+	/* Wake up when either one of two conditions occur:
+	   1 - A response is received from the BP for our open request.
+	   2 - The channel is not configured and running properly.
+	   In case the latter is true an error will be returned eventually. */
+	wait_event_interruptible(device->event_wait,
+				 (device->state & NETWORK_STATE_EVENT) ||
+				 !(device->
+				   state & NETWORK_STATE_CONFIGURED));
 
-    device->state &= ~NETWORK_STATE_EVENT;
+	device->state &= ~NETWORK_STATE_EVENT;
 
-    if(!(device->state&NETWORK_STATE_CONNECTED))
-        return -ECONNREFUSED;
+	if (!(device->state & NETWORK_STATE_CONNECTED))
+		return -ECONNREFUSED;
 
-    netif_start_queue(netdev);
+	netif_start_queue(netdev);
 
-    return 0;
+	return 0;
 }
 
 /*
@@ -497,38 +581,40 @@ int NetworkOpen (struct net_device* netdev)
  * Params:
  * netdev -- a pointer to a net device
  */
-int NetworkClose (struct net_device* netdev)
+int NetworkClose(struct net_device *netdev)
 {
-    NETWORKDEVICE** priv_netdev;
-    NETWORKDEVICE* device;
-    int32          result;
+	NETWORKDEVICE **priv_netdev;
+	NETWORKDEVICE *device;
+	int32 result;
 
-    DEBUG("NetworkClose(0x%p)\n", netdev);
+	DEBUG("NetworkClose(0x%p)\n", netdev);
 
-    priv_netdev = netdev_priv(netdev);
-    device = *priv_netdev;
+	priv_netdev = netdev_priv(netdev);
+	device = *priv_netdev;
 
-    if(device->state&NETWORK_STATE_CONNECTED)
-    {
-        result = DisableChannel(host_end(COMMAND), device->channel, device->netint->host_interface, device->client_interface, device->netint->mux);
-        if(result != ERROR_NONE)
-            return -EPIPE;
+	if (device->state & NETWORK_STATE_CONNECTED) {
+		result =
+		    DisableChannel(host_end(COMMAND), device->channel,
+				   device->netint->host_interface,
+				   device->client_interface,
+				   device->netint->mux);
+		if (result != ERROR_NONE)
+			return -EPIPE;
 
-        enter_write_criticalsection(&device->netint->lock);
+		enter_write_criticalsection(&device->netint->lock);
 
-        device->state = NETWORK_STATE_CONFIGURED;
-        empty_commbuff_queue(&device->process_queue);
-	device->data_amount = 0;
-	device->mux_channel_queue_space = device->maxdata;
+		device->state = NETWORK_STATE_CONFIGURED;
+		empty_commbuff_queue(&device->process_queue);
+		device->data_amount = 0;
+		device->mux_channel_queue_space = device->maxdata;
 
-        exit_write_criticalsection(&device->netint->lock);
-    }
-    else
-        return -ENOTCONN;
+		exit_write_criticalsection(&device->netint->lock);
+	} else
+		return -ENOTCONN;
 
-    netif_stop_queue(netdev);
+	netif_stop_queue(netdev);
 
-    return 0;
+	return 0;
 }
 
 /*
@@ -540,51 +626,53 @@ int NetworkClose (struct net_device* netdev)
  * commbuff -- the data to be sent
  * netdev -- the device to send the data on
  */
-int NetworkTransmit (COMMBUFF* commbuff, struct net_device* netdev)
+int NetworkTransmit(COMMBUFF *commbuff, struct net_device *netdev)
 {
-    NETWORKDEVICE** priv_netdev;
-    NETWORKDEVICE* device;
-    int32 length = commbuff_length(commbuff);
+	NETWORKDEVICE **priv_netdev;
+	NETWORKDEVICE *device;
+	int32 length = commbuff_length(commbuff);
 
-    DEBUG("NetworkTransmit(0x%p, 0x%p)\n", commbuff, netdev);
+	DEBUG("NetworkTransmit(0x%p, 0x%p)\n", commbuff, netdev);
 
-    /* Acquire NM_send wakelock */
-    DEBUG("Acquire netmux_send_wakelock\n");
-    wake_lock(&netmux_send_wakelock);
+	/* Acquire NM_send wakelock */
+	DEBUG("Acquire netmux_send_wakelock\n");
+	wake_lock(&netmux_send_wakelock);
 
-    priv_netdev = netdev_priv(netdev);
-    device = *priv_netdev;
+	priv_netdev = netdev_priv(netdev);
+	device = *priv_netdev;
 
-    device->stats.tx_bytes += length;
-    device->stats.tx_packets ++;
+	device->stats.tx_bytes += length;
+	device->stats.tx_packets++;
 
-    queue_commbuff(commbuff, &device->process_queue);
-    device->data_amount += length;
+	queue_commbuff(commbuff, &device->process_queue);
+	device->data_amount += length;
 
-    /* Due to a race condition that exists between the time we decrement and
-     * increment the process_queue length, more data could have been added to
-     * the NetMUX queue than the burst size for the channel. Also, the amount
-     * of combined data in the two queues may surpass the channel queue size. */
-    if ((device->mux_channel_queue_space - device->data_amount) 
-		    < device->burstsize)
-    {
-        netif_stop_queue(netdev);
-    }
+	/* Due to a race condition that exists between the time
+	 * we decrement and increment the process_queue length,
+	 * more data could have been added to the NetMUX queue than
+	 * the burst size for the channel. Also,
+	 * the amount of combined data in the two queues
+	 * may surpass the channel queue size.
+	 */
+	if ((device->mux_channel_queue_space - device->data_amount)
+	    < device->burstsize) {
+		netif_stop_queue(netdev);
+	}
 
-    RunSend(device->netint->mux);
+	RunSend(device->netint->mux);
 
-    return 0;
+	return 0;
 }
 
-struct net_device_stats* NetworkStats (struct net_device* netdev)
+struct net_device_stats *NetworkStats(struct net_device *netdev)
 {
-    NETWORKDEVICE** priv_netdev;
-    NETWORKDEVICE* device;
+	NETWORKDEVICE **priv_netdev;
+	NETWORKDEVICE *device;
 
-    DEBUG("NetworkStats(0x%p)\n", netdev);
- 
-    priv_netdev = netdev_priv(netdev);
-    device = *priv_netdev;
+	DEBUG("NetworkStats(0x%p)\n", netdev);
 
-    return &device->stats;
+	priv_netdev = netdev_priv(netdev);
+	device = *priv_netdev;
+
+	return &device->stats;
 }

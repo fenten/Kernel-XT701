@@ -155,27 +155,6 @@ void hci_setup_sync(struct hci_conn *conn, __u16 handle)
 	hci_send_cmd(hdev, HCI_OP_SETUP_SYNC_CONN, sizeof(cp), &cp);
 }
 
-/* Device _must_ be locked */
-void hci_sco_setup(struct hci_conn *conn, __u8 status)
-{
-	struct hci_conn *sco = conn->link;
-
-	BT_DBG("%p", conn);
-
-	if (!sco)
-		return;
-
-	if (!status) {
-		if (lmp_esco_capable(conn->hdev))
-			hci_setup_sync(sco, conn->handle);
-		else
-			hci_add_sco(sco, conn->handle);
-	} else {
-		hci_proto_connect_cfm(sco, status);
-		hci_conn_del(sco);
-	}
-}
-
 static void hci_conn_timeout(unsigned long arg)
 {
 	struct hci_conn *conn = (void *) arg;
@@ -192,10 +171,8 @@ static void hci_conn_timeout(unsigned long arg)
 	switch (conn->state) {
 	case BT_CONNECT:
 	case BT_CONNECT2:
-		if (conn->type == ACL_LINK)
+		if (conn->type == ACL_LINK && conn->out)
 			hci_acl_connect_cancel(conn);
-		else
-			hci_acl_disconn(conn, 0x13);
 		break;
 	case BT_CONFIG:
 	case BT_CONNECTED:
@@ -238,6 +215,7 @@ struct hci_conn *hci_conn_add(struct hci_dev *hdev, int type,
 	conn->auth_type = HCI_AT_GENERAL_BONDING;
 
 	conn->power_save = 1;
+	conn->disc_timeout = HCI_DISCONN_TIMEOUT;
 
 	switch (type) {
 	case ACL_LINK:
@@ -277,6 +255,10 @@ struct hci_conn *hci_conn_add(struct hci_dev *hdev, int type,
 	hci_conn_hash_add(hdev, conn);
 	if (hdev->notify)
 		hdev->notify(hdev, HCI_NOTIFY_CONN_ADD);
+
+	atomic_set(&conn->devref, 0);
+
+	hci_conn_init_sysfs(conn);
 
 	tasklet_enable(&hdev->tx_task);
 
@@ -318,7 +300,9 @@ int hci_conn_del(struct hci_conn *conn)
 
 	skb_queue_purge(&conn->data_q);
 
-	hci_conn_del_sysfs(conn);
+	hci_conn_put_device(conn);
+
+	hci_dev_put(hdev);
 
 	return 0;
 }
@@ -407,13 +391,10 @@ struct hci_conn *hci_connect(struct hci_dev *hdev, int type,
 		acl->power_save = 1;
 		hci_conn_enter_active_mode(acl);
 
-		if (test_bit(HCI_CONN_MODE_CHANGE_PEND, &acl->pend)) {
-			/* defer SCO setup until mode change completed */
-			set_bit(HCI_CONN_SCO_SETUP_PEND, &acl->pend);
-			return sco;
-		}
-
-		hci_sco_setup(acl, 0x00);
+		if (lmp_esco_capable(hdev))
+			hci_setup_sync(sco, acl->handle);
+		else
+			hci_add_sco(sco, acl->handle);
 	}
 
 	return sco;
@@ -530,7 +511,7 @@ void hci_conn_enter_active_mode(struct hci_conn *conn)
 	if (test_bit(HCI_RAW, &hdev->flags))
 		return;
 
-	if (conn->mode != HCI_CM_SNIFF /*|| !conn->power_save */)
+	if (conn->mode != HCI_CM_SNIFF /* || !conn->power_save */)
 		goto timer;
 
 	if (!test_and_set_bit(HCI_CONN_MODE_CHANGE_PEND, &conn->pend)) {
@@ -618,6 +599,19 @@ void hci_conn_check_pending(struct hci_dev *hdev)
 
 	hci_dev_unlock(hdev);
 }
+
+void hci_conn_hold_device(struct hci_conn *conn)
+{
+	atomic_inc(&conn->devref);
+}
+EXPORT_SYMBOL(hci_conn_hold_device);
+
+void hci_conn_put_device(struct hci_conn *conn)
+{
+	if (atomic_dec_and_test(&conn->devref))
+		hci_conn_del_sysfs(conn);
+}
+EXPORT_SYMBOL(hci_conn_put_device);
 
 int hci_get_conn_list(void __user *arg)
 {

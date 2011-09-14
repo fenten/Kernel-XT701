@@ -11,4 +11,3 @@ int gunzip(unsigned char *inbuf, int len,
 	   int *pos,
 	   void(*error_fn)(char *x));
 #endif
-

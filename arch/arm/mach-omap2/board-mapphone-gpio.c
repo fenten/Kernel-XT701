@@ -157,7 +157,7 @@ static void gpio_devs_of_init(void)
 	int size, unit_size, i, count;
 	struct device_node *node;
 	const void *prop;
-
+    
 	node = of_find_node_by_path(DT_PATH_GPIOGEV);
 	if (node == NULL) {
 		printk(KERN_ERR

@@ -18,12 +18,11 @@
 #include <linux/mutex.h>
 #include <linux/videodev2.h>
 #include <linux/wait.h>
-#include <mach/display.h>
-#include <mach/vrfb.h>
+#include <plat/display.h>
+#include <plat/vrfb.h>
 #include <media/v4l2-dev.h>
 #include <media/videobuf-core.h>
 
-/*#define DEBUG*/
 #ifdef DEBUG
 #define DBG(format, ...) \
 	printk(KERN_DEBUG "OMAPVOUT: " format, ## __VA_ARGS__)
@@ -37,6 +36,7 @@ struct omapvout_device {
 	struct video_device vdev;
 	struct mutex  mtx; /* Lock for all device accesses */
 	struct video_device *vfd;
+	struct completion working_completion;
 
 	int opened;
 	int id;

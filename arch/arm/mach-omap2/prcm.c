@@ -20,12 +20,12 @@
 #include <linux/init.h>
 #include <linux/clk.h>
 #include <linux/io.h>
+#include <linux/delay.h>
 
-#include <mach/common.h>
-#include <mach/control.h>
-#include <mach/prcm.h>
-#include <mach/irqs.h>
-#include <mach/control.h>
+#include <plat/common.h>
+#include <plat/prcm.h>
+#include <plat/irqs.h>
+#include <plat/control.h>
 
 #include "clock.h"
 #include "cm.h"
@@ -34,6 +34,8 @@
 
 static void __iomem *prm_base;
 static void __iomem *cm_base;
+
+#define MAX_MODULE_ENABLE_WAIT		100000
 
 struct omap3_prcm_regs {
 	u32 control_padconf_sys_nirq;
@@ -99,6 +101,7 @@ struct omap3_prcm_regs {
 	u32 usbhost_cm_sleepdep;
 	u32 cm_clkout_ctrl;
 	u32 prm_clkout_ctrl;
+	u32 mpu_pm_wkdep;
 	u32 sgx_pm_wkdep;
 	u32 dss_pm_wkdep;
 	u32 cam_pm_wkdep;
@@ -223,6 +226,46 @@ u32 cm_rmw_mod_reg_bits(u32 mask, u32 bits, s16 module, s16 idx)
 }
 EXPORT_SYMBOL(cm_rmw_mod_reg_bits);
 
+/**
+ * omap2_cm_wait_idlest - wait for IDLEST bit to indicate module readiness
+ * @reg: physical address of module IDLEST register
+ * @mask: value to mask against to determine if the module is active
+ * @name: name of the clock (for printk)
+ *
+ * Returns 1 if the module indicated readiness in time, or 0 if it
+ * failed to enable in roughly MAX_MODULE_ENABLE_WAIT microseconds.
+ */
+int omap2_cm_wait_idlest(void __iomem *reg, u32 mask, const char *name)
+{
+	int i = 0;
+	int ena = 0;
+
+	/*
+	 * 24xx uses 0 to indicate not ready, and 1 to indicate ready.
+	 * 34xx reverses this, just to keep us on our toes
+	 */
+	if (cpu_is_omap24xx())
+		ena = mask;
+	else if (cpu_is_omap34xx())
+		ena = 0;
+	else
+		BUG();
+
+	/* Wait for lock */
+	while (((__raw_readl(reg) & mask) != ena) &&
+	       (i++ < MAX_MODULE_ENABLE_WAIT))
+		udelay(1);
+
+	if (i < MAX_MODULE_ENABLE_WAIT)
+		pr_debug("cm: Module associated with clock %s ready after %d "
+			 "loops\n", name, i);
+	else
+		pr_err("cm: Module associated with clock %s didn't enable in "
+		       "%d tries\n", name, MAX_MODULE_ENABLE_WAIT);
+
+	return (i < MAX_MODULE_ENABLE_WAIT) ? 1 : 0;
+};
+
 void __init omap2_set_globals_prcm(struct omap_globals *omap2_globals)
 {
 	prm_base = omap2_globals->prm;
@@ -258,8 +301,7 @@ void omap3_prcm_save_context(void)
 			cm_read_mod_reg(PLL_MOD, OMAP3430ES2_CM_CLKSEL4);
 	prcm_context.pll_cm_clksel5 =
 			 cm_read_mod_reg(PLL_MOD, OMAP3430ES2_CM_CLKSEL5);
-	prcm_context.pll_cm_clken =
-			cm_read_mod_reg(PLL_MOD, CM_CLKEN);
+        prcm_context.pll_cm_clken = cm_read_mod_reg(PLL_MOD, CM_CLKEN);
 	prcm_context.pll_cm_clken2 =
 			cm_read_mod_reg(PLL_MOD, OMAP3430ES2_CM_CLKEN2);
 	prcm_context.cm_polctrl = __raw_readl(OMAP3430_CM_POLCTRL);
@@ -305,8 +347,7 @@ void omap3_prcm_save_context(void)
 			 cm_read_mod_reg(OMAP3430_IVA2_MOD, CM_AUTOIDLE2);
 	prcm_context.mpu_cm_autoidle2 =
 			 cm_read_mod_reg(MPU_MOD, CM_AUTOIDLE2);
-	prcm_context.pll_cm_autoidle =
-			 cm_read_mod_reg(PLL_MOD, CM_AUTOIDLE);
+        prcm_context.pll_cm_autoidle = cm_read_mod_reg(PLL_MOD, CM_AUTOIDLE);
 	prcm_context.iva2_cm_clkstctrl =
 			 cm_read_mod_reg(OMAP3430_IVA2_MOD, CM_CLKSTCTRL);
 	prcm_context.mpu_cm_clkstctrl =
@@ -352,9 +393,11 @@ void omap3_prcm_save_context(void)
 	prcm_context.usbhost_cm_sleepdep =
 		 cm_read_mod_reg(OMAP3430ES2_USBHOST_MOD, OMAP3430_CM_SLEEPDEP);
 	prcm_context.cm_clkout_ctrl = cm_read_mod_reg(OMAP3430_CCR_MOD,
-		 OMAP3430_CM_CLKOUT_CTRL_OFFSET);
+		 OMAP3_CM_CLKOUT_CTRL_OFFSET);
 	prcm_context.prm_clkout_ctrl = prm_read_mod_reg(OMAP3430_CCR_MOD,
 		OMAP3_PRM_CLKOUT_CTRL_OFFSET);
+	prcm_context.mpu_pm_wkdep =
+		 prm_read_mod_reg(MPU_MOD, PM_WKDEP);
 	prcm_context.sgx_pm_wkdep =
 		 prm_read_mod_reg(OMAP3430ES2_SGX_MOD, PM_WKDEP);
 	prcm_context.dss_pm_wkdep =
@@ -498,9 +541,11 @@ void omap3_prcm_restore_context(void)
 	cm_write_mod_reg(prcm_context.usbhost_cm_sleepdep,
 				OMAP3430ES2_USBHOST_MOD, OMAP3430_CM_SLEEPDEP);
 	cm_write_mod_reg(prcm_context.cm_clkout_ctrl, OMAP3430_CCR_MOD,
-					OMAP3430_CM_CLKOUT_CTRL_OFFSET);
+					OMAP3_CM_CLKOUT_CTRL_OFFSET);
 	prm_write_mod_reg(prcm_context.prm_clkout_ctrl, OMAP3430_CCR_MOD,
 					OMAP3_PRM_CLKOUT_CTRL_OFFSET);
+	prm_write_mod_reg(prcm_context.mpu_pm_wkdep, MPU_MOD,
+					PM_WKDEP);
 	prm_write_mod_reg(prcm_context.sgx_pm_wkdep, OMAP3430ES2_SGX_MOD,
 					PM_WKDEP);
 	prm_write_mod_reg(prcm_context.dss_pm_wkdep, OMAP3430_DSS_MOD,

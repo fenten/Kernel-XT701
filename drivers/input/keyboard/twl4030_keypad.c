@@ -48,22 +48,21 @@
  * See the TPS65950 documentation; that's the general availability
  * version of the TWL5030 second generation part.
  */
-#define MAX_ROWS		8	/* TWL4030 hard limit */
+#define TWL4030_MAX_ROWS	8	/* TWL4030 hard limit */
+#define TWL4030_MAX_COLS	8
+#define TWL4030_ROW_SHIFT	3
+#define TWL4030_KEYMAP_SIZE	(TWL4030_MAX_ROWS * TWL4030_MAX_COLS)
 
 struct twl4030_keypad {
-	unsigned	*keymap;
-	unsigned int	keymapsize;
-	u16		kp_state[MAX_ROWS];
+	unsigned short	keymap[TWL4030_KEYMAP_SIZE];
+	u16		kp_state[TWL4030_MAX_ROWS];
 	unsigned	n_rows;
 	unsigned	n_cols;
 	unsigned	irq;
 
-	struct device	*dbg_dev;
+	struct device *dbg_dev;
 	struct input_dev *input;
 };
-
-#define ROWCOL_MASK	KEY(0xf, 0xf, 0)
-#define KEYNUM_MASK	~PERSISTENT_KEY(0xf, 0xf)
 
 /*----------------------------------------------------------------------*/
 
@@ -134,42 +133,26 @@ struct twl4030_keypad {
 static int twl4030_kpread(struct twl4030_keypad *kp,
 		u8 *data, u32 reg, u8 num_bytes)
 {
-	int ret;
+	int ret = twl4030_i2c_read(TWL4030_MODULE_KEYPAD, data, reg, num_bytes);
 
-	ret = twl4030_i2c_read(TWL4030_MODULE_KEYPAD, data, reg, num_bytes);
-	if (ret < 0) {
+	if (ret < 0)
 		dev_warn(kp->dbg_dev,
 			"Couldn't read TWL4030: %X - ret %d[%x]\n",
 			 reg, ret, ret);
-		return ret;
-	}
+
 	return ret;
 }
 
 static int twl4030_kpwrite_u8(struct twl4030_keypad *kp, u8 data, u32 reg)
 {
-	int ret;
+	int ret = twl4030_i2c_write_u8(TWL4030_MODULE_KEYPAD, data, reg);
 
-	ret = twl4030_i2c_write_u8(TWL4030_MODULE_KEYPAD, data, reg);
-	if (ret < 0) {
+	if (ret < 0)
 		dev_warn(kp->dbg_dev,
 			"Could not write TWL4030: %X - ret %d[%x]\n",
 			 reg, ret, ret);
-		return ret;
-	}
+
 	return ret;
-}
-
-static int twl4030_find_key(struct twl4030_keypad *kp, int col, int row)
-{
-	int i, rc;
-
-	rc = KEY(col, row, 0);
-	for (i = 0; i < kp->keymapsize; i++)
-		if ((kp->keymap[i] & ROWCOL_MASK) == rc)
-			return kp->keymap[i] & (KEYNUM_MASK | KEY_PERSISTENT);
-
-	return -EINVAL;
 }
 
 static inline u16 twl4030_col_xlate(struct twl4030_keypad *kp, u8 col)
@@ -187,14 +170,14 @@ static inline u16 twl4030_col_xlate(struct twl4030_keypad *kp, u8 col)
 
 static int twl4030_read_kp_matrix_state(struct twl4030_keypad *kp, u16 *state)
 {
-	u8 new_state[MAX_ROWS];
+	u8 new_state[TWL4030_MAX_ROWS];
 	int row;
-	int ret = twl4030_kpread(kp,
-				 new_state, KEYP_FULL_CODE_7_0, kp->n_rows);
-	if (ret >= 0) {
+	int ret = twl4030_kpread(kp, new_state,
+				 KEYP_FULL_CODE_7_0, kp->n_rows);
+	if (ret >= 0)
 		for (row = 0; row < kp->n_rows; row++)
 			state[row] = twl4030_col_xlate(kp, new_state[row]);
-	}
+
 	return ret;
 }
 
@@ -208,15 +191,17 @@ static int twl4030_is_in_ghost_state(struct twl4030_keypad *kp, u16 *key_state)
 
 		if ((col & check) && hweight16(col) > 1)
 			return 1;
+
 		check |= col;
 	}
 
 	return 0;
 }
 
-static void twl4030_kp_scan(struct twl4030_keypad *kp, int release_all)
+static void twl4030_kp_scan(struct twl4030_keypad *kp, bool release_all)
 {
-	u16 new_state[MAX_ROWS];
+	struct input_dev *input = kp->input;
+	u16 new_state[TWL4030_MAX_ROWS];
 	int col, row;
 
 	if (release_all)
@@ -227,6 +212,7 @@ static void twl4030_kp_scan(struct twl4030_keypad *kp, int release_all)
 
 		if (ret < 0)	/* panic ... */
 			return;
+
 		if (twl4030_is_in_ghost_state(kp, new_state))
 			return;
 	}
@@ -239,7 +225,7 @@ static void twl4030_kp_scan(struct twl4030_keypad *kp, int release_all)
 			continue;
 
 		for (col = 0; col < kp->n_cols; col++) {
-			int key;
+			int code;
 
 			if (!(changed & (1 << col)))
 				continue;
@@ -248,20 +234,14 @@ static void twl4030_kp_scan(struct twl4030_keypad *kp, int release_all)
 				(new_state[row] & (1 << col)) ?
 				"press" : "release");
 
-			key = twl4030_find_key(kp, col, row);
-			if (key < 0)
-				dev_warn(kp->dbg_dev,
-					"Spurious key event %d-%d\n",
-					 col, row);
-			else if (key & KEY_PERSISTENT)
-				continue;
-			else
-				input_report_key(kp->input, key,
-						 new_state[row] & (1 << col));
+			code = MATRIX_SCAN_CODE(row, col, TWL4030_ROW_SHIFT);
+			input_event(input, EV_MSC, MSC_SCAN, code);
+			input_report_key(input, kp->keymap[code],
+					 new_state[row] & (1 << col));
 		}
 		kp->kp_state[row] = new_state[row];
 	}
-	input_sync(kp->input);
+	input_sync(input);
 }
 
 /*
@@ -286,12 +266,65 @@ static irqreturn_t do_kp_irq(int irq, void *_kp)
 
 	/* Release all keys if I2C has gone bad or
 	 * the KEYP has gone to idle state */
-	if ((ret >= 0) && (reg & KEYP_IMR1_KP))
-		twl4030_kp_scan(kp, 0);
+	if (ret >= 0 && (reg & KEYP_IMR1_KP))
+		twl4030_kp_scan(kp, false);
 	else
-		twl4030_kp_scan(kp, 1);
+		twl4030_kp_scan(kp, true);
 
 	return IRQ_HANDLED;
+}
+
+static int __devinit twl4030_kp_program(struct twl4030_keypad *kp)
+{
+	u8 reg;
+	int i;
+
+	/* Enable controller, with hardware decoding but not autorepeat */
+	reg = KEYP_CTRL_SOFT_NRST | KEYP_CTRL_SOFTMODEN
+		| KEYP_CTRL_TOE_EN | KEYP_CTRL_KBD_ON;
+	if (twl4030_kpwrite_u8(kp, reg, KEYP_CTRL) < 0)
+		return -EIO;
+
+	/* NOTE:  we could use sih_setup() here to package keypad
+	 * event sources as four different IRQs ... but we don't.
+	 */
+
+	/* Enable TO rising and KP rising and falling edge detection */
+	reg = KEYP_EDR_KP_BOTH | KEYP_EDR_TO_RISING;
+	if (twl4030_kpwrite_u8(kp, reg, KEYP_EDR) < 0)
+		return -EIO;
+
+	/* Set PTV prescaler Field */
+	reg = (PTV_PRESCALER << KEYP_LK_PTV_PTV_SHIFT);
+	if (twl4030_kpwrite_u8(kp, reg, KEYP_LK_PTV) < 0)
+		return -EIO;
+
+	/* Set key debounce time to 20 ms */
+	i = KEYP_PERIOD_US(20000, PTV_PRESCALER);
+	if (twl4030_kpwrite_u8(kp, i, KEYP_DEB) < 0)
+		return -EIO;
+
+	/* Set timeout period to 100 ms */
+	i = KEYP_PERIOD_US(200000, PTV_PRESCALER);
+	if (twl4030_kpwrite_u8(kp, (i & 0xFF), KEYP_TIMEOUT_L) < 0)
+		return -EIO;
+
+	if (twl4030_kpwrite_u8(kp, (i >> 8), KEYP_TIMEOUT_H) < 0)
+		return -EIO;
+
+	/*
+	 * Enable Clear-on-Read; disable remembering events that fire
+	 * after the IRQ but before our handler acks (reads) them,
+	 */
+	reg = TWL4030_SIH_CTRL_COR_MASK | TWL4030_SIH_CTRL_PENDDIS_MASK;
+	if (twl4030_kpwrite_u8(kp, reg, KEYP_SIH_CTRL) < 0)
+		return -EIO;
+
+	/* initialize key state; irqs update it from here on */
+	if (twl4030_read_kp_matrix_state(kp, kp->kp_state) < 0)
+		return -EIO;
+
+	return 0;
 }
 
 /*
@@ -300,120 +333,69 @@ static irqreturn_t do_kp_irq(int irq, void *_kp)
  */
 static int __devinit twl4030_kp_probe(struct platform_device *pdev)
 {
-	u8 reg;
-	int i;
-	int ret = 0;
-	struct twl4030_keypad *kp;
 	struct twl4030_keypad_data *pdata = pdev->dev.platform_data;
+	const struct matrix_keymap_data *keymap_data = pdata->keymap_data;
+	struct twl4030_keypad *kp;
+	struct input_dev *input;
+	u8 reg;
+	int error;
 
-	if (!pdata || !pdata->rows || !pdata->cols || !pdata->keymap
-			|| pdata->rows > 8 || pdata->cols > 8) {
+	if (!pdata || !pdata->rows || !pdata->cols ||
+	    pdata->rows > TWL4030_MAX_ROWS || pdata->cols > TWL4030_MAX_COLS) {
 		dev_err(&pdev->dev, "Invalid platform_data\n");
 		return -EINVAL;
 	}
 
 	kp = kzalloc(sizeof(*kp), GFP_KERNEL);
-	if (!kp)
-		return -ENOMEM;
-
-	platform_set_drvdata(pdev, kp);
+	input = input_allocate_device();
+	if (!kp || !input) {
+		error = -ENOMEM;
+		goto err1;
+	}
 
 	/* Get the debug Device */
 	kp->dbg_dev = &pdev->dev;
+	kp->input = input;
 
-	kp->input = input_allocate_device();
-	if (!kp->input) {
-		kfree(kp);
-		return -ENOMEM;
-	}
-
-	kp->keymap = pdata->keymap;
-	kp->keymapsize = pdata->keymapsize;
 	kp->n_rows = pdata->rows;
 	kp->n_cols = pdata->cols;
 	kp->irq = platform_get_irq(pdev, 0);
 
 	/* setup input device */
-	__set_bit(EV_KEY, kp->input->evbit);
+	__set_bit(EV_KEY, input->evbit);
 
 	/* Enable auto repeat feature of Linux input subsystem */
 	if (pdata->rep)
-		__set_bit(EV_REP, kp->input->evbit);
+		__set_bit(EV_REP, input->evbit);
 
-	for (i = 0; i < kp->keymapsize; i++)
-		__set_bit(kp->keymap[i] & KEYNUM_MASK,
-				kp->input->keybit);
+	input_set_capability(input, EV_MSC, MSC_SCAN);
 
-	kp->input->name		= "TWL4030 Keypad";
-	kp->input->phys		= "twl4030_keypad/input0";
-	kp->input->dev.parent	= &pdev->dev;
+	input->name		= "TWL4030 Keypad";
+	input->phys		= "twl4030_keypad/input0";
+	input->dev.parent	= &pdev->dev;
 
-	kp->input->id.bustype	= BUS_HOST;
-	kp->input->id.vendor	= 0x0001;
-	kp->input->id.product	= 0x0001;
-	kp->input->id.version	= 0x0003;
+	input->id.bustype	= BUS_HOST;
+	input->id.vendor	= 0x0001;
+	input->id.product	= 0x0001;
+	input->id.version	= 0x0003;
 
-	kp->input->keycode	= kp->keymap;
-	kp->input->keycodesize	= sizeof(unsigned int);
-	kp->input->keycodemax	= kp->keymapsize;
+	input->keycode		= kp->keymap;
+	input->keycodesize	= sizeof(kp->keymap[0]);
+	input->keycodemax	= ARRAY_SIZE(kp->keymap);
 
-	ret = input_register_device(kp->input);
-	if (ret < 0) {
+	matrix_keypad_build_keymap(keymap_data, TWL4030_ROW_SHIFT,
+				   input->keycode, input->keybit);
+
+	error = input_register_device(input);
+	if (error) {
 		dev_err(kp->dbg_dev,
 			"Unable to register twl4030 keypad device\n");
-		goto err2;
+		goto err1;
 	}
 
-	/* Enable controller, with hardware decoding but not autorepeat */
-	reg = KEYP_CTRL_SOFT_NRST | KEYP_CTRL_SOFTMODEN
-		| KEYP_CTRL_TOE_EN | KEYP_CTRL_KBD_ON;
-	ret = twl4030_kpwrite_u8(kp, reg, KEYP_CTRL);
-	if (ret < 0)
-		goto err3;
-
-	/* NOTE:  we could use sih_setup() here to package keypad
-	 * event sources as four different IRQs ... but we don't.
-	 */
-
-	/* Enable TO rising and KP rising and falling edge detection */
-	reg = KEYP_EDR_KP_BOTH | KEYP_EDR_TO_RISING;
-	ret = twl4030_kpwrite_u8(kp, reg, KEYP_EDR);
-	if (ret < 0)
-		goto err3;
-
-	/* Set PTV prescaler Field */
-	reg = (PTV_PRESCALER << KEYP_LK_PTV_PTV_SHIFT);
-	ret = twl4030_kpwrite_u8(kp, reg, KEYP_LK_PTV);
-	if (ret < 0)
-		goto err3;
-
-	/* Set key debounce time to 20 ms */
-	i = KEYP_PERIOD_US(20000, PTV_PRESCALER);
-	ret = twl4030_kpwrite_u8(kp, i, KEYP_DEB);
-	if (ret < 0)
-		goto err3;
-
-	/* Set timeout period to 100 ms */
-	i = KEYP_PERIOD_US(200000, PTV_PRESCALER);
-	ret = twl4030_kpwrite_u8(kp, (i & 0xFF), KEYP_TIMEOUT_L);
-	if (ret < 0)
-		goto err3;
-	ret = twl4030_kpwrite_u8(kp, (i >> 8), KEYP_TIMEOUT_H);
-	if (ret < 0)
-		goto err3;
-
-	/* Enable Clear-on-Read; disable remembering events that fire
-	 * after the IRQ but before our handler acks (reads) them,
-	 */
-	reg = TWL4030_SIH_CTRL_COR_MASK | TWL4030_SIH_CTRL_PENDDIS_MASK;
-	ret = twl4030_kpwrite_u8(kp, reg, KEYP_SIH_CTRL);
-	if (ret < 0)
-		goto err3;
-
-	/* initialize key state; irqs update it from here on */
-	ret = twl4030_read_kp_matrix_state(kp, kp->kp_state);
-	if (ret < 0)
-		goto err3;
+	error = twl4030_kp_program(kp);
+	if (error)
+		goto err2;
 
 	/*
 	 * This ISR will always execute in kernel thread context because of
@@ -421,31 +403,35 @@ static int __devinit twl4030_kp_probe(struct platform_device *pdev)
 	 *
 	 * NOTE:  we assume this host is wired to TWL4040 INT1, not INT2 ...
 	 */
-	ret = request_irq(kp->irq, do_kp_irq, 0, pdev->name, kp);
-	if (ret < 0) {
+	error = request_irq(kp->irq, do_kp_irq, 0, pdev->name, kp);
+	if (error) {
 		dev_info(kp->dbg_dev, "request_irq failed for irq no=%d\n",
 			kp->irq);
 		goto err3;
-	} else {
-		/* Enable KP and TO interrupts now. */
-		reg = (u8) ~(KEYP_IMR1_KP | KEYP_IMR1_TO);
-		ret = twl4030_kpwrite_u8(kp, reg, KEYP_IMR1);
-		if (ret < 0)
-			goto err5;
 	}
 
-	return ret;
-err5:
+	/* Enable KP and TO interrupts now. */
+	reg = (u8) ~(KEYP_IMR1_KP | KEYP_IMR1_TO);
+	if (twl4030_kpwrite_u8(kp, reg, KEYP_IMR1)) {
+		error = -EIO;
+		goto err4;
+	}
+
+	platform_set_drvdata(pdev, kp);
+	return 0;
+
+err4:
 	/* mask all events - we don't care about the result */
 	(void) twl4030_kpwrite_u8(kp, 0xff, KEYP_IMR1);
-	free_irq(kp->irq, NULL);
 err3:
-	input_unregister_device(kp->input);
-	kp->input = NULL;
+	free_irq(kp->irq, NULL);
 err2:
-	input_free_device(kp->input);
+	input_unregister_device(input);
+	input = NULL;
+err1:
+	input_free_device(input);
 	kfree(kp);
-	return -ENODEV;
+	return error;
 }
 
 static int __devexit twl4030_kp_remove(struct platform_device *pdev)
@@ -454,6 +440,7 @@ static int __devexit twl4030_kp_remove(struct platform_device *pdev)
 
 	free_irq(kp->irq, kp);
 	input_unregister_device(kp->input);
+	platform_set_drvdata(pdev, NULL);
 	kfree(kp);
 
 	return 0;
@@ -464,8 +451,6 @@ static int __devexit twl4030_kp_remove(struct platform_device *pdev)
  * So this device is a child of an I2C parent, thus it needs to
  * support unplug/replug (which most platform devices don't).
  */
-
-MODULE_ALIAS("platform:twl4030_keypad");
 
 static struct platform_driver twl4030_kp_driver = {
 	.probe		= twl4030_kp_probe,
@@ -491,3 +476,5 @@ module_exit(twl4030_kp_exit);
 MODULE_AUTHOR("Texas Instruments");
 MODULE_DESCRIPTION("TWL4030 Keypad Driver");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS("platform:twl4030_keypad");
+

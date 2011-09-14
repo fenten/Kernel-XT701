@@ -10,4 +10,3 @@ int unlzma(unsigned char *, int,
 	);
 
 #endif
-

@@ -24,8 +24,8 @@
  *
  ******************************************************************************/
 
-#include <asm/io.h>
-#include <asm/uaccess.h>
+#include <linux/io.h>
+#include <linux/uaccess.h>
 
 #include <linux/version.h>
 #include <linux/module.h>
@@ -37,7 +37,7 @@
 #include <linux/fb.h>
 #include <linux/platform_device.h>
 
-#include <mach/display.h>
+#include <plat/display.h>
 
 #include "img_defs.h"
 #include "servicesext.h"
@@ -122,7 +122,8 @@ void OMAPLFBDisplayInit(void)
 
 void OMAPLFBSync(void)
 {
-	if (lcd_mgr && lcd_mgr->device && omap_gfxoverlay)
+	if (lcd_mgr && lcd_mgr->device && omap_gfxoverlay
+					&& lcd_mgr->device->sync)
 		lcd_mgr->device->sync(lcd_mgr->device);
 }
 
@@ -135,15 +136,17 @@ void OMAPLFBFlip(OMAPLFB_SWAPCHAIN *psSwapChain, unsigned long paddr)
 						  &gfxoverlayinfo);
 		gfxoverlayinfo.paddr = paddr;
 		/* TODO: plumb vaddr in to this function */
-		gfxoverlayinfo.vaddr = (void *)(paddr - 0x81314000 + 0xd2800000);
+		gfxoverlayinfo.vaddr = (void *)(paddr -
+		0x81314000 + 0xd2800000);
 
 		omap_gfxoverlay->set_overlay_info(omap_gfxoverlay,
 						  &gfxoverlayinfo);
 		lcd_mgr->apply(lcd_mgr);
 
-		lcd_mgr->device->update(lcd_mgr->device, 0, 0,
-					gfxoverlayinfo.width,
-					gfxoverlayinfo.height);
+		if (lcd_mgr->device->update)
+			lcd_mgr->device->update(lcd_mgr->device, 0, 0,
+						gfxoverlayinfo.width,
+						gfxoverlayinfo.height);
 
 		pixels = (paddr - fb_info->fix.smem_start) /
 			(fb_info->var.bits_per_pixel / 8);

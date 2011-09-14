@@ -48,5 +48,5 @@ ifeq ($(LOG), true)
 	CFLAGS += -D_LOG_
 endif
 
-obj-m := $(MODULE_NAME).o
+obj-$(CONFIG_NETMUX_LINKDRIVER) += $(MODULE_NAME).o
 $(MODULE_NAME)-objs := netmux_usb_linkdriver.o

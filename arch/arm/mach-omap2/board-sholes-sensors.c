@@ -19,9 +19,9 @@
 #include <linux/regulator/consumer.h>
 #include <linux/vib-gpio.h>
 
-#include <mach/mux.h>
-#include <mach/gpio.h>
-#include <mach/keypad.h>
+#include <plat/mux.h>
+#include <plat/gpio.h>
+#include <plat/keypad.h>
 
 #define SHOLES_PROX_INT_GPIO		180
 #define SHOLES_HF_NORTH_GPIO		10

@@ -68,8 +68,9 @@ static void sfh7743_report_input(struct sfh7743_data *sfh)
 static void sfh7743_device_power_off(struct sfh7743_data *sfh)
 {
 	if (sfh->pdata->power_off) {
-		disable_irq_nosync(sfh->irq);
 		sfh->pdata->power_off();
+		disable_irq(sfh->irq);
+		disable_irq_wake(sfh->irq);
 	}
 }
 
@@ -82,6 +83,7 @@ static int sfh7743_device_power_on(struct sfh7743_data *sfh)
 		if (err < 0)
 			return err;
 		enable_irq(sfh->irq);
+		enable_irq_wake(sfh->irq);
 		sfh7743_report_input(sfh);
 	}
 
@@ -314,7 +316,6 @@ static int sfh7743_probe(struct platform_device *pdev)
 	err = request_irq(sfh->irq, sfh7743_isr,
 			  IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
 			  "sfh7743_irq", sfh);
-	enable_irq_wake(sfh->irq);
 
 	if (err < 0) {
 		pr_err("%s: request irq failed: %d\n", __func__, err);

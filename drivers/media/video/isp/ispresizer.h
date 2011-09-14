@@ -110,7 +110,7 @@ int ispresizer_request(void);
 
 int ispresizer_free(void);
 
-int ispresizer_config_datapath(enum ispresizer_input input);
+int ispresizer_config_datapath(enum ispresizer_input input, u8 reset);
 
 void ispresizer_enable_cbilin(u8 enable);
 
@@ -119,6 +119,10 @@ void ispresizer_config_ycpos(u8 yc);
 void ispresizer_config_startphase(u8 hstartphase, u8 vstartphase);
 
 void ispresizer_config_filter_coef(struct isprsz_coef *coef);
+
+void ispresizer_get_filter_coef(struct isprsz_coef *coef);
+
+void ispresizer_write_filter_coef(void);
 
 void ispresizer_config_luma_enhance(struct isprsz_yenh *yenh);
 

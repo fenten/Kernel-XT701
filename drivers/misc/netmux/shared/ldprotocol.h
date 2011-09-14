@@ -1,7 +1,7 @@
 /******************************************************************************
  * NetMUX ldprotocol.h                                                        *
  *                                                                            *
- * Copyright (C) Motorola 2006                                                *
+ * Copyright (C) 2006-2010 Motorola, Inc.                                     *
  *                                                                            *
  * Redistribution and use in source and binary forms, with or without         *
  * modification, are permitted provided that the following conditions are     *
@@ -33,6 +33,7 @@
  *   ----------  ----------  -----------------------------------------------  *
  *   2006/09/28  Motorola    Initial version                                  *
  *   2006/12/19  Motorola    Combined header and data into one transfer       *
+ *   2010/04/28  Motorola    Format cleanup                                   *
  ******************************************************************************/
 
 /* ldprotocol.h is shared between the NetMUX and any participating link       */
@@ -75,48 +76,50 @@
  *            The function takes a pointer to a commbuff and returns
  *            an LDP error code.
  *
- * LinkInform - points to an inform function that can be used to configure the link driver
- *              The first parameter is the inform type and the second is any data
- *              to be associated with the inform type.
+ * LinkInform - points to an inform function that can be used
+ * 		to configure the link driver
+ *              The first parameter is the inform type and the
+ *              second is any data to be associated with the inform type.
  *
  * localMaxRcvSize - the max size that we can receive
  *
  * remoteMaxRcvSize - the max size the remote can receive
  */
-typedef struct INTERFACELINK
-{
-    unsigned long (*LinkSend)   (void*);
-    unsigned long (*LinkInform) (void*, void*);
+typedef struct INTERFACELINK {
+	unsigned long (*LinkSend) (void *);
+	unsigned long (*LinkInform) (void *, void *);
 
-    unsigned long localMaxRcvSize;
-    unsigned long remoteMaxRcvSize;
-}INTERFACELINK;
+	unsigned long localMaxRcvSize;
+	unsigned long remoteMaxRcvSize;
+} INTERFACELINK;
 
 
 /*
  * INTERFACEMUX defines the mux's communication interface. A brief
  * description follows below.
  *
- * MUXReceive - defines a function the link driver can call to give data to the NetMUX.
- *              The first parameter is the buffer being received, the second is the
- *              id member of the INTERFACEMUX structure.
+ * MUXReceive - defines a function the link driver can call
+ * 		to give data to the NetMUX. The first parameter
+ * 		is the buffer being received, the second is
+ * 		the id member of the INTERFACEMUX structure.
  *
- * MUXInform - points to a function the link driver can use to configure the NetMUX
- *             The first parameter is the inform type and the second is any data
- *             to be associated with the inform type.
+ * MUXInform - points to a function the link driver can use
+ * 		to configure the NetMUX. The first parameter
+ * 		is the inform type and the second is
+ * 		any data to be associated with the inform type.
  *
- * CommBuffRequest - a function pointer provided by the NetMUX that the linkdriver
- *                   must use to obtain a COMMBUFF to receive into.
+ * CommBuffRequest - a function pointer provided by the NetMUX that
+ * 		the linkdriver must use to obtain a COMMBUFF to receive into.
  *
- * id represents a MUX object specific value to allow for more than one MUX object
+ * id represents a MUX object specific value to
+ * allow for more than one MUX object
  */
-typedef struct INTERFACEMUX
-{
-    unsigned long (*MUXReceive) (void*, void*);
-    unsigned long (*MUXInform)  (void*, void*);
+typedef struct INTERFACEMUX {
+	unsigned long (*MUXReceive) (void *, void *);
+	unsigned long (*MUXInform) (void *, void *);
 
-    void* id;
-}INTERFACEMUX;
+	void *id;
+} INTERFACEMUX;
 
 
 /*
@@ -132,8 +135,8 @@ typedef struct INTERFACEMUX
  * the 'id' member of the INTERFACEMUX structure. This value
  * is filled in by the NetMUX upon calling RegisterMUXLink.
  */
-extern unsigned long RegisterMUXLink   (INTERFACELINK*, INTERFACEMUX*);
-extern unsigned long UnregisterMUXLink (void*);
+extern unsigned long RegisterMUXLink(INTERFACELINK *, INTERFACEMUX *);
+extern unsigned long UnregisterMUXLink(void *);
 
 
 #endif

@@ -202,11 +202,9 @@ int sec_ioctl(struct inode *inode, struct file *file,
 
 static void SecGetModelId(void *data)
 {
-	volatile unsigned int *fuse_ptr = NULL;
 	volatile unsigned int fuse_value = 0;
 	memset(data, 0xFF, SIZE_OF_MODEL_ID);
-	fuse_ptr = (unsigned int *) IO_ADDRESS(REGISTER_ADDRESS_MSV);
-	fuse_value = *fuse_ptr;
+	fuse_value = omap_readl(REGISTER_ADDRESS_MSV);
 	memcpy(data, (void *) &fuse_value, sizeof(unsigned int));
 
 	return;
@@ -236,9 +234,9 @@ static void SecGetProcID(void *data)
 	volatile unsigned int *fuse_ptr = NULL;
 	volatile unsigned int fuse_value = 0;
 	memset(data, 0xFF, SIZE_OF_PROC_ID);
-	fuse_ptr = (unsigned int *) IO_ADDRESS(REGISTER_ADDRESS_DIE_ID);
+	fuse_ptr = (unsigned int *) REGISTER_ADDRESS_DIE_ID;
 	for (i = 0; i < 4; i++) {
-		fuse_value = *(fuse_ptr - i);
+		fuse_value = omap_readl((u32)(fuse_ptr - i));
 		memcpy(data + (4 * i), (void *) &fuse_value,
 		       sizeof(unsigned int));
 	}
@@ -415,10 +413,10 @@ SEC_STAT_T SecProcessorID(unsigned char *buffer, int length)
 		return SEC_FAIL;
 
 	memset(buffer, 0xFF, length);
-	fuse_ptr = (unsigned int *) IO_ADDRESS(REGISTER_ADDRESS_DIE_ID);
+	fuse_ptr = (unsigned int *) REGISTER_ADDRESS_DIE_ID;
 
 	for (counter = 0; counter < 4; counter++) {
-		fuse_value = *(fuse_ptr - counter);
+		fuse_value = omap_readl((u32)(fuse_ptr - counter));
 		memcpy(buffer + (4 * counter), (void *) &fuse_value,
 		       sizeof(unsigned int));
 	}
@@ -429,14 +427,12 @@ EXPORT_SYMBOL(SecProcessorID);
 
 SEC_STAT_T SecModelID(unsigned char *buffer, int length)
 {
-	volatile unsigned int *fuse_ptr = NULL;
 	volatile unsigned int fuse_value = 0;
 
 	if (length < SIZE_OF_MODEL_ID)
 		return SEC_FAIL;
 	memset(buffer, 0xFF, length);
-	fuse_ptr = (unsigned int *) IO_ADDRESS(REGISTER_ADDRESS_MSV);
-	fuse_value = *fuse_ptr;
+	fuse_value = omap_readl(REGISTER_ADDRESS_MSV);
 	memcpy(buffer, (void *) &fuse_value, sizeof(unsigned int));
 	return SEC_SUCCESS;
 
