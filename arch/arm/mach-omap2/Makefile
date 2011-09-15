@@ -100,7 +100,6 @@ obj-$(CONFIG_MACH_SHOLES)		+= board-sholes.o \
 #					   board-sholes-usbnet.o \
 
 obj-$(CONFIG_MACH_MAPPHONE)             += board-mapphone.o \
-                                           board-mapphone-camera.o \
                                            board-mapphone-flash.o \
                                            board-mapphone-padconf.o \
                                            board-mapphone-panel.o \
@@ -112,6 +111,7 @@ obj-$(CONFIG_MACH_MAPPHONE)             += board-mapphone.o \
                                            board-mapphone-wifi.o \
                                            board-mapphone-gpio.o \
                                            board-mapphone-mmcprobe.o
+#                                          board-mapphone-camera.o \
 obj-$(CONFIG_MOT_FEAT_MDTV)             += board-mapphone-mdtv.o
 obj-$(CONFIG_EMU_UART_DEBUG)		+= board-mapphone-emu_uart.o
 obj-$(CONFIG_MACH_NOKIA_RX51)		+= board-rx51.o \
