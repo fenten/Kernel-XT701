@@ -13,6 +13,7 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/delay.h>
 #include <linux/mutex.h>
 #include <linux/pagemap.h>
 #include <linux/platform_device.h>
@@ -715,6 +716,7 @@ static void dispsw_unset_display(struct omap_dss_device *dssdev,
 
 	DBG("Disconnecting %s from %s\n", dssdev->name, dssmgr->name);
 
+	dssdev->panel.config = OMAP_DSS_LCD_TFT;
 	/* Ignore the errors as we are unsetting */
 	dssdev->disable(dssdev);
 
@@ -800,6 +802,7 @@ static int dispsw_switch_to_display(struct dispsw_cmd *cmd,
 	int rc;
 
 	if (dssmgr->device) {
+		msleep(400);
 		olddev = dssmgr->device;
 		dispsw_unset_display(dssmgr->device, dssmgr);
 	}
