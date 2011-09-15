@@ -305,8 +305,6 @@ static int mapphone_dt_get_tda19989_info(void)
 	panel_prop = of_get_property(panel_node, "cec_reg_name", NULL);
 	if (panel_prop != NULL)
 		strcpy(mapphone_tda19989_data.cec_reg_name, (char *)panel_prop);
-#endif
-
 	return 0;
 }
 

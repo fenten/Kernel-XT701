@@ -1421,7 +1421,7 @@ extern struct airc_platform_data mapphone_airc_data;
 #endif
 
 static struct i2c_board_info __initdata
-	mapphone_i2c_bus1_master_board_info[I2C_BUS_MAX_DEVICES];
+	mapphone_i2c_bus1_board_info[I2C_BUS_MAX_DEVICES];
 static struct i2c_board_info __initdata
 	mapphone_i2c_bus2_board_info[I2C_BUS_MAX_DEVICES];
 static struct i2c_board_info __initdata
@@ -1668,14 +1668,14 @@ static int __init mapphone_i2c_init(void)
 
 	/* Populate I2C bus 1 devices */
 	i2c_bus_devices = initialize_i2c_bus_info(
-			1, mapphone_i2c_bus1_master_board_info,
+			1, mapphone_i2c_bus1_board_info,
 			I2C_BUS_MAX_DEVICES,
 			mapphone_i2c_bus1_master_board_info,
 			ARRAY_SIZE(mapphone_i2c_bus1_master_board_info));
 	if (i2c_bus_devices != 0)
 		omap_register_i2c_bus(
 			1, 400,
-			mapphone_i2c_bus1_master_board_info, i2c_bus_devices);
+			mapphone_i2c_bus1_board_info, i2c_bus_devices);
 
 	/* Populate I2C bus 2 devices */
 	i2c_bus_devices = initialize_i2c_bus_info(
