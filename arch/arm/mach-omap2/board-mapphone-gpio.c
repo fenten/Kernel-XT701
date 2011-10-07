@@ -113,7 +113,7 @@ static void gpiodev_devs_init(void *p_data)
 	struct gpio_device *p_devs = gpio_devs;
 	int i = 0;
 
-	while ((i < GPIO_DEVICE_NAME_LEN - 1) && (' ' != p->name[i]))
+	while ((i < GPIO_DEVICE_NAME_LEN) && (' ' != p->name[i]))
 		i++;
 	p->name[i] = '\0';
 
@@ -157,7 +157,7 @@ static void gpio_devs_of_init(void)
 	int size, unit_size, i, count;
 	struct device_node *node;
 	const void *prop;
-
+    
 	node = of_find_node_by_path(DT_PATH_GPIOGEV);
 	if (node == NULL) {
 		printk(KERN_ERR

@@ -16,7 +16,7 @@
 
 #include <linux/debugfs.h>
 
-#define MAPPHONE_WIFI_PMENA_GPIO	126
+#define MAPPHONE_WIFI_PMENA_GPIO	186
 #define MAPPHONE_WIFI_IRQ_GPIO	65
 
 static int mapphone_wifi_cd = 0;		/* WIFI virtual 'card detect' status */

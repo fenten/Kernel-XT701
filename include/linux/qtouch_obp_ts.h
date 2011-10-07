@@ -24,14 +24,6 @@
 
 #define QTM_OBP_ID_INFO_ADDR		0
 
-#define QTM_OBP_BOOT_WAIT_FOR_DATA		0x80
-#define QTM_OBP_BOOT_WAIT_ON_BOOT_CMD		0xC0
-#define QTM_OBP_BOOT_CRC_CHECK			0x02
-#define QTM_OBP_BOOT_CRC_FAIL			0x03
-#define QTM_OBP_BOOT_CRC_PASSED			0x04
-#define QTM_OBP_SLEEP_RESET_HOLD	20
-#define QTM_OBP_SLEEP_WAIT_FOR_HW_RESET	50
-
 enum {
 	QTM_OBJ_RESERVED0		= 0,
 	QTM_OBJ_RESERVED1		= 1,
@@ -63,11 +55,11 @@ enum {
 	QTM_OBJ_PROCI_TWO_TOUCH_GESTURE_PROC = 27,
 	QTM_OBJ_SPT_CTE_CONFIG		= 28,
 	QTM_OBJ_NOISESUPPRESSION_1  = 36,
-	QTM_OBJ_DEBUG_DIAGNOSTIC        = 37,
-	QTM_OBJ_SPT_USERDATA       = 38,
+	QTM_OBJ_DEBUG_DIAGNOSTIC         = 37,
+	QTM_OBJ_CPT_USERDATA             = 38,
 
 	/* Max number of objects currently defined */
-	QTM_OBP_MAX_OBJECT_NUM = QTM_OBJ_SPT_USERDATA + 1,
+	QTM_OBP_MAX_OBJECT_NUM = QTM_OBJ_CPT_USERDATA + 1,
 };
 
 /* OBP structures as defined by the wire protocol. */
@@ -149,28 +141,7 @@ struct qtm_touch_keyarray_msg {
 	uint32_t		keystate;
 } __attribute__ ((packed));
 
-/* status message sent by the noise suppression - T22 */
-#define QTM_NOISE_SUPRS_PROC_STATUS_GCAFCHG	(1 << 4)
-#define QTM_NOISE_SUPRS_PROC_STATUS_FHERR	(1 << 3)
-#define QTM_NOISE_SUPRS_STATUS_GCAFERR		(1 << 2)
-#define QTM_NOISE_SUPRS_STATUS_FHCHG	(1)
-struct qtm_noise_suprs_msg {
-	uint8_t     report_id;
-	uint8_t     status;
-	uint8_t     gcaf_depth;
-	uint8_t     freq_index;
-} __attribute__ ((packed));
 
-/* status message sent by the self test - T25 */
-struct qtm_self_test_msg {
-  uint8_t     report_id;
-  uint8_t     result_code;
-  uint8_t     result_data_0;
-  uint8_t     result_data_1;
-  uint8_t     result_data_2;
-  uint8_t     result_data_3;
-  uint8_t     result_data_4;
-} __attribute__ ((packed));
 
 /*******************************/
 /**** configuration objects ****/
@@ -182,7 +153,6 @@ struct qtm_gen_cmd_proc {
 	uint8_t			backupnv;
 	uint8_t			calibrate;
 	uint8_t			reportall;
-	uint8_t			rsvd;
 	uint8_t			debugctrl;
 } __attribute__ ((packed));
 
@@ -235,7 +205,6 @@ struct qtm_touch_multi_cfg {
 	uint8_t			x_edge_cdist;
 	uint8_t			y_edge_ori;;
 	uint8_t			y_edge_cdist;
-	uint8_t			max_pos_jump;
 } __attribute__ ((packed));
 
 /* TOUCH_KEYARRAY_T15 */
@@ -269,7 +238,7 @@ struct qtm_proci_linear_tbl_cfg {
 	uint8_t			y_segment[16];
 } __attribute__ ((packed));
 
-/* SPT_COM_CONFIG_T18*/
+/* SPT_COM_CONFIG_T18 */
 struct qtm_spt_com_cfg {
 	uint8_t			ctrl;
 	uint8_t			cmd;
@@ -384,7 +353,7 @@ struct qtm_proci_noise1_suppression_cfg {
 	uint8_t			duty_cycle;
 } __attribute__ ((packed));
 
-/* QTM_OBJ_SPT_USERDATA_T38 */
+/* QTM_OBJ_CPT_USERDATA_T38 */
 struct qtm_spt_userdata {
 	uint8_t			data_0;
 	uint8_t			data_1;
@@ -446,8 +415,8 @@ struct qtouch_ts_platform_data {
 	uint32_t		abs_min_w;
 	uint32_t		abs_max_w;
 
-	uint32_t		x_delta;
-	uint32_t		y_delta;
+        uint32_t                x_delta;
+        uint32_t                y_delta;
 
 	uint16_t		nv_checksum;
 
@@ -455,11 +424,6 @@ struct qtouch_ts_platform_data {
 	uint32_t		fuzz_y;
 	uint32_t		fuzz_p;
 	uint32_t		fuzz_w;
-
-	uint8_t			boot_i2c_addr;
-	uint8_t			fw_version;
-	uint8_t			build_version;
-	uint8_t			base_fw_version;
 
 	int			(*hw_reset)(void);
 

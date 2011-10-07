@@ -78,7 +78,6 @@ struct omap_uart_state {
 static struct omap_uart_state omap_uart[OMAP_MAX_NR_PORTS];
 static LIST_HEAD(uart_list);
 static unsigned int fifo_idleblks = 0;
-static int uart0_padconf = 0x180;
 
 #ifdef CONFIG_SERIAL_OMAP
 static struct plat_serialomap_port serial_platform_data[] = {
@@ -105,7 +104,7 @@ static struct plat_serialomap_port serial_platform_data[] = {
 		.irq		= 74,
 		.regshift	= 2,
 #ifdef CONFIG_SERIAL_OMAP3430_HW_FLOW_CONTROL
-		.ctsrts		= UART_EFR_CTS | UART_EFR_RTS,
+		.ctsrts		= UART_EFR_RTS,
 #endif
 		.flags		= UPF_BOOT_AUTOCONF,
 	},
@@ -422,7 +421,7 @@ void omap_uart_prepare_idle(int num)
 			 * data could still be on the way to the
 			 * fifo. This delay is ~1 byte time @ 115.2k
 			 */
-			if (uart->num == 2)
+			if (uart->num == 0)
 				udelay(80);
 
 #ifdef CONFIG_SERIAL_OMAP
@@ -529,13 +528,13 @@ static void omap_uart_rtspad_init(struct omap_uart_state *uart)
 		return;
 	switch(uart->num) {
 	case 0:
-/*		uart->rts_padconf = 0x17e;*/
+		uart->rts_padconf = 0x17e;
 		break;
 	case 1:
 		uart->rts_padconf = 0x176;
 		break;
 	case 2:
-		uart->rts_padconf = 0x19c;
+/*		uart->rts_padconf = 0x19c; */
 		break;
 	default:
 		uart->rts_padconf = 0;
@@ -570,7 +569,7 @@ static void omap_uart_idle_init(struct omap_uart_state *uart)
 		switch (uart->num) {
 		case 0:
 			wk_mask = OMAP3430_ST_UART1_MASK;
-			padconf = uart0_padconf;
+			padconf = 0x180;
 			break;
 		case 1:
 			wk_mask = OMAP3430_ST_UART2_MASK;
@@ -706,15 +705,10 @@ void __init omap_serial_ctsrts_init(unsigned char ctsrts[])
 {
 #if defined(CONFIG_SERIAL_OMAP) && \
 	defined(CONFIG_SERIAL_OMAP3430_HW_FLOW_CONTROL)
-	serial_platform_data[0].ctsrts = ctsrts[0];
-	serial_platform_data[1].ctsrts = ctsrts[1];
-	serial_platform_data[2].ctsrts = ctsrts[2];
+	serial_platform_data[0].ctsrts = 0x40;//ctsrts[0]; need to check by Steve (w21521)
+	serial_platform_data[1].ctsrts = 0xC0; //ctsrts[1];
+	serial_platform_data[2].ctsrts = 0x40; //ctsrts[2];
 #endif
-}
-
-void __init omap_uart_set_uart0_padconf(int padconf)
-{
-	uart0_padconf = padconf;
 }
 
 void __init omap_serial_init(int wake_gpio_strobe,

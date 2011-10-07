@@ -36,6 +36,14 @@
 #define GPMC_CS0_BASE  0x60
 #define GPMC_CS_SIZE   0x30
 
+////////////////////////////////////////////////////////////////////
+// Adding by no change device tree
+
+/* Feature Node */
+#define DT_HIGH_LEVEL_FEATURE	"/System@0/Feature@0"
+#define DT_HIGH_LEVEL_FEATURE_NO_NAND "feature_no_nand"
+////////////////////////////////////////////////////////////////////
+
 static struct mtd_partition sdp_nand_partitions[] = {
 	/* All the partition sizes are listed in terms of NAND block size */
 	{

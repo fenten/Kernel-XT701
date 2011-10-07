@@ -74,9 +74,6 @@ struct omap_mmc_platform_data {
 
 	u64 dma_mask;
 
-	/* Delay in msec before detecting card */
-	int init_delay;
-
 	/* To identify device name */
 	char * name;
 

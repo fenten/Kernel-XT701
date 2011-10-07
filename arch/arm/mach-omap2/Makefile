@@ -50,9 +50,6 @@ obj-$(CONFIG_OMAP_PM_SRF)		+=  resource34xx.o
 obj-$(CONFIG_OMAP_MBOX_FWK)		+= mailbox_mach.o
 mailbox_mach-objs			:= mailbox.o
 
-# EMU peripherals
-obj-$(CONFIG_OMAP3_EMU)		+= emu.o
-
 iommu-y					+= iommu2.o
 iommu-$(CONFIG_ARCH_OMAP3)		+= omap3-iommu.o
 
@@ -103,7 +100,6 @@ obj-$(CONFIG_MACH_SHOLES)		+= board-sholes.o \
 #					   board-sholes-usbnet.o \
 
 obj-$(CONFIG_MACH_MAPPHONE)             += board-mapphone.o \
-                                           board-mapphone-camera.o \
                                            board-mapphone-flash.o \
                                            board-mapphone-padconf.o \
                                            board-mapphone-panel.o \
@@ -114,9 +110,8 @@ obj-$(CONFIG_MACH_MAPPHONE)             += board-mapphone.o \
                                            board-mapphone-keypad.o \
                                            board-mapphone-wifi.o \
                                            board-mapphone-gpio.o \
-                                           board-mapphone-modem.o \
-                                           board-mapphone-mmcprobe.o \
-                                           board-mapphone-usb.o
+                                           board-mapphone-mmcprobe.o
+#                                          board-mapphone-camera.o \
 obj-$(CONFIG_MOT_FEAT_MDTV)             += board-mapphone-mdtv.o
 obj-$(CONFIG_EMU_UART_DEBUG)		+= board-mapphone-emu_uart.o
 obj-$(CONFIG_MACH_NOKIA_RX51)		+= board-rx51.o \
@@ -153,4 +148,3 @@ obj-y					+= $(onenand-m) $(onenand-y)
 
 smc91x-$(CONFIG_SMC91X)			:= gpmc-smc91x.o
 obj-y					+= $(smc91x-m) $(smc91x-y)
-obj-$(CONFIG_PROC_OMAP_PHONE_ID)       	+= phoneid.o

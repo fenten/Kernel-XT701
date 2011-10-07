@@ -383,5 +383,6 @@ int hp3a_read_ispreg_to_user(struct hp3a_reg *user_reg);
  * External global task data.
  **/
 extern struct hp3a_context g_tc;
+extern struct work_struct g_hp3a_work_queue;
 
 #endif	/* __HP3A_COMMON_H_INCLUDED */

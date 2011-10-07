@@ -37,7 +37,21 @@
 #include <asm/prom.h>
 #endif
 
-#define GPIO_SIGNAL_MMC_DET 12
+
+/////////////////////////////////////////////////////////////////////////
+// Adding by no change device tree
+/* MMC Node */
+#define DT_PATH_MMC1		"/System@0/SDHC@0/SDHCSLOT@0"
+#define DT_PATH_MMC2		"/System@0/SDHC@0/SDHCSLOT@1"
+#define DT_PATH_MMC3		"/System@0/SDHC@0/SDHCSLOT@2"
+#define DT_PROP_MMC_CARD_CONNECT	"card_connect"
+#define DT_PROP_MMC_PWR_SUPPLY		"pwr_supply"
+#define DT_PROP_MMC_HOST_CAPABILITY	"host_capability"
+#define DT_PROP_MMC_CARD_CAPABILITY	"card_capability"
+#define DT_PROP_MMC_CARD_DETECTION	"card_detection"
+/////////////////////////////////////////////////////////////////////////
+
+#define GPIO_SIGNAL_MMC_DET 163
 
 static const int mmc2_cd_gpio = OMAP_MAX_GPIO_LINES + 1;
 
@@ -86,8 +100,6 @@ static int hsmmc_late_init(struct device *dev)
 		ret = PTR_ERR(hsmmc_regulator);
 		goto err2;
 	}
-	regulator_enable(hsmmc_regulator);
-	msleep(3000);
 
 	return ret;
 err2:
@@ -190,7 +202,7 @@ static int hsmmc_set_power(struct device *dev, int slot, int power_on,
 	return 0;
 }
 
-#ifdef CONFIG_MMC_TEST_INSERT_REMOVE
+#ifdef CONFIG_MMC_TST
 int ex_hsmmc_set_power(struct device *dev, int slot, int power_on,
 						int vdd)
 {
@@ -258,7 +270,6 @@ static struct omap_mmc_platform_data mmc1_data __initdata = {
 	.resume				= hsmmc_resume,
 #endif
 	.dma_mask			= 0xffffffff,
-	.init_delay			= 50,
 	.slots[0] = {
 		.wires			= 4,
 		.nonremovable		= 0,	/* MMC_UNSAFE_RESUME defined */
@@ -284,7 +295,9 @@ static struct omap_mmc_platform_data emmc_data __initdata = {
 	.slots[0] = {
 		.wires			= 8,
 		.nonremovable		= 1,
-		.power_saving		= 1,
+		/* TEMPORARILY TURN OFF POWER SAVING UNTIL
+		   IT DOESNT BREAK DROID2 */
+		.power_saving		= 0,
 		.no_off			= 1,
 		.set_power		= emmc_set_power,  /* must have */
 		.ocr_mask		= MMC_VDD_165_195,

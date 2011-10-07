@@ -189,10 +189,6 @@
 #define OV5650_STROBE_CTRL_STRB_PLS_WIDTH_SHIFT  2
 #define OV5650_STROBE_CTRL_STRB_MODE_SHIFT  0
 
-#define OV5650_5060HZ_CTRL_01			0x3C01
-#define OV5650_5060HZ_CTRL_01_DEBUG_SHIFT  7
-#define OV5650_5060HZ_CTRL_01_DEBUG_MASK (0x1 << \
-	OV5650_5060HZ_CTRL_01_DEBUG_SHIFT)
 #define OV5650_5060HZ_CTRL_0C			0x3C0C
 #define OV5650_5060HZ_CTRL_0C_BAND50_SHIFT  0
 #define OV5650_5060HZ_CTRL_0C_BAND50_MASK (0x1 << \
@@ -235,10 +231,6 @@
 #define OV5650_ISP_CTRL_02_VAP_EN_SHIFT  1
 #define OV5650_ISP_CTRL_02_VAP_EN_MASK (0x1 << \
 	OV5650_ISP_CTRL_02_VAP_EN_SHIFT)
-#define OV5650_ISP_CTRL_3D			0x503D
-#define OV5650_ISP_CTRL_3D_TEST_PATT_EN_SHIFT  7
-#define OV5650_ISP_CTRL_3D_TEST_PATT_EN_MASK (0x1 << \
-	OV5650_ISP_CTRL_3D_TEST_PATT_EN_SHIFT)
 #define OV5650_ISP_CTRL46			0x5046
 #define OV5650_RESERVED_505A			0x505A
 #define OV5650_RESERVED_505B			0x505B
@@ -449,6 +441,11 @@ const static struct ov5650_reg ov5650_common[OV_NUM_IMAGE_SIZES][150] = {
 		{0x3a1a, 0x06},
 		{0x3623, 0x01},
 		{0x3633, 0x24},
+		{0x3c01, 0x34},
+		{0x3c04, 0x28},
+		{0x3c05, 0x98},
+		{0x3c07, 0x07},
+		{0x3c09, 0xc2},
 		{0x4000, 0x05},
 		{0x401d, 0x28},
 		{0x4001, 0x02},
@@ -516,6 +513,11 @@ const static struct ov5650_reg ov5650_common[OV_NUM_IMAGE_SIZES][150] = {
 		{0x3a1a, 0x06},
 		{0x3623, 0x01},
 		{0x3633, 0x24},
+		{0x3c01, 0x34},
+		{0x3c04, 0x28},
+		{0x3c05, 0x98},
+		{0x3c07, 0x07},
+		{0x3c09, 0xc2},
 		{0x4000, 0x05},
 		{0x401d, 0x28},
 		{0x4001, 0x02},
@@ -582,6 +584,11 @@ const static struct ov5650_reg ov5650_common[OV_NUM_IMAGE_SIZES][150] = {
 		{0x3a1a, 0x06},
 		{0x3623, 0x01},
 		{0x3633, 0x24},
+		{0x3c01, 0x34},
+		{0x3c04, 0x28},
+		{0x3c05, 0x98},
+		{0x3c07, 0x07},
+		{0x3c09, 0xc2},
 		{0x401c, 0x42},
 		{0x4000, 0x05},
 		{0x401d, 0x28},
@@ -675,7 +682,14 @@ const static struct ov5650_reg ov5650_common[OV_NUM_IMAGE_SIZES][150] = {
 		{0x3a18, 0x00},
 		{0x3a19, 0xf8},
 		{0x3b07, 0x0e},
+		{0x3c01, 0x34},
+		{0x3c04, 0x28},
+		{0x3c05, 0x98},
+		{0x3c07, 0x07},
+		{0x3c09, 0xc2},
 		{0x300D, 0x21},
+		{0x3C0A, 0x54},
+		{0x3C0B, 0xA1},
 		{0x401f, 0x03},
 		{0x3503, 0x13},
 		{0x3003, 0x01},
@@ -712,6 +726,11 @@ const static struct ov5650_reg ov5650_common[OV_NUM_IMAGE_SIZES][150] = {
 		{0x3a1a, 0x06},
 		{0x3623, 0x01},
 		{0x3633, 0x24},
+		{0x3c01, 0x34},
+		{0x3c04, 0x28},
+		{0x3c05, 0x98},
+		{0x3c07, 0x07},
+		{0x3c09, 0xc2},
 		{0x4000, 0x05},
 		{0x401d, 0x28},
 		{0x4001, 0x02},
@@ -754,11 +773,6 @@ const static struct ov5650_reg ov5650_common[OV_NUM_IMAGE_SIZES][150] = {
 
 /* 50-60 Hz Detection settings */
 const static struct ov5650_reg ov5650_50_60_hz_detect_tbl[] = {
-	{0x3c01, 0xB4},  /* Start in manual, switch to auto after streaming */
-	{0x3c04, 0x28},
-	{0x3c05, 0x98},
-	{0x3c07, 0x07},
-	{0x3c09, 0xc2},
 	{0x3c0a, 0xaf},  /* 27Mhz */
 	{0x3c0b, 0xc8},  /* 27Mhz */
 	/* read 3c0c[0], 1=50hz, 0=60hz */

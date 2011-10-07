@@ -18,8 +18,6 @@
 #include <linux/leds-cpcap-kpad.h>
 #include <linux/leds-cpcap-display.h>
 #include <linux/leds-cpcap-button.h>
-#include <linux/cpcap_audio_platform_data.h>
-#include <linux/pm_dbg.h>
 #include <mach/gpio.h>
 #include <plat/mux.h>
 #include <plat/resource.h>
@@ -29,6 +27,14 @@
 #include <mach/dt_path.h>
 #include <asm/prom.h>
 #endif
+
+//////////////////////////////////////////////////////////////////////
+// Adding by no change device tree
+/* LM3559 Node */
+#define DT_PATH_LM3559			"/System@0/I2C@0/LEDLM3559@0"
+
+//////////////////////////////////////////////////////////////////////
+
 /*
  * CPCAP devcies are common for different HW Rev.
  *
@@ -107,20 +113,6 @@ static struct platform_device cpcap_vio_active_device = {
 		.platform_data = NULL,
 	},
 };
-
-#ifdef CONFIG_PM_DBG_DRV
-static struct platform_device cpcap_pm_dbg_device = {
-	.name		= "cpcap_pm_dbg",
-	.id		= -1,
-	.dev		= {
-		.platform_data = NULL,
-	},
-};
-
-static struct pm_dbg_drvdata cpcap_pm_dbg_drvdata = {
-	.pm_cd_factor = 1000,
-};
-#endif
 
 static struct platform_device *cpcap_devices[] = {
 #ifdef CONFIG_CPCAP_USB
@@ -207,251 +199,57 @@ static struct platform_device cpcap_lm3559 = {
 static int __init is_ld_cpcap_kpad_on(void)
 {
 	u8 device_available;
-	struct device_node *node;
-	const void *prop;
 
-	node = of_find_node_by_path(DT_KPAD_LED);
-	if (node == NULL) {
-		pr_err("Unable to read node %s from device tree!\n",
-			DT_KPAD_LED);
-		return -ENODEV;
-	}
-
-	prop = of_get_property(node, "tablet_kpad_led", NULL);
-	if (prop)
-		device_available = *(u8 *)prop;
-	else {
-		pr_err("Read property %s error!\n", DT_PROP_TABLET_KPAD_LED);
-			of_node_put(node);
-		return -ENODEV;
-	}
-
-	of_node_put(node);
+     device_available = 1;
 	return device_available;
 }
 
 static int __init is_cpcap_kpad_on(void)
 {
 	u8 device_available;
-	struct device_node *node;
-	const void *prop;
 
-	node = of_find_node_by_path(DT_KPAD_LED);
-	if (node == NULL) {
-		pr_err("Unable to read node %s from device tree!\n",
-			DT_KPAD_LED);
-		return -ENODEV;
-	}
-
-	prop = of_get_property(node, "ruth_kpad_led", NULL);
-	if (prop)
-		device_available = *(u8 *)prop;
-	else {
-		pr_err("Read property %s error!\n", DT_PROP_RUTH_KPAD_LED);
-		of_node_put(node);
-		return -ENODEV;
-	}
-
-	of_node_put(node);
+	device_available = 0;
 	return device_available;
 }
 
 static int __init cpcap_button_init(void)
 {
 	u8 device_available;
-	struct device_node *node;
-	const void *prop;
 
-	node = of_find_node_by_path(DT_HOME_LED);
-	if (node == NULL) {
-		pr_err("Unable to read node %s from device tree!\n",
-			DT_HOME_LED);
-		return -ENODEV;
-}
-
-	prop = of_get_property(node, "ruth_button_led", NULL);
-	if (prop)
-		device_available = *(u8 *)prop;
-	else {
-		pr_err("Read property %s error!\n", DT_PROP_RUTH_BUTTON);
-			of_node_put(node);
-		return -ENODEV;
-	}
-
-	of_node_put(node);
+    device_available = 0;
 	return device_available;
 }
 
 static int __init ld_cpcap_disp_button_init(void)
 {
-	struct device_node *node;
-	const void *prop;
 	struct disp_button_config_data *pbtn_data = &btn_data;
 	u8 device_available, ret;
 
 	ret = -ENODEV;
 
-	node = of_find_node_by_path(DT_HOME_LED);
-	if (node == NULL) {
-		pr_err("Unable to read node %s from device tree!\n",
-							DT_HOME_LED);
-		goto err;
-	}
+        device_available = 1;
+        pbtn_data->duty_cycle = 0x2A0;
+	pbtn_data->cpcap_mask = 0x3FF;
+	pbtn_data->led_current =  0xA;
+	pbtn_data->reg = CPCAP_REG_KLC;
 
-	prop = of_get_property(node, "tablet_button_led", NULL);
-	if (prop)
-		device_available = *(u8 *)prop;
-	else {
-		pr_err("Read property %s error!\n", DT_PROP_TABLET_BUTTON);
-		goto err;
-	}
-	/*
-	 * Hard Keys do not light
-	 * making it difficult to see in low/no light
-	 */
-	if (device_available <= 0) {
-		pr_err("Tablet button led device not present: %d\n",
-							device_available);
-		goto err;
-	}
-
-	prop = of_get_property(node, "button_duty_cycle", NULL);
-	if (prop)
-		pbtn_data->duty_cycle = *(u16 *)prop;
-	else {
-		pr_err("Read property %s error!\n", "button_duty_cycle");
-		goto err;
-	}
-
-	prop = of_get_property(node, "button_cpcap_mask", NULL);
-	if (prop)
-		pbtn_data->cpcap_mask = *(u16 *)prop;
-	else {
-		pr_err("Read property %s error!\n", "button_cpcap_mask");
-		goto err;
-	}
-
-	prop = of_get_property(node, "button_current", NULL);
-	if (prop)
-		pbtn_data->led_current = *(u8 *)prop;
-	else {
-		pr_err("Read property %s error!\n", "button_current");
-		goto err;
-	}
-
-	prop = of_get_property(node, "button_register", NULL);
-	if (prop)
-		pbtn_data->reg = *(enum cpcap_reg *)prop;
-	else {
-		pr_err("Read property %s error!\n", "button_register");
-		goto err;
-	}
-
-	prop = of_get_property(node, "button_register2", NULL);
-	if (prop == NULL) {
-		pr_err("Read property %s error!\n", "button_register2");
-		pbtn_data->reg2 = 0;
-
-		/* NOTE: Fail to read reg2 NOT mean everything wrong*/
-		goto done;
-	}
-
-	pbtn_data->reg2 = *(enum cpcap_reg *)prop;
-	prop = of_get_property(node, "button_cpcap_abmode_mask", NULL);
-	if (prop)
-		pbtn_data->abmode_cpcap_mask = *(u16 *)prop;
-	else {
-		pr_err("Read property %s error!\n",
-				"button_cpcap_abmode_mask");
-		goto err;
-	}
-
-	prop = of_get_property(node, "button_pwm", NULL);
-	if (prop)
-		pbtn_data->pwm = *(u16 *)prop;
-	else {
-		pr_err("Read property %s error!\n", "button_pwm");
-		goto err;
-	}
-
-	prop = of_get_property(node, "button_fade_time", NULL);
-	if (prop)
-		pbtn_data->fade_time = *(u16 *)prop;
-	else {
-		pr_err("Read property %s error!\n", "button_fade_time");
-		goto err;
-	}
-
-	prop = of_get_property(node, "button_fade_en", NULL);
-	if (prop)
-		pbtn_data->fade_en = *(u16 *)prop;
-	else {
-		pr_err("Read property %s error!\n", "button_fade_time");
-		goto err;
-	}
-
-	prop = of_get_property(node, "button_abmode", NULL);
-	if (prop)
-		pbtn_data->abmode = *(u16 *)prop;
-	else {
-		pr_err("Read property %s error!\n", "button_abmode");
-		goto err;
-	}
-
-done:
 	ret = 1;
-err:
-	if (node != NULL)
-		of_node_put(node);
 	return ret;
 }
 
 static int __init is_disp_led_on(void)
 {
 	u8 device_available;
-	struct device_node *node;
-	const void *prop;
 
-	node = of_find_node_by_path(DT_BACKLIGHT);
-	if (node == NULL) {
-		pr_err("Unable to read node %s from device tree!\n",
-			DT_BACKLIGHT);
-		return -ENODEV;
-	}
-
-	prop = of_get_property(node, "ruth_lcd", NULL);
-	if (prop)
-		device_available = *(u8 *)prop;
-	else {
-		pr_err("Read property %s error!\n", DT_PROP_RUTH_LCD);
-			of_node_put(node);
-		return -ENODEV;
-	}
-
-	of_node_put(node);
+	device_available = 0;
 	return device_available;
 }
 
 static int __init led_cpcap_lm3554_init(void)
 {
 	u8 device_available;
-	struct device_node *node;
-	const void *prop;
 
-	node = of_find_node_by_path(DT_PATH_LM3554);
-	if (node == NULL)
-		return -ENODEV;
-
-	prop = of_get_property(node, "device_available", NULL);
-	if (prop)
-		device_available = *(u8 *)prop;
-	else {
-		pr_err("Read property %s error!\n", "device_available");
-		of_node_put(node);
-		return -ENODEV;
-	}
-
-	of_node_put(node);
+	device_available = 1;
 	return device_available;
 }
 
@@ -463,7 +261,9 @@ static int __init led_cpcap_lm3559_init(void)
 
 	node = of_find_node_by_path(DT_PATH_LM3559);
 	if (node == NULL)
+	{
 		return -ENODEV;
+	}
 
 	prop = of_get_property(node, "device_available", NULL);
 	if (prop)
@@ -475,139 +275,23 @@ static int __init led_cpcap_lm3559_init(void)
 	}
 
 	of_node_put(node);
+
 	return device_available;
 }
 
 static int __init is_ld_cpcap_rgb_on(void)
 {
 	u8 device_available;
-	struct device_node *node;
-	const void *prop;
 
-	node = of_find_node_by_path(DT_NOTIFICATION_LED);
-	if (node == NULL) {
-		pr_err("Unable to read node %s from device tree!\n",
-			DT_NOTIFICATION_LED);
-		return -ENODEV;
-	}
-
-	prop = of_get_property(node, "tablet_rgb_led", NULL);
-	if (prop)
-		device_available = *(u8 *)prop;
-	else {
-		pr_err("Read property %s error!\n", DT_PROP_TABLET_RGB_LED);
-		of_node_put(node);
-		return -ENODEV;
-	}
-
-	of_node_put(node);
+	device_available = 1;
 	return device_available;
 }
 
-int is_cpcap_vio_supply_converter(void)
+static int is_cpcap_vio_supply_converter(void)
 {
-	struct device_node *node;
-	const void *prop;
-	int size;
-
-	node = of_find_node_by_path(DT_PATH_CPCAP);
-	if (node) {
-		prop = of_get_property(node,
-				DT_PROP_CPCAP_VIO_SUPPLY_CONVERTER,
-				&size);
-		if (prop && size)
-			return *(u8 *)prop;
-	}
 	/* The converter is existing by default */
 	return 1;
 }
-
-#ifdef CONFIG_SOUND_CPCAP_OMAP
-static void get_cpcap_audio_data(void)
-{
-	struct device_node *node;
-	const void *prop;
-	static struct cpcap_audio_pdata data;
-
-	cpcap_audio_device.dev.platform_data = (void *)&data;
-
-	node = of_find_node_by_path(DT_PATH_AUDIO);
-	if (!node) {
-		pr_err("Unable to read node %s from device tree!\n",
-			DT_PATH_AUDIO);
-		return;
-	}
-
-	prop = of_get_property(node, DT_PROP_AUDIO_ANALOG_DOWNLINK, NULL);
-	if (prop)
-		data.analog_downlink = (*(int *)prop > 0 ? 1 : 0);
-	else {
-		data.analog_downlink = 0;
-		pr_err("Read property %s error!\n",
-			DT_PROP_AUDIO_ANALOG_DOWNLINK);
-	}
-
-	prop = of_get_property(node, DT_PROP_AUDIO_STEREO_LOUDSPEAKER, NULL);
-	if (prop)
-		data.stereo_loudspeaker = (*(int *)prop > 0 ? 1 : 0);
-	else {
-		data.stereo_loudspeaker = 0;
-		pr_err("Read property %s error!\n",
-			DT_PROP_AUDIO_STEREO_LOUDSPEAKER);
-	}
-
-	prop = of_get_property(node, DT_PROP_AUDIO_MIC3, NULL);
-	if (prop)
-		data.mic3 = (*(int *)prop > 0 ? 1 : 0);
-	else {
-		data.mic3 = 0;
-		pr_err("Read property %s error!\n",
-			DT_PROP_AUDIO_MIC3);
-	}
-	prop = of_get_property(node, DT_PROP_AUDIO_I2S_BP, NULL);
-	if (prop)
-		data.i2s_bp = (*(int *)prop > 0 ? 1 : 0);
-	else {
-		data.i2s_bp = 0;
-		pr_err("Read property %s error!\n",
-			DT_PROP_AUDIO_I2S_BP);
-	}
-
-	prop = of_get_property(node, DT_PROP_AUDIO_MB_BIAS, NULL);
-	if (prop) {
-		/* MB_BIAS_R[1:0]
-		::: 00 : 0Ohm / 01 : 2.2KOhm
-		::: 10 : 4.7KOhm / 11 : invalid state */
-		data.mb_bias = *(int *)prop;
-		if (data.mb_bias < 0 || data.mb_bias > 2)
-			data.mb_bias = 0;
-	} else {
-		data.mb_bias = 0;
-		pr_err("Read property %s error!\n",
-			DT_PROP_AUDIO_MB_BIAS);
-	}
-
-	of_node_put(node);
-}
-#endif
-
-#ifdef CONFIG_PM_DBG_DRV
-static void get_pm_dbg_drvdata(void)
-{
-	struct device_node *node;
-	const void *prop;
-	int size;
-
-	node = of_find_node_by_path("/System@0/PMDbgDevice@0");
-	if (node) {
-		prop = of_get_property(node,
-			"pm_cd_factor",
-			&size);
-		if (prop && size)
-			cpcap_pm_dbg_drvdata.pm_cd_factor = *(u16 *)prop;
-	}
-}
-#endif
 
 #endif /* CONFIG_ARM_OF */
 
@@ -615,10 +299,6 @@ static void get_pm_dbg_drvdata(void)
 void __init mapphone_cpcap_client_init(void)
 {
 	int i;
-
-#ifdef CONFIG_SOUND_CPCAP_OMAP
-	get_cpcap_audio_data();
-#endif
 
 	for (i = 0; i < ARRAY_SIZE(cpcap_devices); i++)
 		cpcap_device_register(cpcap_devices[i]);
@@ -649,10 +329,4 @@ void __init mapphone_cpcap_client_init(void)
 
 	if (!is_cpcap_vio_supply_converter())
 		cpcap_device_register(&cpcap_vio_active_device);
-
-#ifdef CONFIG_PM_DBG_DRV
-	get_pm_dbg_drvdata();
-	cpcap_device_register(&cpcap_pm_dbg_device);
-	platform_set_drvdata(&cpcap_pm_dbg_device, &cpcap_pm_dbg_drvdata);
-#endif
 }

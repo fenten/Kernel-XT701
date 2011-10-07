@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2010 Motorola, Inc.
+ * Copyright (C) 2009 Motorola, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -16,60 +16,57 @@
  * 02111-1307, USA
  */
 
-#include <linux/isl29030.h>
-
+#include <linux/i2c.h>
+#include <linux/leds.h>
 #include <linux/delay.h>
 #include <linux/earlysuspend.h>
-#include <linux/i2c.h>
-#include <linux/input.h>
-#include <linux/interrupt.h>
-#include <linux/irq.h>
-#include <linux/leds.h>
 #include <linux/miscdevice.h>
-#include <linux/mutex.h>
 #include <linux/platform_device.h>
-#include <linux/types.h>
 #include <linux/uaccess.h>
 #include <linux/workqueue.h>
+#include <linux/irq.h>
+#include <linux/input.h>
+#include <linux/interrupt.h>
+#include <linux/isl29030.h>
+#include <linux/types.h>
+
+
 
 struct isl29030_data {
 	struct input_dev *idev;
 	struct input_dev *adev;
+	struct led_classdev led_dev;
 	struct i2c_client *client;
 	struct work_struct wq;
 	struct workqueue_struct *working_queue;
-	struct isl29030_platform_data *pdata;
-	struct mutex lock;    /* Mutex to lock read and write */
-	struct mutex bit_lock; /* Mutex to lock single bit function */
-	struct early_suspend early_suspend;
-	unsigned int lux_level;
-	atomic_t prox_enabled;
-	atomic_t als_enabled;
-	atomic_t prox_near;
-	atomic_t prox_reported_near;
-	atomic_t als_needs_enable_flag;
-	atomic_t irq_enabled;
+	struct isl29030_platform_data *als_ir_pdata;
+	struct early_suspend		early_suspend;
+	struct isl29030_zone_conv isl29030_low_zone_info[255];
+	struct isl29030_zone_conv isl29030_high_zone_info[255];
+	uint8_t zone;
+	uint8_t low_lux_level;
+	uint8_t prox_detect;
+	atomic_t enabled;
+	int irq;
 };
 
 struct isl29030_data *isl29030_misc_data;
 
 struct isl29030_reg {
 	const char *name;
-	u8 reg;
+	uint8_t reg;
 } isl29030_regs[] = {
-	{ "CHIP_ID",		ISL29030_CHIPID },
-	{ "CONFIGURE",		ISL29030_CONFIGURE },
-	{ "INTERRUPT",		ISL29030_INTERRUPT },
-	{ "PROX_LT",		ISL29030_PROX_LT },
-	{ "PROX_HT",		ISL29030_PROX_HT },
-	{ "ALS_IR_TH1",		ISL29030_ALSIR_TH1 },
-	{ "ALS_IR_TH2",		ISL29030_ALSIR_TH2 },
-	{ "ALS_IR_TH3",		ISL29030_ALSIR_TH3 },
-	{ "PROX_DATA",		ISL29030_PROX_DATA },
-	{ "ALS_IR_DT1",		ISL29030_ALSIR_DT1 },
-	{ "ALS_IR_DT2",		ISL29030_ALSIR_DT2 },
-	{ "ENABLE",		ISL29030_TEST1 },
-	{ "DISABLE",		ISL29030_TEST2 },
+	{ "CHIP_ID",			ISL29030_CHIPID },
+	{ "CONFIGURE",          ISL29030_CONFIGURE },
+	{ "INTERRUPT",          ISL29030_INTERRUPT },
+	{ "PROX_LT",			ISL29030_PROX_LT },
+	{ "PROX_HT",			ISL29030_PROX_HT },
+	{ "ALS_IR_TH1",			ISL29030_ALSIR_TH1 },
+	{ "ALS_IR_TH2",			ISL29030_ALSIR_TH2 },
+	{ "ALS_IR_TH3",         ISL29030_ALSIR_TH3 },
+	{ "PROX_DATA",          ISL29030_PROX_DATA },
+	{ "ALS_IR_DT1",         ISL29030_ALSIR_DT1 },
+	{ "ALS_IR_DT2",         ISL29030_ALSIR_DT2 },
 };
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
@@ -77,34 +74,25 @@ static void isl29030_early_suspend(struct early_suspend *handler);
 static void isl29030_late_resume(struct early_suspend *handler);
 #endif
 
-#define ISL29030_DBG_REPORT_INPUT	0x00000001
-#define ISL29030_DBG_POWER_ON_OFF	0x00000002
-#define ISL29030_DBG_ENABLE_DISABLE	0x00000004
-#define ISL29030_DBG_MISC_IOCTL		0x00000008
-#define ISL29030_DBG_SUSPEND_RESUME	0x00000010
-static u32 isl29030_debug = 0x00000000;
-
+static uint32_t isl29030_debug = 0x03;
 module_param_named(als_debug, isl29030_debug, uint, 0664);
 
-static int isl29030_read_reg(struct isl29030_data *isl, u8 reg,
-			     u8 *value)
+static int isl29030_read_reg(struct isl29030_data *als_ir_data, uint8_t reg,
+		   uint8_t *value)
 {
 	int error = 0;
 	int i = 0;
-	u8 dest_buffer;
+	uint8_t dest_buffer;
 
 	if (!value) {
 		pr_err("%s: invalid value pointer\n", __func__);
 		return -EINVAL;
 	}
-
-	mutex_lock(&isl->lock);
-
 	do {
 		dest_buffer = reg;
-		error = i2c_master_send(isl->client, &dest_buffer, 1);
+		error = i2c_master_send(als_ir_data->client, &dest_buffer, 1);
 		if (error == 1) {
-			error = i2c_master_recv(isl->client,
+			error = i2c_master_recv(als_ir_data->client,
 				&dest_buffer, LD_ISL29030_ALLOWED_R_BYTES);
 		}
 		if (error != LD_ISL29030_ALLOWED_R_BYTES) {
@@ -118,23 +106,20 @@ static int isl29030_read_reg(struct isl29030_data *isl, u8 reg,
 		error = 0;
 		*value = dest_buffer;
 	}
-	mutex_unlock(&isl->lock);
 
 	return error;
 }
 
-static int isl29030_write_reg(struct isl29030_data *isl,
-			      u8 reg,
-			      u8 value)
+static int isl29030_write_reg(struct isl29030_data *als_ir_data,
+							uint8_t reg,
+							uint8_t value)
 {
-	u8 buf[LD_ISL29030_ALLOWED_W_BYTES] = { reg, value };
+	uint8_t buf[LD_ISL29030_ALLOWED_W_BYTES] = { reg, value };
 	int bytes;
 	int i = 0;
 
-	mutex_lock(&isl->lock);
-
 	do {
-		bytes = i2c_master_send(isl->client, buf,
+		bytes = i2c_master_send(als_ir_data->client, buf,
 					LD_ISL29030_ALLOWED_W_BYTES);
 
 		if (bytes != LD_ISL29030_ALLOWED_W_BYTES) {
@@ -144,7 +129,6 @@ static int isl29030_write_reg(struct isl29030_data *isl,
 	} while ((bytes != (LD_ISL29030_ALLOWED_W_BYTES))
 		 && ((++i) < LD_ISL29030_MAX_RW_RETRIES));
 
-	mutex_unlock(&isl->lock);
 	if (bytes != LD_ISL29030_ALLOWED_W_BYTES) {
 		pr_err("%s: i2c_master_send error\n", __func__);
 		return -EINVAL;
@@ -152,128 +136,22 @@ static int isl29030_write_reg(struct isl29030_data *isl,
 	return 0;
 }
 
-static int isl29030_set_bit(struct isl29030_data *isl,
-				   u8 reg,
-				   u8 bit_mask,
-				   u8 value)
+static int ld_isl29030_init_registers(struct isl29030_data *data)
 {
-	int ret;
-	u8 reg_val;
-	mutex_lock(&isl->bit_lock);
-
-	ret = isl29030_read_reg(isl, reg, &reg_val);
-
-	if (ret != 0) {
-		pr_err("%s:Unable to read register 0x%x: %d\n",
-			__func__, reg, ret);
-		ret = -EFAULT;
-	} else {
-
-		if (value)
-			reg_val |= (u8)bit_mask;
-		else
-			reg_val &= (u8)~bit_mask;
-
-		ret = isl29030_write_reg(isl, reg, reg_val);
-
-		if (ret != 0) {
-			pr_err("%s:Unable to write register 0x%x: %d\n",
-				__func__, reg, ret);
-			ret = -EFAULT;
-		}
-	}
-	mutex_unlock(&isl->bit_lock);
-
-	return ret;
-}
-
-static int isl29030_set_als_enable(struct isl29030_data *isl,
-				   unsigned int bit_value)
-{
-	if (isl29030_debug & ISL29030_DBG_ENABLE_DISABLE)
-		pr_info("%s: bit = %d prox_near = %d als_needs_enable = %d\n",
-			__func__, bit_value, atomic_read(&isl->prox_near),
-			atomic_read(&isl->als_needs_enable_flag));
-	if (bit_value && (atomic_read(&isl->prox_near))) {
-		atomic_set(&isl->als_needs_enable_flag, 1);
-		return 0;
-	}
-	atomic_set(&isl->als_needs_enable_flag, 0);
-
-	return isl29030_set_bit(isl, ISL29030_CONFIGURE,
-		ISL29030_CNF_ALS_EN_MASK, bit_value);
-}
-
-static int isl29030_set_als_range(struct isl29030_data *isl,
-				  unsigned int bit_value)
-{
-	return isl29030_set_bit(isl, ISL29030_CONFIGURE,
-		ISL29030_CNF_ALS_RANGE_MASK, bit_value);
-}
-
-static int isl29030_clear_als_flag(struct isl29030_data *isl)
-{
-	return isl29030_set_bit(isl, ISL29030_INTERRUPT,
-		ISL29030_ALS_FLAG_MASK, 0);
-}
-
-static int isl29030_clear_prox_flag(struct isl29030_data *isl)
-{
-	return isl29030_set_bit(isl, ISL29030_INTERRUPT,
-		ISL29030_PROX_FLAG_MASK, 0);
-}
-
-static int isl29030_clear_prox_and_als_flags(struct isl29030_data *isl)
-{
-	return isl29030_set_bit(isl, ISL29030_INTERRUPT,
-		ISL29030_ALS_FLAG_MASK | ISL29030_PROX_FLAG_MASK, 0);
-}
-
-static int isl29030_set_prox_enable(struct isl29030_data *isl,
-				    unsigned int bit_value)
-{
-	int err;
-	if (isl29030_debug & ISL29030_DBG_ENABLE_DISABLE)
-		pr_info("%s: bit = %d prox_near = %d als_needs_enable = %d\n",
-			__func__, bit_value, atomic_read(&isl->prox_near),
-			atomic_read(&isl->als_needs_enable_flag));
-
-	err = isl29030_set_bit(isl, ISL29030_CONFIGURE,
-		ISL29030_CNF_PROX_EN_MASK,
-		bit_value);
-
-	if (!err && !bit_value) {
-		atomic_set(&isl->prox_near, 0);
-		if (atomic_read(&isl->als_needs_enable_flag))
-			return isl29030_set_als_enable(isl, 1);
-	}
-	return err;
-}
-
-static int ld_isl29030_init_registers(struct isl29030_data *isl)
-{
-	/* as per intersil recommendations */
-	if (isl29030_write_reg(isl, ISL29030_CONFIGURE, 0) ||
-		isl29030_write_reg(isl, ISL29030_TEST2, 0x29) ||
-		isl29030_write_reg(isl, ISL29030_TEST1, 0) ||
-		isl29030_write_reg(isl, ISL29030_TEST2, 0)) {
-
-		pr_err("%s:Register initialization failed\n", __func__);
-		return -EINVAL;
-	}
-	msleep(2);
-
-	if (isl29030_write_reg(isl, ISL29030_CONFIGURE,
-			isl->pdata->configure) ||
-		isl29030_write_reg(isl, ISL29030_INTERRUPT,
-			isl->pdata->interrupt_cntrl) ||
-		isl29030_write_reg(isl, ISL29030_PROX_LT,
-			isl->pdata->prox_lower_threshold) ||
-		isl29030_write_reg(isl, ISL29030_PROX_HT,
-			isl->pdata->prox_higher_threshold) ||
-		isl29030_write_reg(isl, ISL29030_ALSIR_TH1, 0xFF) ||
-		isl29030_write_reg(isl, ISL29030_ALSIR_TH2, 0xFF) ||
-		isl29030_write_reg(isl, ISL29030_ALSIR_TH3, 0xFF)) {
+	if (isl29030_write_reg(data, ISL29030_CONFIGURE,
+			data->als_ir_pdata->configure) ||
+		isl29030_write_reg(data, ISL29030_INTERRUPT,
+			data->als_ir_pdata->interrupt_cntrl) ||
+		isl29030_write_reg(data, ISL29030_PROX_LT,
+			data->als_ir_pdata->prox_lower_threshold) ||
+		isl29030_write_reg(data, ISL29030_PROX_HT,
+			data->als_ir_pdata->prox_higher_threshold) ||
+		isl29030_write_reg(data, ISL29030_ALSIR_TH1,
+			data->als_ir_pdata->als_ir_low_threshold) ||
+		isl29030_write_reg(data, ISL29030_ALSIR_TH2,
+			data->als_ir_pdata->als_ir_high_low_threshold) ||
+		isl29030_write_reg(data, ISL29030_ALSIR_TH3,
+			data->als_ir_pdata->als_ir_high_threshold)) {
 		pr_err("%s:Register initialization failed\n", __func__);
 		return -EINVAL;
 	}
@@ -282,343 +160,218 @@ static int ld_isl29030_init_registers(struct isl29030_data *isl)
 
 irqreturn_t ld_isl29030_irq_handler(int irq, void *dev)
 {
-	struct isl29030_data *isl = dev;
+	struct isl29030_data *als_ir_data = dev;
 
-	disable_irq_nosync(isl->client->irq);
-	queue_work(isl->working_queue, &isl->wq);
-	enable_irq(isl->client->irq);
+	disable_irq(als_ir_data->client->irq);
+	queue_work(als_ir_data->working_queue, &als_ir_data->wq);
 
 	return IRQ_HANDLED;
 }
 
-static int isl29030_read_adj_als(struct isl29030_data *isl,
-				 unsigned int *raw_als_count)
+static int isl29030_read_adj_als(struct isl29030_data *isl)
 {
-	int lens_adj_lux = -1;
 	int ret;
-	unsigned int als_read_data = 0;
-	unsigned char als_lower;
-	unsigned char als_upper;
+	int i;
+	int lux = 0;
+	u8 als_lower;
+	u8 als_upper;
+	u16 als_read_data = 0;
+	u8 configure_reg;
 
 	ret = isl29030_read_reg(isl, ISL29030_ALSIR_DT1, &als_lower);
 	if (ret != 0) {
-		pr_err("%s:Unable to read ISL29030_ALSIR_DT1 register: %d\n",
-			__func__, ret);
-		return -EFAULT;
+		pr_err("%s:Unable to read interrupt register: %d\n",
+	       __func__, ret);
+		return -1;
 	}
 	ret = isl29030_read_reg(isl, ISL29030_ALSIR_DT2, &als_upper);
 	if (ret != 0) {
-		pr_err("%s:Unable to read ISL29030_ALSIR_DT2 register: %d\n",
-			__func__, ret);
-		return -EFAULT;
+		pr_err("%s:Unable to read interrupt register: %d\n",
+	       __func__, ret);
+		return -1;
 	}
 
 	als_read_data = (als_upper << 8);
 	als_read_data |= als_lower;
-	if (raw_als_count)
-		*raw_als_count = als_read_data;
-	else
-		pr_err("%s: ERROR ptr NULL\n", __func__);
-
-	if (isl29030_debug & ISL29030_DBG_REPORT_INPUT)
+	if (isl29030_debug & 1)
 		pr_info("%s:Data read from ALS 0x%X\n",
 		__func__, als_read_data);
 
-	lens_adj_lux = (isl->lux_level * als_read_data) /
-		(isl->pdata->lens_percent_t * 41);
+	if ((als_read_data < ISL29030_LOW_LUX_TRIGGER) &&
+		(!isl->low_lux_level)) {
+			isl->low_lux_level = 1;
 
-	return lens_adj_lux;
-}
+			ret = isl29030_read_reg(isl, ISL29030_CONFIGURE,
+				&configure_reg);
+			if (ret != 0) {
+				pr_err("%s:%s: %d\n", __func__,
+					"Unable to read interrupt register",
+					ret);
+			}
+			ret = isl29030_write_reg(isl, ISL29030_CONFIGURE,
+			     (configure_reg | 0x02));
 
-static int isl29030_switch_als_range_and_thresholds(struct isl29030_data *isl,
-						    unsigned int raw_als_count)
-{
-	unsigned int zone_size, als_low, als_high;
-	unsigned int switch_range = 0;
-
-	/* turn off ALS since we're going to be reconfiguring it */
-	if (isl29030_set_als_enable(isl, 0))
-		return -EFAULT;
-
-	/* if we're in the highest low-lux range, switch to high lux
-		or if in lowest high-lux range, switch to low lux*/
-	if ((isl->lux_level == ISL29030_LOW_LUX_RANGE) &&
-		(raw_als_count >= ISL29030_LOW_TO_HIGH_COUNTS)) {
-		if (isl29030_debug & ISL29030_DBG_REPORT_INPUT)
-			pr_info("%s switching to high lux range\n", __func__);
-		isl->lux_level	= ISL29030_HIGH_LUX_RANGE;
-		switch_range	= 1;
-		raw_als_count	= raw_als_count * ISL29030_LOW_LUX_RANGE
-			/ ISL29030_HIGH_LUX_RANGE;
-
-	} else if ((isl->lux_level == ISL29030_HIGH_LUX_RANGE) &&
-		(raw_als_count <= ISL29030_HIGH_TO_LOW_COUNTS)) {
-		if (isl29030_debug & ISL29030_DBG_REPORT_INPUT)
-			pr_info("%s switching to low lux range\n", __func__);
-		isl->lux_level	= ISL29030_LOW_LUX_RANGE;
-		switch_range	= 1;
-		raw_als_count	= raw_als_count * ISL29030_HIGH_LUX_RANGE
-			/ ISL29030_LOW_LUX_RANGE;
 	}
+	/* Adjust the ALS threshold to a new window */
+	if (isl->low_lux_level) {
+		for (i = 0; i < isl->als_ir_pdata->num_of_low_zones; i++) {
+			struct isl29030_zone_conv info =
+				isl->isl29030_low_zone_info[i];
+			struct isl29030_als_zone_data als_low_lux =
+				isl->als_ir_pdata->als_low_lux[i];
 
-	zone_size = 1;
-	als_low = ((raw_als_count > zone_size) ? raw_als_count - zone_size : 0);
-	if (raw_als_count <= 0xFFE) {
-		als_high = raw_als_count + zone_size;
-		als_high = ((als_high > 0xFFE) ? 0xFFE : als_high);
-	} else {
-		als_high = 0xFFF;
-	}
+			if (als_read_data > info.upper_threshold) {
+				continue;
+			} else if (als_read_data < info.lower_threshold) {
+				continue;
+			} else if ((als_read_data <= info.upper_threshold) &&
+				(als_read_data >= info.lower_threshold)) {
+				int num = isl->als_ir_pdata->num_of_low_zones;
 
-	/* reconfigure if needed */
-	if (switch_range) {
-		isl29030_set_als_range(isl,
-			(isl->lux_level == ISL29030_LOW_LUX_RANGE) ? 0 : 1);
-	}
+				if (isl29030_debug & 1)
+					pr_info("%s:%s %i\n", __func__,
+						"Setting next window to", i);
 
-	if (isl29030_write_reg(isl, ISL29030_ALSIR_TH1, als_low & 0x0FF) ||
-		isl29030_write_reg(isl, ISL29030_ALSIR_TH2,
-			((als_low & 0xF00) >> 8) | ((als_high & 0x00F) << 4)) ||
-		isl29030_write_reg(isl, ISL29030_ALSIR_TH3,
-			(als_high & 0xFF0) >> 4)) {
-		pr_err("%s couldn't set als thresholds\n", __func__);
-		return -EFAULT;
-	}
-
-	if (isl29030_set_als_enable(isl, 1))
-		return -EFAULT;
-
-	return 0;
-}
-
-static int isl29030_report_prox(struct isl29030_data *isl, int force_report)
-{
-	int ret = 0;
-	u8 als_prox_int;
-	int prox_near = 0;
-	u8 config_reg = 0;
-
-	ret = isl29030_read_reg(isl, ISL29030_INTERRUPT, &als_prox_int);
-	if (ret != 0) {
-		pr_err("%s:Unable to read interrupt register: %d\n",
-			__func__, ret);
-		return 1;
-	}
-
-	if (als_prox_int & ISL29030_PROX_FLAG_MASK) {
-		atomic_set(&isl->prox_near, 1);
-		prox_near = 1;
-		if (isl29030_debug & ISL29030_DBG_REPORT_INPUT)
-			pr_info("%s:Prox near - disabling als if "
-				"active due to part limitation\n",
-				__func__);
-		isl29030_set_als_enable(isl, 0);
-	} else {
-		atomic_set(&isl->prox_near, 0);
-		ret = isl29030_read_reg(isl, ISL29030_CONFIGURE, &config_reg);
-		if (ret != 0) {
-			pr_err("%s:Unable to read config "
-				"register: %d\n",
-				__func__, ret);
-		} else if ((atomic_read(&isl->als_enabled) == 1) &&
-			((config_reg & ISL29030_CNF_ALS_EN_MASK) == 0)) {
-			isl29030_set_als_enable(isl, 1);
-			if (isl29030_debug & ISL29030_DBG_REPORT_INPUT)
-				pr_info("%s: re-enabling als_en bit "
-					"in config. reg\n",
-					__func__);
+				if (i == num - 1) {
+					isl->low_lux_level = 0;
+					ret = isl29030_read_reg(isl,
+						ISL29030_CONFIGURE,
+						&configure_reg);
+					if (ret != 0) {
+						pr_err("%s:%s%s:%d\n",
+							__func__,
+							"Unable to read ",
+							"interrupt register",
+							ret);
+					}
+					ret = isl29030_write_reg(isl,
+						ISL29030_CONFIGURE,
+						(configure_reg & 0xfd));
+				}
+				isl29030_write_reg(isl, ISL29030_ALSIR_TH1,
+					als_low_lux.als_low_threshold);
+				isl29030_write_reg(isl, ISL29030_ALSIR_TH2,
+					als_low_lux.als_high_low_threshold);
+				isl29030_write_reg(isl, ISL29030_ALSIR_TH3,
+					als_low_lux.als_high_threshold);
+			}
 		}
+		if (isl->als_ir_pdata->lens_percent_t)
+			lux = ((625 / isl->als_ir_pdata->lens_percent_t) *
+				(als_read_data)) / 100;
+
+	} else {
+		for (i = 0; i < isl->als_ir_pdata->num_of_high_zones; i++) {
+			struct isl29030_zone_conv info =
+				isl->isl29030_high_zone_info[i];
+			struct isl29030_als_zone_data als_high_lux =
+				isl->als_ir_pdata->als_high_lux[i];
+
+			if (als_read_data > info.upper_threshold) {
+				continue;
+			} else if (als_read_data < info.lower_threshold) {
+				continue;
+			} else if ((als_read_data <= info.upper_threshold) &&
+				(als_read_data >= info.lower_threshold)) {
+				if (isl29030_debug & 1)
+					pr_info("%s:%s %i\n", __func__,
+						"Setting next window to ", i);
+				isl29030_write_reg(isl, ISL29030_ALSIR_TH1,
+					als_high_lux.als_low_threshold);
+				isl29030_write_reg(isl, ISL29030_ALSIR_TH2,
+					als_high_lux.als_high_low_threshold);
+				isl29030_write_reg(isl, ISL29030_ALSIR_TH3,
+					als_high_lux.als_high_threshold);
+			}
+		}
+		if (isl->als_ir_pdata->lens_percent_t)
+			lux = ((10000 / isl->als_ir_pdata->lens_percent_t) *
+				(als_read_data)) / 100;
 	}
 
-	/* Don't report the prox state if it hasn't changed. */
-	if (force_report ||
-		(prox_near != atomic_read(&isl->prox_reported_near))) {
-		atomic_set(&isl->prox_reported_near, prox_near);
-		input_report_abs(isl->idev, ABS_DISTANCE,
-			prox_near ? PROXIMITY_NEAR : PROXIMITY_FAR);
-		input_sync(isl->idev);
-	}
+	if (isl29030_debug & 1)
+		pr_info("%s:Reporting LUX %d\n",
+					__func__, lux);
+	return lux;
 
-	return !prox_near;
 }
-
-static void isl29030_report_als(struct isl29030_data *isl)
-{
-	unsigned int raw_als_data = 0;
-	int lux_val;
-
-	lux_val = isl29030_read_adj_als(isl, &raw_als_data);
-	isl29030_switch_als_range_and_thresholds(isl, raw_als_data);
-
-	if (lux_val >= 0) {
-		input_event(isl->adev, EV_LED, LED_MISC,
-			((lux_val > 1) ? lux_val : 2));
-		input_sync(isl->adev);
-	}
-}
-
 static void isl29030_report_input(struct isl29030_data *isl)
 {
 	int ret = 0;
-	int clear_prox = 1;
+	int lux_val;
 	u8 als_prox_int;
+	u8 prox_data;
 
 	ret = isl29030_read_reg(isl, ISL29030_INTERRUPT, &als_prox_int);
 	if (ret != 0) {
 		pr_err("%s:Unable to read interrupt register: %d\n",
-			__func__, ret);
+		       __func__, ret);
 		return;
 	}
-
-	if (als_prox_int & ISL29030_ALS_FLAG_MASK)
-		isl29030_report_als(isl);
-
-	if (atomic_read(&isl->prox_enabled) == 1)
-		clear_prox = isl29030_report_prox(isl, 0);
-
-	if (clear_prox)
-		isl29030_clear_prox_and_als_flags(isl);
-	else
-		isl29030_clear_als_flag(isl);
-}
-
-static unsigned int isl29030_get_avg_noise_floor(struct isl29030_data *isl)
-{
-	int err = 0;
-	unsigned int i, sum, avg;
-	u8 prox_data;
-
-	unsigned int num_samples =
-		isl->pdata->num_samples_for_noise_floor;
-
-	/* turn off PROX_EN */
-	isl29030_set_prox_enable(isl, 0);
-
-	msleep(2);
-
-	avg = 0;
-	sum = 0;
-
-	for (i = 0; i < num_samples; i++) {
-		/* turn on PROX_EN */
-		err = isl29030_set_prox_enable(isl, 1);
-		if (err) {
-			pr_err("%s:Unable to turn on PROX_EN with error: %d\n",
-				__func__, err);
-			break;
+	if ((als_prox_int & ISL29030_PROX_MASK) ||
+		(isl->prox_detect)) {
+		/* Report proximity here */
+		ret = isl29030_read_reg(isl, ISL29030_PROX_DATA, &prox_data);
+		if (ret != 0) {
+			pr_err("%s:Unable to read interrupt register: %d\n",
+		       __func__, ret);
 		}
-		msleep(2); /* sleep for a bit before reading PROX_DATA */
-		err = isl29030_read_reg(isl, ISL29030_PROX_DATA, &prox_data);
-		if (err) {
-			pr_err("%s:Unable to read prox data: %d\n",
-				__func__, err);
-			break;
+		if (isl29030_debug & 2)
+			pr_err("%s:Data returned for PROX 0x%X\n",
+			__func__, prox_data);
+
+		if (prox_data > isl->als_ir_pdata->prox_higher_threshold) {
+			input_report_abs(isl->idev, ABS_DISTANCE,
+				PROXIMITY_NEAR);
+			isl->prox_detect = 1;
+			if (isl29030_debug & 2)
+				pr_err("%s:Prox near\n", __func__);
+		} else {
+			input_report_abs(isl->idev, ABS_DISTANCE,
+				PROXIMITY_FAR);
+			isl->prox_detect = 0;
+			if (isl29030_debug & 2)
+				pr_err("%s:Prox far\n", __func__);
 		}
-		/* turn back off */
-		err = isl29030_set_prox_enable(isl, 0);
-		if (err) {
-			pr_err("%s:Unable to turn off PROX_EN with error: %d\n",
-				__func__, err);
-			break;
+		input_sync(isl->idev);
+	}
+
+	if (als_prox_int & ISL29030_ALS_MASK) {
+		lux_val = isl29030_read_adj_als(isl);
+		if (lux_val >= 0) {
+			input_event(isl->adev, EV_LED, LED_MISC, lux_val);
+			input_sync(isl->adev);
 		}
-		msleep(2);
-		sum += prox_data;
-		pr_err("%s: prox data sample %d is 0x%x\n",
-			__func__, i, prox_data);
 	}
+	isl29030_write_reg(isl, ISL29030_INTERRUPT,
+	     (als_prox_int & 0xf7));
 
-	if (!err)
-		avg = sum / num_samples;
-
-	if (isl29030_debug & ISL29030_DBG_POWER_ON_OFF)
-		pr_info("%s: average is 0x%x ", __func__, avg);
-	return avg;
-}
-
-static int isl29030_set_prox_thresholds(struct isl29030_data *isl)
-{
-	unsigned int prox_ht, prox_lt, offset;
-	int err = 0;
-	unsigned int avg_noise_floor = isl29030_get_avg_noise_floor(isl);
-
-	if ((avg_noise_floor >
-		(isl->pdata->crosstalk_vs_covered_threshold)) ||
-		(avg_noise_floor == 0)) {
-		offset = isl->pdata->default_prox_noise_floor;
-	} else {
-		offset = avg_noise_floor;
-	}
-	prox_lt = offset + isl->pdata->prox_lower_threshold;
-	prox_ht = offset + isl->pdata->prox_higher_threshold;
-
-	/* check for overflow beyond 1 byte */
-	if ((prox_lt > 0xFF) || (prox_ht > 0xFF)) {
-		pr_err("%s: noise adjusted proximity thresholds are 0x%x "
-			"and 0x%x, overflowing 8 bits, using defaults\n",
-			__func__, prox_lt, prox_ht);
-		prox_lt  = isl->pdata->prox_lower_threshold;
-		prox_ht = isl->pdata->prox_higher_threshold;
-	}
-
-	err = isl29030_write_reg(isl, ISL29030_PROX_LT, (u8)prox_lt);
-	if (err)
-		pr_err("%s:Unable to write PROX_LT: %d\n", __func__, err);
-	else {
-		err = isl29030_write_reg(isl, ISL29030_PROX_HT, (u8)prox_ht);
-		if (err)
-			pr_err("%s:Unable to write PROX_HT: %d\n",
-				__func__, err);
-	}
-	return err;
 }
 
 static void isl29030_device_power_off(struct isl29030_data *isl)
 {
 	int err;
-	u8 config_reg;
-	err = isl29030_set_prox_enable(isl, 0);
-	isl29030_clear_prox_flag(isl);
+	u8 configure_reg = isl->als_ir_pdata->configure & 0x7f;
 
+	err = isl29030_write_reg(isl, ISL29030_CONFIGURE,
+			     configure_reg);
 	if (err)
-		pr_err("%s:Unable to turn off prox: %d\n", __func__, err);
+		pr_err("%s:Unable to turn off prox: %d\n",
+		       __func__, err);
 
-	isl29030_clear_als_flag(isl);
-
-	err = isl29030_read_reg(isl, ISL29030_CONFIGURE, &config_reg);
-
-	if (err)
-		pr_err("%s: unable to read config reg: %d\n", __func__, err);
-
-	if ((atomic_read(&isl->als_enabled) == 1) &&
-		((config_reg & ISL29030_CNF_ALS_EN_MASK) == 0)) {
-		isl29030_set_als_enable(isl, 1);
-		if (isl29030_debug & ISL29030_DBG_POWER_ON_OFF)
-			pr_info("%s: re-enabling als_en bit in config. reg\n",
-				__func__);
-
-	}
-
-	return;
 }
 
 static int isl29030_device_power_on(struct isl29030_data *isl)
 {
 	int err;
+	u8 configure_reg = isl->als_ir_pdata->configure | 0x84;
 
-	if (isl29030_debug & ISL29030_DBG_POWER_ON_OFF)
-		pr_info("%s\n", __func__);
-
-	err = isl29030_set_prox_thresholds(isl);
+	err = isl29030_write_reg(isl, ISL29030_CONFIGURE,
+			     configure_reg);
 	if (err)
-		pr_err("%s:Unable to set prox thresholds: %d\n",
-			__func__, err);
-	else{
-		err = isl29030_set_prox_enable(isl, 1);
+		pr_err("%s:Unable to turn on prox: %d\n",
+		       __func__, err);
 
-		if (err)
-			pr_err("%s:Unable to turn on prox: %d\n",
-				__func__, err);
-	}
 	return err;
 }
 
@@ -626,43 +379,20 @@ int isl29030_enable(struct isl29030_data *isl)
 {
 	int err;
 
-	if (atomic_cmpxchg(&isl->prox_enabled, 0, 1) == 0) {
+	if (!atomic_cmpxchg(&isl->enabled, 0, 1)) {
 		err = isl29030_device_power_on(isl);
 		if (err) {
-			atomic_set(&isl->prox_enabled, 0);
+			atomic_set(&isl->enabled, 0);
 			return err;
 		}
-
-		if (atomic_cmpxchg(&isl->irq_enabled, 0, 1) == 0) {
-			enable_irq(isl->client->irq);
-			if (isl29030_debug & ISL29030_DBG_ENABLE_DISABLE)
-				pr_info("%s: enabling IRQ\n", __func__);
-		} else if (isl29030_debug & ISL29030_DBG_ENABLE_DISABLE)
-			pr_info("%s not touching IRQ\n", __func__);
-
-		isl29030_report_prox(isl, 1);
-	} else if (isl29030_debug & ISL29030_DBG_ENABLE_DISABLE)
-		pr_info("%s prox already enabled\n", __func__);
-
+	}
 	return 0;
 }
 
 int isl29030_disable(struct isl29030_data *isl)
 {
-	if (atomic_cmpxchg(&isl->prox_enabled, 1, 0) == 1) {
+	if (atomic_cmpxchg(&isl->enabled, 1, 0))
 		isl29030_device_power_off(isl);
-		if ((atomic_read(&isl->als_enabled) == 0) &&
-		    (atomic_cmpxchg(&isl->irq_enabled, 1, 0) == 1)) {
-			disable_irq_nosync(isl->client->irq);
-			cancel_work_sync(&isl->wq);
-
-			if (isl29030_debug & ISL29030_DBG_ENABLE_DISABLE)
-				pr_info("%s: disabling IRQ\n", __func__);
-		} else if (isl29030_debug & ISL29030_DBG_ENABLE_DISABLE)
-			pr_info("%s not touching IRQ\n", __func__);
-
-	} else if (isl29030_debug & ISL29030_DBG_ENABLE_DISABLE)
-		pr_info("%s prox already disabled\n", __func__);
 
 	return 0;
 }
@@ -670,7 +400,6 @@ int isl29030_disable(struct isl29030_data *isl)
 static int isl29030_misc_open(struct inode *inode, struct file *file)
 {
 	int err;
-
 	err = nonseekable_open(inode, file);
 	if (err < 0)
 		return err;
@@ -681,14 +410,11 @@ static int isl29030_misc_open(struct inode *inode, struct file *file)
 }
 
 static int isl29030_misc_ioctl(struct inode *inode, struct file *file,
-			       unsigned int cmd, unsigned long arg)
+			      unsigned int cmd, unsigned long arg)
 {
 	void __user *argp = (void __user *)arg;
 	u8 enable;
 	struct isl29030_data *isl = file->private_data;
-
-	if (isl29030_debug & ISL29030_DBG_MISC_IOCTL)
-		pr_info("%s: cmd = %d\n", __func__, cmd);
 
 	switch (cmd) {
 	case ISL29030_IOCTL_SET_ENABLE:
@@ -705,7 +431,7 @@ static int isl29030_misc_ioctl(struct inode *inode, struct file *file,
 		break;
 
 	case ISL29030_IOCTL_GET_ENABLE:
-		enable = atomic_read(&isl->prox_enabled);
+		enable = atomic_read(&isl->enabled);
 		if (copy_to_user(argp, &enable, 1))
 			return -EINVAL;
 
@@ -731,31 +457,32 @@ static struct miscdevice isl29030_misc_device = {
 };
 
 static ssize_t ld_isl29030_registers_show(struct device *dev,
-					  struct device_attribute *attr,
-					  char *buf)
+			      struct device_attribute *attr, char *buf)
 {
-	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
+	struct i2c_client *client = container_of(dev, struct i2c_client,
+						 dev);
 	struct isl29030_data *als_ir_data = i2c_get_clientdata(client);
 	unsigned i, n, reg_count;
-	u8 value;
+	uint8_t value;
 
 	reg_count = sizeof(isl29030_regs) / sizeof(isl29030_regs[0]);
 	for (i = 0, n = 0; i < reg_count; i++) {
 		isl29030_read_reg(als_ir_data, isl29030_regs[i].reg, &value);
 		n += scnprintf(buf + n, PAGE_SIZE - n,
-			"%-20s = 0x%02X\n",
-			isl29030_regs[i].name,
-			value);
+			       "%-20s = 0x%02X\n",
+			       isl29030_regs[i].name,
+			       value);
 	}
 
 	return n;
 }
 
 static ssize_t ld_isl29030_registers_store(struct device *dev,
-					   struct device_attribute *attr,
-					   const char *buf, size_t count)
+			       struct device_attribute *attr,
+			       const char *buf, size_t count)
 {
-	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
+	struct i2c_client *client = container_of(dev, struct i2c_client,
+						 dev);
 	struct isl29030_data *als_ir_data = i2c_get_clientdata(client);
 	unsigned i, reg_count, value;
 	int error;
@@ -763,122 +490,132 @@ static ssize_t ld_isl29030_registers_store(struct device *dev,
 
 	if (count >= 30) {
 		pr_err("%s:input too long\n", __func__);
-		return -EFAULT;
+		return -1;
 	}
 
 	if (sscanf(buf, "%30s %x", name, &value) != 2) {
 		pr_err("%s:unable to parse input\n", __func__);
-		return -EFAULT;
+		return -1;
 	}
 
 	reg_count = sizeof(isl29030_regs) / sizeof(isl29030_regs[0]);
 	for (i = 0; i < reg_count; i++) {
 		if (!strcmp(name, isl29030_regs[i].name)) {
-			switch (isl29030_regs[i].reg) {
-
-			case ISL29030_PROX_LT:
-				als_ir_data->pdata->
-					prox_lower_threshold = value;
-			break;
-
-			case ISL29030_PROX_HT:
-				als_ir_data->pdata->
-					prox_higher_threshold = value;
-			break;
-
-			case ISL29030_TEST1:
-				isl29030_enable(als_ir_data);
-				return count;
-			break;
-
-			case ISL29030_TEST2:
-				isl29030_disable(als_ir_data);
-				return count;
-			break;
-			}
 			error = isl29030_write_reg(als_ir_data,
 				isl29030_regs[i].reg,
 				value);
 			if (error) {
 				pr_err("%s:Failed to write register %s\n",
 					__func__, name);
-				return -EFAULT;
+				return -1;
 			}
 			return count;
 		}
 	}
 
 	pr_err("%s:no such register %s\n", __func__, name);
-	return -EFAULT;
+	return -1;
 }
 
 static DEVICE_ATTR(registers, 0644, ld_isl29030_registers_show,
-		   ld_isl29030_registers_store);
+		ld_isl29030_registers_store);
 
 void ld_isl29030_work_queue(struct work_struct *work)
 {
-	struct isl29030_data *isl =
-		container_of(work, struct isl29030_data, wq);
+	struct isl29030_data *als_ir_data =
+	    container_of(work, struct isl29030_data, wq);
 
-	isl29030_report_input(isl);
+	isl29030_report_input(als_ir_data);
+	enable_irq(als_ir_data->client->irq);
 }
 
+static void isl29030_convert_zones(struct isl29030_data *isl)
+{
+	int i = 0;
+
+	for (i = 0; i < isl->als_ir_pdata->num_of_low_zones; i++) {
+		struct isl29030_als_zone_data als_low_lux =
+			isl->als_ir_pdata->als_low_lux[i];
+
+		isl->isl29030_low_zone_info[i].lower_threshold =
+			als_low_lux.als_low_threshold;
+		isl->isl29030_low_zone_info[i].lower_threshold |=
+			(als_low_lux.als_high_low_threshold & 0x0f) << 8;
+		isl->isl29030_low_zone_info[i].upper_threshold =
+			(als_low_lux.als_high_low_threshold & 0xf0) >> 4;
+		isl->isl29030_low_zone_info[i].upper_threshold |=
+			als_low_lux.als_high_threshold << 4;
+		pr_err("%s:Element %i Upper 0x%X Lower 0x%X\n", __func__, i,
+			isl->isl29030_low_zone_info[i].upper_threshold,
+			isl->isl29030_low_zone_info[i].lower_threshold);
+	}
+	for (i = 0; i < isl->als_ir_pdata->num_of_high_zones; i++) {
+		struct isl29030_als_zone_data als_high_lux =
+			isl->als_ir_pdata->als_high_lux[i];
+
+		isl->isl29030_high_zone_info[i].lower_threshold =
+			als_high_lux.als_low_threshold;
+		isl->isl29030_high_zone_info[i].lower_threshold |=
+			(als_high_lux.als_high_low_threshold & 0x0f) << 8;
+		isl->isl29030_high_zone_info[i].upper_threshold =
+			(als_high_lux.als_high_low_threshold & 0xf0) >> 4;
+		isl->isl29030_high_zone_info[i].upper_threshold |=
+			als_high_lux.als_high_threshold << 4;
+		pr_err("%s:Element %i Upper 0x%X Lower 0x%X\n", __func__, i,
+			isl->isl29030_high_zone_info[i].upper_threshold,
+			isl->isl29030_high_zone_info[i].lower_threshold);
+	}
+}
 static int ld_isl29030_probe(struct i2c_client *client,
-			     const struct i2c_device_id *id)
+			   const struct i2c_device_id *id)
 {
 	struct isl29030_platform_data *pdata = client->dev.platform_data;
-	struct isl29030_data *isl;
+	struct isl29030_data *als_ir_data;
 	int error = 0;
 
 	if (pdata == NULL) {
 		pr_err("%s: platform data required\n", __func__);
 		return -ENODEV;
+	} else if (!client->irq) {
+		pr_err("%s: polling mode currently not supported\n", __func__);
+		return -ENODEV;
 	}
-
-	client->irq = pdata->irq;
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		pr_err("%s:I2C_FUNC_I2C not supported\n", __func__);
 		return -ENODEV;
 	}
 
-	isl = kzalloc(sizeof(struct isl29030_data), GFP_KERNEL);
-	if (isl == NULL) {
+	als_ir_data = kzalloc(sizeof(struct isl29030_data), GFP_KERNEL);
+	if (als_ir_data == NULL) {
 		error = -ENOMEM;
 		goto err_alloc_data_failed;
 	}
 
-	isl->client = client;
-	isl->pdata = pdata;
+	als_ir_data->client = client;
+	als_ir_data->als_ir_pdata = pdata;
 
-	if (isl->pdata->init) {
-		error = isl->pdata->init();
-		if (error < 0) {
-			pr_err("%s:init failed: %d\n", __func__, error);
-			goto error_init_failed;
-		}
-	}
-
-	isl->idev = input_allocate_device();
-	if (!isl->idev) {
+	als_ir_data->idev = input_allocate_device();
+	if (!als_ir_data->idev) {
 		error = -ENOMEM;
 		pr_err("%s: input device allocate failed: %d\n", __func__,
-			error);
+		       error);
 		goto error_input_allocate_failed_ir;
 	}
 
-	isl->idev->name = "proximity";
-	input_set_capability(isl->idev, EV_ABS, ABS_DISTANCE);
+	als_ir_data->idev->name = "proximity";
+	input_set_capability(als_ir_data->idev, EV_ABS, ABS_DISTANCE);
 
-	isl->adev = input_allocate_device();
-	if (!isl->adev) {
+	als_ir_data->adev = input_allocate_device();
+	if (!als_ir_data->adev) {
 		error = -ENOMEM;
 		pr_err("%s: input device allocate failed: %d\n", __func__,
-			error);
+		       error);
 		goto error_input_allocate_failed_als;
 	}
 
-	isl->adev->name = "als";
-	input_set_capability(isl->adev, EV_LED, LED_MISC);
+	als_ir_data->adev->name = "als";
+	input_set_capability(als_ir_data->adev, EV_MSC, MSC_RAW);
+	input_set_capability(als_ir_data->adev, EV_LED, LED_MISC);
 
 	error = misc_register(&isl29030_misc_device);
 	if (error < 0) {
@@ -886,72 +623,57 @@ static int ld_isl29030_probe(struct i2c_client *client,
 		goto error_misc_register_failed;
 	}
 
-	isl->lux_level = ISL29030_HIGH_LUX_RANGE;
+	als_ir_data->prox_detect = 0;
+	als_ir_data->low_lux_level = 0;
+	isl29030_convert_zones(als_ir_data);
 
-	atomic_set(&isl->prox_enabled, 0);
-	atomic_set(&isl->als_enabled, 1);
-	atomic_set(&isl->prox_near, 0);
-	atomic_set(&isl->als_needs_enable_flag, 0);
-	atomic_set(&isl->irq_enabled, 1);
+	atomic_set(&als_ir_data->enabled, 0);
 
-	isl->working_queue = create_singlethread_workqueue("als_wq");
-	if (!isl->working_queue) {
+	als_ir_data->working_queue = create_singlethread_workqueue("als_wq");
+	if (!als_ir_data->working_queue) {
 		pr_err("%s: Cannot create work queue\n", __func__);
 		error = -ENOMEM;
 		goto error_create_wq_failed;
 	}
 
-	INIT_WORK(&isl->wq, ld_isl29030_work_queue);
+	INIT_WORK(&als_ir_data->wq, ld_isl29030_work_queue);
 
-	error = request_irq(client->irq,
-		ld_isl29030_irq_handler,
-		(IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING),
-		LD_ISL29030_NAME, isl);
+	error = request_irq(als_ir_data->client->irq, ld_isl29030_irq_handler,
+			    (IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING),
+				LD_ISL29030_NAME, als_ir_data);
 	if (error != 0) {
 		pr_err("%s: irq request failed: %d\n", __func__, error);
 		error = -ENODEV;
 		goto err_req_irq_failed;
 	}
+	enable_irq_wake(als_ir_data->client->irq);
 
-	enable_irq_wake(client->irq);
+	i2c_set_clientdata(client, als_ir_data);
 
-	i2c_set_clientdata(client, isl);
-
-	mutex_init(&isl->lock);
-
-	mutex_init(&isl->bit_lock);
-
-	error = input_register_device(isl->idev);
+	error = input_register_device(als_ir_data->idev);
 	if (error) {
 		pr_err("%s: input device register failed:%d\n", __func__,
-			error);
+		       error);
 		goto error_input_register_failed_ir;
 	}
 
-	error = input_register_device(isl->adev);
+	error = input_register_device(als_ir_data->adev);
 	if (error) {
 		pr_err("%s: input device register failed:%d\n", __func__,
-			error);
+		       error);
 		goto error_input_register_failed_als;
 	}
 
-	if (isl->pdata->power_on) {
-		error = isl->pdata->power_on();
-		if (error < 0) {
-			pr_err("%s:power_on failed: %d\n", __func__, error);
-			goto error_power_on_failed;
-		}
-	}
-
-	error = ld_isl29030_init_registers(isl);
+	error = ld_isl29030_init_registers(als_ir_data);
 	if (error < 0) {
 		pr_err("%s: Register Initialization failed: %d\n",
-			__func__, error);
+		       __func__, error);
 		error = -ENODEV;
 		goto err_reg_init_failed;
 	}
 
-	error = device_create_file(&client->dev, &dev_attr_registers);
+	error = device_create_file(&als_ir_data->client->dev,
+		&dev_attr_registers);
 	if (error < 0) {
 		pr_err("%s:File device creation failed: %d\n", __func__, error);
 		error = -ENODEV;
@@ -959,139 +681,113 @@ static int ld_isl29030_probe(struct i2c_client *client,
 	}
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
-	isl->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
-	isl->early_suspend.suspend = isl29030_early_suspend;
-	isl->early_suspend.resume = isl29030_late_resume;
-	register_early_suspend(&isl->early_suspend);
+	als_ir_data->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
+	als_ir_data->early_suspend.suspend = isl29030_early_suspend;
+	als_ir_data->early_suspend.resume = isl29030_late_resume;
+	register_early_suspend(&als_ir_data->early_suspend);
 #endif
-	isl29030_misc_data = isl;
-	isl29030_report_input(isl);
+	disable_irq(als_ir_data->client->irq);
+	queue_work(als_ir_data->working_queue, &als_ir_data->wq);
 
 	return 0;
 
 err_create_registers_file_failed:
 err_reg_init_failed:
-	if (isl->pdata->power_off)
-		isl->pdata->power_off();
-error_power_on_failed:
-	disable_irq_nosync(isl->client->irq);
-	input_unregister_device(isl->adev);
-	isl->adev = NULL;
+    input_unregister_device(als_ir_data->adev);
 error_input_register_failed_als:
-	input_unregister_device(isl->idev);
-	isl->idev = NULL;
+	input_unregister_device(als_ir_data->idev);
 error_input_register_failed_ir:
-	mutex_destroy(&isl->lock);
-	mutex_destroy(&isl->bit_lock);
-	i2c_set_clientdata(client, NULL);
-	free_irq(isl->client->irq, isl);
+	free_irq(als_ir_data->client->irq, als_ir_data);
 err_req_irq_failed:
-	destroy_workqueue(isl->working_queue);
-error_create_wq_failed:
-	misc_deregister(&isl29030_misc_device);
+	destroy_workqueue(als_ir_data->working_queue);
 error_misc_register_failed:
-	input_free_device(isl->adev);
+error_create_wq_failed:
+	input_free_device(als_ir_data->adev);
 error_input_allocate_failed_als:
-	input_free_device(isl->idev);
+	input_free_device(als_ir_data->idev);
 error_input_allocate_failed_ir:
-	if (isl->pdata->exit)
-		isl->pdata->exit();
-error_init_failed:
-	kfree(isl);
+	kfree(als_ir_data);
 err_alloc_data_failed:
 	return error;
 }
 
 static int ld_isl29030_remove(struct i2c_client *client)
 {
-	struct isl29030_data *isl = i2c_get_clientdata(client);
+	struct isl29030_data *als_ir_data = i2c_get_clientdata(client);
 
-	device_remove_file(&client->dev, &dev_attr_registers);
+	input_free_device(als_ir_data->idev);
+	input_free_device(als_ir_data->adev);
+	device_remove_file(als_ir_data->led_dev.dev, &dev_attr_registers);
 
-	input_unregister_device(isl->idev);
-	input_unregister_device(isl->adev);
+	free_irq(als_ir_data->client->irq, als_ir_data);
 
-	free_irq(isl->client->irq, isl);
-
-	if (isl->working_queue)
-		destroy_workqueue(isl->working_queue);
-
-	misc_deregister(&isl29030_misc_device);
-
-	if (isl->pdata->power_off)
-		isl->pdata->power_off();
-	if (isl->pdata->exit)
-		isl->pdata->exit();
-
-	kfree(isl);
+	if (als_ir_data->working_queue)
+		destroy_workqueue(als_ir_data->working_queue);
+	kfree(als_ir_data);
 	return 0;
 }
 
 static int isl29030_suspend(struct i2c_client *client, pm_message_t mesg)
 {
-	struct isl29030_data *isl = i2c_get_clientdata(client);
+	struct isl29030_data *als_ir_data = i2c_get_clientdata(client);
 	int ret;
+	u8 config_data = 0;
 
-	if (isl29030_debug & ISL29030_DBG_SUSPEND_RESUME)
+	if (isl29030_debug)
 		pr_info("%s: Suspending\n", __func__);
 
-	if (atomic_cmpxchg(&isl->als_enabled, 1, 0) == 1) {
-
-		ret = isl29030_set_als_enable(isl, 0);
-		isl29030_clear_als_flag(isl);
-
-		if (ret) {
-			pr_err("%s:Unable to turn off ALS_EN: %d\n",
-				__func__, ret);
-			atomic_set(&isl->als_enabled, 1);
-			return ret;
+	if (atomic_read(&als_ir_data->enabled) == 1) {
+		/* Disable the ALS but not the IRQ because the prox
+		is enabled */
+		ret = isl29030_read_reg(als_ir_data, ISL29030_CONFIGURE,
+			&config_data);
+		if (ret != 0) {
+			pr_err("%s:Unable to read interrupt register: %d\n",
+		       __func__, ret);
 		}
-		if (isl29030_debug & ISL29030_DBG_SUSPEND_RESUME)
-			pr_info("%s: turned off ALS\n", __func__);
-
-		if ((atomic_read(&isl->prox_enabled) == 0) &&
-		    (atomic_cmpxchg(&isl->irq_enabled, 1, 0) == 1)) {
-			disable_irq_nosync(isl->client->irq);
-			cancel_work_sync(&isl->wq);
-			if (isl29030_debug & ISL29030_DBG_SUSPEND_RESUME)
-				pr_info("%s: disabling IRQ\n", __func__);
-
-		} else if (isl29030_debug & ISL29030_DBG_SUSPEND_RESUME)
-			pr_info("%s: not touching IRQ\n", __func__);
-	} else if (isl29030_debug & ISL29030_DBG_SUSPEND_RESUME)
-		pr_info("%s: ALS already disabled\n", __func__);
+		ret = isl29030_write_reg(als_ir_data, ISL29030_CONFIGURE,
+			     config_data & 0xfb);
+		if (ret)
+			pr_err("%s:Unable to turn on prox: %d\n",
+		       __func__, ret);
+	} else {
+		disable_irq_nosync(als_ir_data->client->irq);
+		ret = cancel_work_sync(&als_ir_data->wq);
+		if (ret) {
+			pr_info("%s: Not Suspending\n", __func__);
+			enable_irq(als_ir_data->client->irq);
+			return -EBUSY;
+		}
+	}
 
 	return 0;
 }
 
 static int isl29030_resume(struct i2c_client *client)
 {
-	struct isl29030_data *isl = i2c_get_clientdata(client);
+	struct isl29030_data *als_ir_data = i2c_get_clientdata(client);
 	int ret;
+	u8 config_data = 0;
 
-	if (isl29030_debug & ISL29030_DBG_SUSPEND_RESUME)
+	if (isl29030_debug)
 		pr_info("%s: Resuming\n", __func__);
 
-	if (atomic_cmpxchg(&isl->als_enabled, 0, 1) == 0) {
-		ret = isl29030_set_als_enable(isl, 1);
-		if (ret) {
-			pr_err("%s:Unable to turn on ALS: %d\n",
-				__func__, ret);
-			atomic_set(&isl->als_enabled, 0);
-			return ret;
-		}
-		/* Allow the ALS sensor to read the zone */
-		msleep(100);
-		isl29030_report_als(isl);
+	/* Disable the ALS but not the IRQ because the prox
+	is enabled */
+	ret = isl29030_read_reg(als_ir_data, ISL29030_CONFIGURE, &config_data);
+	if (ret != 0) {
+		pr_err("%s:Unable to read interrupt register: %d\n",
+	       __func__, ret);
+	}
+	ret = isl29030_write_reg(als_ir_data, ISL29030_CONFIGURE,
+		     config_data | 0x04);
+	if (ret)
+		pr_err("%s:Unable to turn on prox: %d\n",
+	       __func__, ret);
 
-		if (atomic_cmpxchg(&isl->irq_enabled, 0, 1) == 0) {
-			enable_irq(isl->client->irq);
-			if (isl29030_debug & ISL29030_DBG_SUSPEND_RESUME)
-				pr_info("%s: turning on IRQ\n", __func__);
-		} else if (isl29030_debug & ISL29030_DBG_SUSPEND_RESUME)
-			pr_info("%s: not touching IRQ\n", __func__);
-	} else if (isl29030_debug & ISL29030_DBG_SUSPEND_RESUME)
-		pr_info("%s: ALS already activated\n", __func__);
+	/* Allow the ALS sensor to read the zone */
+	msleep(100);
+	isl29030_report_input(als_ir_data);
 
 	return 0;
 }
@@ -1099,20 +795,20 @@ static int isl29030_resume(struct i2c_client *client)
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static void isl29030_early_suspend(struct early_suspend *handler)
 {
-	struct isl29030_data *isl;
+	struct isl29030_data *als_ir_data;
 
-	isl = container_of(handler, struct isl29030_data,
-		early_suspend);
-	isl29030_suspend(isl->client, PMSG_SUSPEND);
+	als_ir_data = container_of(handler, struct isl29030_data,
+			early_suspend);
+	isl29030_suspend(als_ir_data->client, PMSG_SUSPEND);
 }
 
 static void isl29030_late_resume(struct early_suspend *handler)
 {
-	struct isl29030_data *isl;
+	struct isl29030_data *als_ir_data;
 
-	isl = container_of(handler, struct isl29030_data,
-		early_suspend);
-	isl29030_resume(isl->client);
+	als_ir_data = container_of(handler, struct isl29030_data,
+			early_suspend);
+	isl29030_resume(als_ir_data->client);
 }
 #endif
 
@@ -1122,17 +818,17 @@ static const struct i2c_device_id isl29030_id[] = {
 };
 
 static struct i2c_driver ld_isl29030_i2c_driver = {
-	.probe		= ld_isl29030_probe,
-	.remove		= ld_isl29030_remove,
+	.probe = ld_isl29030_probe,
+	.remove = ld_isl29030_remove,
 #ifndef CONFIG_HAS_EARLYSUSPEND
 	.suspend	= isl29030_suspend,
 	.resume		= isl29030_resume,
 #endif
-	.id_table	= isl29030_id,
+	.id_table = isl29030_id,
 	.driver = {
-		.name = LD_ISL29030_NAME,
-		.owner = THIS_MODULE,
-	},
+		   .name = LD_ISL29030_NAME,
+		   .owner = THIS_MODULE,
+		   },
 };
 
 static int __init ld_isl29030_init(void)
@@ -1143,11 +839,12 @@ static int __init ld_isl29030_init(void)
 static void __exit ld_isl29030_exit(void)
 {
 	i2c_del_driver(&ld_isl29030_i2c_driver);
+
 }
 
 module_init(ld_isl29030_init);
 module_exit(ld_isl29030_exit);
 
 MODULE_DESCRIPTION("ALS and Proximity driver for ISL29030");
-MODULE_AUTHOR("Motorola");
+MODULE_AUTHOR("Dan Murphy <wldm10@motorola.com>");
 MODULE_LICENSE("GPL");

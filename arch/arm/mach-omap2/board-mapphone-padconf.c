@@ -28,6 +28,9 @@
 #include <mach/dt_path.h>
 #include <asm/prom.h>
 #endif
+#ifdef CONFIG_EMU_UART_DEBUG
+#include <plat/board-mapphone-emu_uart.h>
+#endif
 #include <asm/bootinfo.h>
 
 struct iomux_range {
@@ -933,7 +936,7 @@ static __initdata struct {
 		    OMAP343X_PADCONF_OFF_OUTPUT_ENABLED |
 		    OMAP343X_PADCONF_OFFMODE_ENABLED |
 		    OMAP343X_PADCONF_INPUT_ENABLED |
-		    OMAP343X_PADCONF_PULL_UP |
+		    OMAP343X_PADCONF_PULL_DOWN |
 		    OMAP343X_PADCONF_PUD_ENABLED | OMAP343X_PADCONF_MUXMODE0},
 	    /* UART3_TX_IRTX */
 	{
@@ -1565,11 +1568,10 @@ static __initdata struct {
 	    /* SDRC_CKE1 */
 	{
 	0x0264,
-		    OMAP343X_PADCONF_PUD_DISABLED | OMAP343X_PADCONF_MUXMODE0},
-	    /* GPMC_A11 */
-	{
-	0x0266,
-		    OMAP343X_PADCONF_MUXMODE1},
+			OMAP343X_PADCONF_INPUT_ENABLED |
+			OMAP343X_PADCONF_PULL_UP |
+			OMAP343X_PADCONF_PUD_ENABLED |
+			OMAP343X_PADCONF_MUXMODE7},
 	    /* I2C4_SCL */
 	{
 	0x0A00,
@@ -1723,7 +1725,6 @@ static void __init mux_pad_callback(const void *p_data)
 			padconf_settings[i].setting |=
 			    (MAKE_OMAP343X_PAD_VALUE
 			     (p->mode, p->input_en, p->pull_type));
-
 			return;
 		}
 	}
@@ -1783,6 +1784,17 @@ void dt_prop_or_init(struct dt_operation *op)
 	printk(KERN_INFO "Device tree prop %s override done\n", op->prop);
 }
 
+
+// by Steve Kim (w21521) only support MS1 Froyo product
+// MS1 froyo should not be changed device tree hence I added this function to meet Stable-2 dev branch
+void dt_prop_or_init_except(struct dt_operation *op)
+{
+  struct mux_conf_entry p_data[] = {{0x264, 7,  1,    1}};
+  (*op->callback) (p_data);
+  printk(KERN_INFO "Steve : dt_prop_or_init_except \n");
+}
+
+
 void __init mux_setting_init(void)
 {
 	struct dt_operation op;
@@ -1794,6 +1806,7 @@ void __init mux_setting_init(void)
 	op.callback = mux_pad_callback;
 	op.name_size = 2;
 	dt_prop_or_init(&op);
+	dt_prop_or_init_except(&op); // by Steve Kim (w21521) to support MS1 Froyo
 
 	/* Read and implement MUX pad setting for pad wakeups registers */
 	op.path = DT_PATH_MUX;
@@ -1856,6 +1869,13 @@ void __init mapphone_padconf_init(void)
 			   is a half word on this architecture
 			 */
 			unsigned short val = omap_readw(addr);
+#ifdef CONFIG_EMU_UART_DEBUG
+			if (is_emu_uart_iomux_reg(padconf_settings[i].offset)) {
+				printk(KERN_ERR "padconf ignored, offset = 0x%04x\n",
+						padconf_settings[i].offset);
+				continue;
+			}
+#endif
 			val &= ~(OMAP343X_PADCONF_SETTING_MASK);
 			val |= padconf_settings[i].setting;
 

@@ -29,6 +29,8 @@
 #include <linux/spi/cpcap-regbits.h>
 #include <linux/spi/spi.h>
 
+#define CONSIDER_CABLE_STATUS
+
 #define CPCAP_SENSE4_LS		8
 #define CPCAP_BIT_DP_S_LS	(CPCAP_BIT_DP_S << CPCAP_SENSE4_LS)
 #define CPCAP_BIT_DM_S_LS	(CPCAP_BIT_DM_S << CPCAP_SENSE4_LS)
@@ -48,13 +50,6 @@
 			     CPCAP_BIT_VBUSVLD_S   | \
 			     CPCAP_BIT_SESSVLD_S)
 
-/* This Sense mask is needed because on TI the CHRGCURR1 interrupt is not always
- * set.  In Factory Mode the comparator follows the Charge current only. */
-#define SENSE_FACTORY_COM   (CPCAP_BIT_ID_FLOAT_S  | \
-			     CPCAP_BIT_ID_GROUND_S | \
-			     CPCAP_BIT_VBUSVLD_S   | \
-			     CPCAP_BIT_SESSVLD_S)
-
 #define SENSE_CHARGER_FLOAT (CPCAP_BIT_ID_FLOAT_S  | \
 			     CPCAP_BIT_CHRGCURR1_S | \
 			     CPCAP_BIT_VBUSVLD_S   | \
@@ -70,8 +65,6 @@
 				 CPCAP_BIT_DM_S_LS     | \
 				 CPCAP_BIT_DP_S_LS)
 
-#define UNDETECT_TRIES		5
-
 enum cpcap_det_state {
 	CONFIG,
 	SAMPLE_1,
@@ -79,6 +72,7 @@ enum cpcap_det_state {
 	IDENTIFY,
 	USB,
 	FACTORY,
+	CHARGER,
 };
 
 enum cpcap_accy {
@@ -104,7 +98,6 @@ struct cpcap_usb_det_data {
 	struct regulator *regulator;
 	struct wake_lock wake_lock;
 	unsigned char is_vusb_enabled;
-	unsigned char undetect_cnt;
 };
 
 static const char *accy_devices[] = {
@@ -112,13 +105,6 @@ static const char *accy_devices[] = {
 	"cpcap_factory",
 	"cpcap_charger",
 };
-
-#ifdef CONFIG_USB_TESTING_POWER
-static int testing_power_enable = -1;
-module_param(testing_power_enable, int, 0644);
-MODULE_PARM_DESC(testing_power_enable, "Enable factory cable power "
-	"supply function for testing");
-#endif
 
 static void vusb_enable(struct cpcap_usb_det_data *data)
 {
@@ -282,6 +268,13 @@ static int configure_hardware(struct cpcap_usb_det_data *data,
 static void notify_accy(struct cpcap_usb_det_data *data, enum cpcap_accy accy)
 {
 	dev_info(&data->cpcap->spi->dev, "notify_accy: accy=%d\n", accy);
+#ifdef CONSIDER_CABLE_STATUS
+	if (accy == CPCAP_ACCY_NONE) {
+		set_accy_status(0);
+	} else {
+		set_accy_status(1);
+	}
+#endif
 
 	if ((data->usb_accy != CPCAP_ACCY_NONE) && (data->usb_dev != NULL)) {
 		platform_device_del(data->usb_dev);
@@ -339,11 +332,9 @@ static void detection_work(struct work_struct *work)
 		cpcap_irq_mask(data->cpcap, CPCAP_IRQ_VBUSVLD);
 		cpcap_irq_mask(data->cpcap, CPCAP_IRQ_DPI);
 		cpcap_irq_mask(data->cpcap, CPCAP_IRQ_DMI);
-		cpcap_irq_mask(data->cpcap, CPCAP_IRQ_SESSVLD);
 
 		configure_hardware(data, CPCAP_ACCY_UNKNOWN);
 
-		data->undetect_cnt = 0;
 		data->state = SAMPLE_1;
 		schedule_delayed_work(&data->work, msecs_to_jiffies(11));
 		break;
@@ -391,20 +382,7 @@ static void detection_work(struct work_struct *work)
 
 			/* Special handling of USB cable undetect. */
 			data->state = USB;
-		} else if ((data->sense == SENSE_FACTORY) ||
-			   (data->sense == SENSE_FACTORY_COM)) {
-#ifdef CONFIG_USB_TESTING_POWER
-			if (testing_power_enable > 0) {
-				notify_accy(data, CPCAP_ACCY_NONE);
-				cpcap_irq_unmask(data->cpcap,
-					CPCAP_IRQ_CHRG_DET);
-				cpcap_irq_unmask(data->cpcap,
-					CPCAP_IRQ_CHRG_CURR1);
-				cpcap_irq_unmask(data->cpcap,
-				CPCAP_IRQ_VBUSVLD);
-				break;
-			}
-#endif
+		} else if (data->sense == SENSE_FACTORY) {
 			notify_accy(data, CPCAP_ACCY_FACTORY);
 
 			cpcap_irq_unmask(data->cpcap, CPCAP_IRQ_SE1);
@@ -415,10 +393,12 @@ static void detection_work(struct work_struct *work)
 			   (data->sense == SENSE_CHARGER)) {
 			notify_accy(data, CPCAP_ACCY_CHARGER);
 
+			cpcap_irq_unmask(data->cpcap, CPCAP_IRQ_CHRG_CURR1);
 			cpcap_irq_unmask(data->cpcap, CPCAP_IRQ_SE1);
 			cpcap_irq_unmask(data->cpcap, CPCAP_IRQ_IDGND);
 
-			data->state = CONFIG;
+			/* Special handling of charger undetect. */
+			data->state = CHARGER;
 		} else if ((data->sense & CPCAP_BIT_VBUSVLD_S) &&
 				(data->usb_accy == CPCAP_ACCY_NONE)) {
 			data->state = CONFIG;
@@ -454,26 +434,12 @@ static void detection_work(struct work_struct *work)
 		get_sense(data);
 
 		if ((data->sense & CPCAP_BIT_SE1_S) ||
-			(data->sense & CPCAP_BIT_ID_GROUND_S)) {
+			(data->sense & CPCAP_BIT_ID_GROUND_S) ||
+			(!(data->sense & CPCAP_BIT_VBUSVLD_S))) {
 				data->state = CONFIG;
 				schedule_delayed_work(&data->work, 0);
-		} else if (!(data->sense & CPCAP_BIT_VBUSVLD_S)) {
-			if (data->undetect_cnt++ < UNDETECT_TRIES) {
-				cpcap_irq_mask(data->cpcap, CPCAP_IRQ_CHRG_DET);
-				cpcap_irq_mask(data->cpcap,
-					       CPCAP_IRQ_CHRG_CURR1);
-				cpcap_irq_mask(data->cpcap, CPCAP_IRQ_SE1);
-				cpcap_irq_mask(data->cpcap, CPCAP_IRQ_IDGND);
-				data->state = USB;
-				schedule_delayed_work(&data->work,
-						      msecs_to_jiffies(100));
-			} else {
-				data->state = CONFIG;
-				schedule_delayed_work(&data->work, 0);
-			}
 		} else {
 			data->state = USB;
-			data->undetect_cnt = 0;
 			cpcap_irq_unmask(data->cpcap, CPCAP_IRQ_CHRG_DET);
 			cpcap_irq_unmask(data->cpcap, CPCAP_IRQ_CHRG_CURR1);
 			cpcap_irq_unmask(data->cpcap, CPCAP_IRQ_SE1);
@@ -496,6 +462,26 @@ static void detection_work(struct work_struct *work)
 		} else {
 			data->state = FACTORY;
 			cpcap_irq_unmask(data->cpcap, CPCAP_IRQ_SE1);
+		}
+		break;
+
+	case CHARGER:
+		get_sense(data);
+
+		/* If the battery voltage is above the set charge voltage in
+		 * CPCAP and ICHRG is set, CHRGCURR1 will be 0.  Do not undetect
+		 * charger in this case. */
+		if (!(data->sense & CPCAP_BIT_SE1_S) ||
+		    (!(data->sense & CPCAP_BIT_VBUSVLD_S) &&
+		     !(data->sense & CPCAP_BIT_CHRGCURR1_S))) {
+			data->state = CONFIG;
+			schedule_delayed_work(&data->work, 0);
+		} else {
+			data->state = CHARGER;
+
+			cpcap_irq_unmask(data->cpcap, CPCAP_IRQ_CHRG_CURR1);
+			cpcap_irq_unmask(data->cpcap, CPCAP_IRQ_SE1);
+			cpcap_irq_unmask(data->cpcap, CPCAP_IRQ_IDGND);
 		}
 		break;
 
@@ -534,7 +520,6 @@ static int __init cpcap_usb_det_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&data->work, detection_work);
 	data->usb_accy = CPCAP_ACCY_NONE;
 	wake_lock_init(&data->wake_lock, WAKE_LOCK_SUSPEND, "usb");
-	data->undetect_cnt = 0;
 
 	data->regulator = regulator_get(NULL, "vusb");
 	if (IS_ERR(data->regulator)) {
@@ -557,8 +542,6 @@ static int __init cpcap_usb_det_probe(struct platform_device *pdev)
 	retval |= cpcap_irq_register(data->cpcap, CPCAP_IRQ_DPI,
 				     int_handler, data);
 	retval |= cpcap_irq_register(data->cpcap, CPCAP_IRQ_DMI,
-				     int_handler, data);
-	retval |= cpcap_irq_register(data->cpcap, CPCAP_IRQ_SESSVLD,
 				     int_handler, data);
 
 	/* Now that HW initialization is done, give USB control via ULPI. */
@@ -586,7 +569,6 @@ free_irqs:
 	cpcap_irq_free(data->cpcap, CPCAP_IRQ_CHRG_DET);
 	cpcap_irq_free(data->cpcap, CPCAP_IRQ_DPI);
 	cpcap_irq_free(data->cpcap, CPCAP_IRQ_DMI);
-	cpcap_irq_free(data->cpcap, CPCAP_IRQ_SESSVLD);
 	regulator_put(data->regulator);
 free_mem:
 	wake_lock_destroy(&data->wake_lock);
@@ -604,7 +586,6 @@ static int __exit cpcap_usb_det_remove(struct platform_device *pdev)
 	cpcap_irq_free(data->cpcap, CPCAP_IRQ_SE1);
 	cpcap_irq_free(data->cpcap, CPCAP_IRQ_IDGND);
 	cpcap_irq_free(data->cpcap, CPCAP_IRQ_VBUSVLD);
-	cpcap_irq_free(data->cpcap, CPCAP_IRQ_SESSVLD);
 
 	configure_hardware(data, CPCAP_ACCY_NONE);
 	cancel_delayed_work_sync(&data->work);
