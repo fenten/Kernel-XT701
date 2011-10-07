@@ -28,7 +28,11 @@
 #define DT_PATH_CHOSEN		"/Chosen@0"
 #define DT_PROP_CHOSEN_BP	"bp_model"
 #define DT_PROP_CHOSEN_BP_LEN	16
+#define DT_PROP_CHOSEN_OMAP3630REV       "omap3630_rev"
 #define DT_PROP_CHOSEN_USB_PROD_NAME "usb_id_prod_name"
+#define DT_PROP_CHOSEN_USB_PIDS "usb_pids"
+#define DT_PROP_CHOSEN_USB_NLUNS "usb_nluns"
+#define DT_PROP_CHOSEN_MODEM_IFACE_NUM "modem_interface_num"
 
 /* Keypad Node */
 #define DT_PATH_KEYPAD		"/System@0/Keypad@0"
@@ -41,6 +45,12 @@
 #define DT_PROP_KEYPAD_CLOSED_MAPS "closed_maps"
 #define DT_PROP_KEYPAD_NAME	"name"
 #define DT_PROP_KEYPAD_ADP5588  "adp5588_keypad"
+
+/* Keyreset Node */
+#define DT_PATH_KEYRESET	"/System@0/Keyreset@0"
+#define DT_PROP_KEYRESET_DOWN	"keydown"
+#define DT_PROP_KEYRESET_UP	"keyup"
+#define DT_PROP_KEYRESET_CRASH	"crash"
 
 /* GPIODev Node */
 #define DT_PATH_GPIOGEV		"/System@0/GPIODev@0"
@@ -110,6 +120,7 @@
 
 /* CPCAP Node */
 #define DT_PATH_CPCAP			"/System@0/SPI@0/PowerIC@0"
+#define DT_PROP_CPCAP_BUSNUM	"bus_num"
 #define DT_PROP_CPCAP_SPIINIT	"spiinit"
 #define DT_PROP_CPCAP_VIO_SUPPLY_CONVERTER "vio_supply_converter"
 #define DT_PROP_CPCAP_RGTINIT	"regulator_init"
@@ -128,6 +139,7 @@
 /* HallEffect Node */
 #define DT_HALLEFFECT_DOCK		"/System@0/GPIO@0/HallEffect@0"
 #define DT_PROP_DEV_AVAILABLE	"device_available"
+#define DT_PROP_DEV_NORTH_IS_DESK	"north_is_desk"
 
 #define DT_HOME_LED		"/System@0/ButtonBacklight@0"
 #define DT_PROP_TABLET_BUTTON	"tablet_button_led"
@@ -141,6 +153,17 @@
 #define DT_NOTIFICATION_LED	"/System@0/NotificationLED@0"
 #define DT_PROP_TABLET_RGB_LED	"tablet_rgb_led"
 #define DT_PROP_RUTH_RGB_LED	"ruth_rgb_led"
+
+#define DT_PATH_PROX                    "/System@0/I2C@0/Proximity@0"
+#define DT_PROP_ISL29030_CONF           "configure"
+#define DT_PROP_ISL29030_INT_CNTL       "interrupt_cntrl"
+#define DT_PROP_ISL29030_PROX_LOW_TH    "prox_lower_threshold"
+#define DT_PROP_ISL29030_PROX_HIGH_TH   "prox_higher_threshold"
+#define DT_PROP_ISL29030_XTALK_V_COV_TH "crosstalk_vs_covered_threshold"
+#define DT_PROP_ISL29030_DEF_PROX_NOISE "default_prox_noise_floor"
+#define DT_PROP_ISL29030_NUM_SAMP_NOISE "num_samples_for_noise_floor"
+#define DT_PROP_ISL29030_LENS_PERCENT   "lens_percent_t"
+#define DT_PROP_ISL29030_REGULATOR      "regulator"
 
 #define DT_LCD_BACKLIGHT	"/System@0/I2C@0/LCDBacklight@0"
 #define DT_PROP_POWERUP_GEN_CNFG	"power_up_gen_config"
@@ -163,6 +186,8 @@
 #define DT_PROP_UPPER_CURR_SEL		"upper_curr_sel"
 #define DT_PROP_LOWER_CURR_SEL		"lower_curr_sel"
 #define DT_PROP_LENS_LOSS_COEFF		"lens_loss_coeff"
+#define DT_PROP_MANUAL_ALS_CONFIG	"manual_als_config"
+#define DT_PROP_ALS_ENABLED		"als_enabled"
 
 /* Video out Node */
 #define DT_PATH_VIDEO_OUT	"/System@0/VideoOut@0"
@@ -202,6 +227,19 @@
 #define DT_PATH_UART	"/System@0/UART@0"
 #define DT_PROP_UART_HW_FLOW_CONTROL	"hw_flow_control"
 #define DT_PROP_UART_PORT_FOR_GPS		"gps_port"
+#define DT_PROP_UART_PADCONF_FOR_UART0    "uart0_padconf"
+
+/* Audio Node */
+#define DT_PATH_AUDIO	"/System@0/Audio@0"
+#define DT_PROP_AUDIO_ANALOG_DOWNLINK	"analog_downlink"
+#define DT_PROP_AUDIO_STEREO_LOUDSPEAKER "stereo_loudspeaker"
+#define DT_PROP_AUDIO_MIC3 "mic3"
+#define DT_PROP_AUDIO_I2S_BP "i2s_bp"
+#define DT_PROP_AUDIO_MB_BIAS "mb_bias"
+
+/* Modem Node */
+#define DT_PATH_MODEM	"/System@0/Modem@0"
+#define DT_PROP_MODEM_TYPE	"type"
 
 #endif
 #endif

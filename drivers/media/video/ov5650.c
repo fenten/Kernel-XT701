@@ -80,6 +80,12 @@ struct ov5650_exp_params {
 	u16 max_linear_gain;
 };
 
+struct ov5650_min_readout_params {
+	u8   enable_min_size;
+	u16 requested_width;
+	u16 requested_height;
+};
+
 enum ioctl_op {
 	IOCTL_RD = 0,
 	IOCTL_WR
@@ -99,7 +105,8 @@ enum sensor_op {
 	SENSOR_OTP_REQ,
 	DEFECT_PIXEL_CORRECTION,
 	FLICKER_DETECT_REQ,
-	CROPPED_READOUT_REQ
+	CROPPED_READOUT_REQ,
+	USE_MIN_SIZE_READOUT
 };
 
 struct camera_params_control {
@@ -154,6 +161,7 @@ struct ov5650_sensor {
 	struct ov5650_flash_params flash;
 	struct ov5650_exp_params exposure;
 	enum ov5650_orientation orientation;
+	struct ov5650_min_readout_params min_readout;
 };
 
 static struct ov5650_sensor ov5650 = {
@@ -176,6 +184,7 @@ static struct ov5650_sensor ov5650 = {
 
 static struct i2c_driver ov5650sensor_i2c_driver;
 static enum v4l2_power current_power_state = V4L2_POWER_OFF;
+static bool ov5650_flicker_manual_mode = true;
 
 #define BRIGHT_CENTER_COMP_GAIN (4*256)	/* linear gain threshold where bright
 					   center compensation is used. */
@@ -518,8 +527,8 @@ static struct private_vcontrol video_control_private[] = {
 		.minimum = OV5650_NO_HORZ_FLIP_OR_VERT_FLIP,
 		.maximum = OV5650_HORZ_FLIP_AND_VERT_FLIP,
 		.step = 0,
-		.default_value = OV5650_NO_HORZ_FLIP_OR_VERT_FLIP,
-		.current_value = OV5650_NO_HORZ_FLIP_OR_VERT_FLIP,
+		.default_value = OV5650_HORZ_FLIP_ONLY,
+		.current_value = OV5650_HORZ_FLIP_ONLY,
 	},
 	{
 		.id = LENS_CORRECTION,
@@ -597,6 +606,16 @@ static struct private_vcontrol video_control_private[] = {
 		.name = "Cropped Readout",
 		.minimum = 0,
 		.maximum = 1,
+		.step = 0,
+		.default_value = 0,
+		.current_value = 0,
+	},
+	{
+		.id = USE_MIN_SIZE_READOUT,
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.name = "Min Size Readout",
+		.minimum = 0,
+		.maximum = -1,
 		.step = 0,
 		.default_value = 0,
 		.current_value = 0,
@@ -1059,17 +1078,16 @@ int ov5650_set_color_bar_mode(u16 enable, struct v4l2_int_device *s,
 						struct private_vcontrol *pvc)
 {
 	int err = 0;
-	/*
 	struct ov5650_sensor *sensor = s->priv;
 	struct i2c_client *client = sensor->i2c_client;
 
 	if ((current_power_state == V4L2_POWER_ON) || sensor->resuming) {
 		if (enable) {
-			err = ov5650_write_reg(client, OV5650_CBAR, 0x1);
-			err = ov5650_write_reg(client, OV5650_SIZE_H0, 0x2);
+			err = ov5650_write_reg(client, OV5650_ISP_CTRL_3D,
+				OV5650_ISP_CTRL_3D_TEST_PATT_EN_MASK);
 		} else {
-			err = ov5650_write_reg(client, OV5650_CBAR, 0x0);
-			err = ov5650_write_reg(client, OV5650_SIZE_H0, 0x3);
+			err = ov5650_write_reg(client, OV5650_ISP_CTRL_3D,
+				0x0);
 		}
 	}
 
@@ -1079,7 +1097,6 @@ int ov5650_set_color_bar_mode(u16 enable, struct v4l2_int_device *s,
 		if (pvc)
 			pvc->current_value = enable;
 	}
-	*/
 
 	return err;
 }
@@ -1205,7 +1222,6 @@ static int ov5650_set_orientation(enum ov5650_orientation val,
 	struct i2c_client *client = to_i2c_client(sensor->dev);
 	struct ov5650_sensor_settings *ss = &sensor_settings[isize];
 
-
 	if ((current_power_state == V4L2_POWER_ON) || sensor->resuming) {
 
 		hmirror = (val == OV5650_HORZ_FLIP_ONLY ||
@@ -1285,7 +1301,18 @@ static int ov5650_set_orientation(enum ov5650_orientation val,
 					OV5650_VREF_START_MAN_L,
 					data & 0xFF);
 
-				DPRINTK_OV5650("%s: OV5650_VREF_START_MAN_L=" \
+				/* VREF_START regs may get used depending on
+				   VFLIP */
+
+				err |= ov5650_write_reg(client,
+					OV5650_VREF_START_H,
+					(data >> 8) & 0xFF);
+
+				err |= ov5650_write_reg(client,
+					OV5650_VREF_START_L,
+					data & 0xFF);
+
+				DPRINTK_OV5650("%s: OV5650_VREF_START_MAN=" \
 					"0x%x\n", __func__, data);
 			}
 		} else {
@@ -1410,7 +1437,6 @@ int ov5650_get_otp_data(struct v4l2_int_device *s, u8 *otp_data, u16 otp_size)
 	if (current_power_state != V4L2_POWER_ON) {
 		/* Turn Power & Clk On */
 		err |= sensor->pdata->power_set(sensor->dev, V4L2_POWER_ON);
-		isp_set_xclk(sensor->freq.xclk, OV5650_USE_XCLKA);
 	}
 
 	orig_streaming_state = sensor->streaming;
@@ -1427,14 +1453,12 @@ int ov5650_get_otp_data(struct v4l2_int_device *s, u8 *otp_data, u16 otp_size)
 				printk(KERN_ERR "OV5650: Unable to write reg\n");
 				sensor->pdata->power_set(sensor->dev,
 							orig_power_state);
-				isp_set_xclk(0, OV5650_USE_XCLKA);
 				return -ENODEV;
 			}
 			if (ov5650_read_reg(c, 1, OV5650_OTP_DATA, &val)) {
 				printk(KERN_ERR "OV5650: Unable to read OTP reg\n");
 				sensor->pdata->power_set(sensor->dev,
 							orig_power_state);
-				isp_set_xclk(0, OV5650_USE_XCLKA);
 				return -ENODEV;
 			}
 			val_sum += val;
@@ -1462,11 +1486,48 @@ int ov5650_get_otp_data(struct v4l2_int_device *s, u8 *otp_data, u16 otp_size)
 			/* Turn Power & Clk Off */
 			err |= sensor->pdata->power_set(sensor->dev,
 				orig_power_state);
-			isp_set_xclk(0, OV5650_USE_XCLKA);
 		}
 
 	} else {
 		printk(KERN_ERR "OV5650: Cannot read OTP\n");
+		err = -ENODEV;
+	}
+
+	return err;
+}
+
+/*
+ * Get Flicker Detect
+ *
+ *  Flicker mode need to be initialized to manual (debug) mode and then
+ *  switched to auto mode while streaming to get the default status to work.
+ */
+int ov5650_get_flicker_detect(struct v4l2_int_device *s, u32 *flicker)
+{
+	u32 val;
+	int err = 0;
+	struct ov5650_sensor *sensor = s->priv;
+	struct i2c_client *c = to_i2c_client(sensor->dev);
+
+	if ((current_power_state == V4L2_POWER_ON) || sensor->resuming) {
+		/* Make sure flicker has been taken out of manual mode */
+		if (ov5650_flicker_manual_mode) {
+			err |= ov5650_read_reg(c, 1, OV5650_5060HZ_CTRL_01,
+				&val);
+			val &= ~OV5650_5060HZ_CTRL_01_DEBUG_MASK;
+			err |= ov5650_write_reg(c, OV5650_5060HZ_CTRL_01,
+				val);
+			DPRINTK_OV5650("setting OV5650_5060HZ_CTRL_01=0x%x\n",
+				val);
+			ov5650_flicker_manual_mode = false;
+		}
+
+		/* Read Flicker result */
+		err = ov5650_read_reg(c, 1, OV5650_5060HZ_CTRL_0C, flicker);
+		*flicker &= OV5650_5060HZ_CTRL_0C_BAND50_MASK;
+		/* DPRINTK_OV5650("Flicker status = %d\n", *flicker); */
+	} else {
+		printk(KERN_ERR "OV5650: Cannot read flicker result\n");
 		err = -ENODEV;
 	}
 
@@ -1519,11 +1580,13 @@ static int ov5650_param_handler(u32 ctrlval,
 			struct v4l2_int_device *s)
 {
 	int err = 0, i;
+	u32 flicker;
 	struct ov5650_sensor *sensor = s->priv;
 	struct i2c_client *c = to_i2c_client(sensor->dev);
 	struct ov5650_sensor_params sensor_params;
 	struct ov5650_sensor_regif sensor_reg;
 	struct ov5650_flash_params flash_params;
+	struct ov5650_min_readout_params min_readout;
 	struct camera_params_control camctl;
 	struct private_vcontrol *pvc;
 	struct ov5650_sensor_settings *ss =
@@ -1686,11 +1749,13 @@ static int ov5650_param_handler(u32 ctrlval,
 			}
 			break;
 		case FLICKER_DETECT_REQ:
-			err =  ov5650_read_reg(c, 1, OV5650_5060HZ_CTRL_0C,
-				&sensor_reg.val);
-			sensor_reg.val &= OV5650_5060HZ_CTRL_0C_BAND50_MASK;
+			if (ov5650_get_flicker_detect(s, &flicker)) {
+				printk(KERN_ERR "ov5650: Get flicker detect error\n");
+				err = -EINVAL;
+				break;
+			}
 			if (copy_to_user((void *)camctl.data_in,
-				&sensor_reg.val, sizeof(sensor_reg.val))) {
+				&flicker, camctl.data_in_size)) {
 				printk(KERN_ERR "ov5650: Copy_to_user err\n");
 				err = -EINVAL;
 			}
@@ -1699,6 +1764,24 @@ static int ov5650_param_handler(u32 ctrlval,
 			camctl.data_in = pvc->current_value;
 			if (copy_to_user((void *)ctrlval, &camctl,
 					sizeof(struct camera_params_control))) {
+				dev_err(&c->dev, "ov5650: Copy_to_user err\n");
+				err = -EINVAL;
+			}
+			break;
+		case USE_MIN_SIZE_READOUT:
+			if (sizeof(sensor->min_readout) > camctl.data_in_size) {
+				dev_err(&c->dev,
+					"V4L2_CID_PRIVATE_S_PARAMS IOCTL " \
+					"DATA SIZE ERROR: src=%d dst=%d\n",
+					sizeof(sensor->min_readout),
+					camctl.data_in_size);
+				err = -EINVAL;
+				break;
+			}
+
+			if (copy_to_user((void *)camctl.data_in,
+					 &(sensor->min_readout),
+					 sizeof(sensor->min_readout))) {
 				dev_err(&c->dev, "ov5650: Copy_to_user err\n");
 				err = -EINVAL;
 			}
@@ -1796,6 +1879,24 @@ static int ov5650_param_handler(u32 ctrlval,
 			break;
 		case CROPPED_READOUT_REQ:
 			pvc->current_value = camctl.data_out;
+			break;
+		case USE_MIN_SIZE_READOUT:
+			if (sizeof(min_readout) < camctl.data_out_size) {
+				dev_err(&c->dev,
+					"V4L2_CID_PRIVATE_S_PARAMS IOCTL " \
+					"DATA SIZE ERROR: src=%d dst=%d\n",
+					camctl.data_out_size,
+					sizeof(min_readout));
+				err = -EINVAL;
+				break;
+			}
+
+			if (copy_from_user(&(sensor->min_readout),
+			(struct ov5650_min_readout_params *)camctl.data_out,
+			sizeof(struct ov5650_min_readout_params)) == 0) {
+				pvc->current_value =
+					sensor->min_readout.enable_min_size;
+			}
 			break;
 		default:
 			dev_err(&c->dev, "Unrecognized op %d\n",
@@ -1947,6 +2048,13 @@ int ov5650_configure_frame(struct v4l2_int_device *s,
 			 (ss->frame.v_ref_start >> 8) & 0xFF);
 
 		err |= ov5650_write_reg(client, OV5650_VREF_START_MAN_L,
+			 ss->frame.v_ref_start & 0xFF);
+
+		/* VREF_START regs may get used depending on VFLIP */
+		err |= ov5650_write_reg(client, OV5650_VREF_START_H,
+			 (ss->frame.v_ref_start >> 8) & 0xFF);
+
+		err |= ov5650_write_reg(client, OV5650_VREF_START_L,
 			 ss->frame.v_ref_start & 0xFF);
 	} else {
 		err |= ov5650_write_reg(client, OV5650_HREF_START_H,
@@ -2149,6 +2257,7 @@ static int ov5650_configure(struct v4l2_int_device *s)
 	/* Turn on 50-60 Hz Detection */
 	if (isize != SIZE_5M) {
 		err = ov5650_write_regs(client, ov5650_50_60_hz_detect_tbl);
+		ov5650_flicker_manual_mode = true;
 		if (err)
 			return err;
 	}
@@ -2221,6 +2330,14 @@ static int ov5650_configure(struct v4l2_int_device *s)
 		lvc = &video_control[i];
 		ov5650_set_gain(lvc->current_value,
 			sensor->v4l2_int_device, lvc);
+	}
+
+	/* Set initial color bars */
+	i = find_vctrl_private(COLOR_BAR);
+	if (i >= 0) {
+		pvc = &video_control_private[i];
+		ov5650_set_color_bar_mode(pvc->current_value,
+			sensor->v4l2_int_device, pvc);
 	}
 
 	/* Set initial flash mode */
@@ -2681,7 +2798,7 @@ static int ioctl_g_priv(struct v4l2_int_device *s, void *p)
 	struct ov5650_sensor *sensor = s->priv;
 	struct i2c_client *c = sensor->i2c_client;
 	struct omap34xxcam_hw_config hw_config;
-	int rval;
+	int rval, i;
 
 	rval = ioctl_g_priv(s, &hw_config);
 	if (rval) {
@@ -2693,23 +2810,26 @@ static int ioctl_g_priv(struct v4l2_int_device *s, void *p)
 	if (rval < 0) {
 		printk(KERN_ERR "OV5650: Unable to set the power state: "
 			OV5650_DRIVER_NAME " sensor\n");
-		isp_set_xclk(0, OV5650_USE_XCLKA);
 		return rval;
 	}
 
 	if (on == V4L2_POWER_ON) {
-		isp_set_xclk(sensor->freq.xclk, OV5650_USE_XCLKA);
 		/* set streaming off, standby */
 		rval = ov5650_write_reg(c, SYSTEM_CONTROL0, 0x42);
 		if (rval) {
 			enum v4l2_power off = V4L2_POWER_OFF;
 			printk(KERN_ERR "OV5650: Unable to write reg\n");
-			rval = sensor->pdata->power_set(sensor->dev, off);
-			isp_set_xclk(0, OV5650_USE_XCLKA);
+			sensor->pdata->power_set(sensor->dev, off);
 			return rval;
 		}
 	} else {
-		isp_set_xclk(0, OV5650_USE_XCLKA);
+		if (on == V4L2_POWER_OFF) {
+			for (i = (ARRAY_SIZE(video_control_private) - 1); i >= 0; i--) {
+				struct private_vcontrol *pvc = NULL;
+				pvc = &video_control_private[i];
+				pvc->current_value = pvc->default_value;
+			}
+		}
 		sensor->streaming = false;
 	}
 
@@ -2876,7 +2996,16 @@ const struct v4l2_fract ov5650_frameintervals[] = {
 static int ioctl_enum_frameintervals(struct v4l2_int_device *s,
 					struct v4l2_frmivalenum *frmi)
 {
-	int ifmt;
+	int ifmt, i;
+	struct ov5650_sensor *sensor = s->priv;
+	u16 use_min_readout = 0;
+	struct private_vcontrol *pvc = NULL;
+
+	i = find_vctrl_private(USE_MIN_SIZE_READOUT);
+	if (i >= 0) {
+		pvc = &video_control_private[i];
+		use_min_readout = pvc->current_value;
+	}
 
 	for (ifmt = 0; ifmt < NUM_CAPTURE_FORMATS; ifmt++) {
 		if (frmi->pixel_format == ov5650_formats[ifmt].pixelformat)
@@ -2894,17 +3023,48 @@ static int ioctl_enum_frameintervals(struct v4l2_int_device *s,
 		 */
 		if (frmi->index > 9)
 			return -EINVAL;
-	} else if (((frmi->width == ov5650_sizes[SIZE_2M].width) &&
-			(frmi->height == ov5650_sizes[SIZE_2M].height)) ||
-			((frmi->width == ov5650_sizes[SIZE_1_25M].width) &&
-			(frmi->height == ov5650_sizes[SIZE_1_25M].height)) ||
-			((frmi->width == ov5650_sizes[SIZE_315K].width) &&
-			(frmi->height == ov5650_sizes[SIZE_315K].height))) {
-		/* The max framerate supported by SIZE_2M, SIZE_1_25M,
-		   & SIZE_315K capture is 30 fps
+	} else if ((frmi->width == ov5650_sizes[SIZE_2M].width) &&
+			(frmi->height == ov5650_sizes[SIZE_2M].height)) {
+		/* The max framerate supported by SIZE_2M capture is 30 fps
 		 */
 		if (frmi->index > 16)
 			return -EINVAL;
+	} else if ((frmi->width == ov5650_sizes[SIZE_1_25M].width) &&
+			(frmi->height == ov5650_sizes[SIZE_1_25M].height)) {
+		/* The max framerate supported by SIZE_1_25M capture is 30 fps
+		 */
+		if (frmi->index > 16)
+			return -EINVAL;
+		/* If want to use min frame and there is a smaller size that
+		   qualifies, do no allow this readout
+		 */
+		if ((use_min_readout == 1) &&
+			 (sensor->min_readout.requested_width <=
+				ov5650_sizes[SIZE_315K].width) &&
+			 (sensor->min_readout.requested_height <=
+				ov5650_sizes[SIZE_315K].height)) {
+				DPRINTK_OV5650("ov5650: Readout 1.25M not " \
+					"allowed when using Min Size\n");
+				return -EINVAL;
+		}
+	} else if (((frmi->width == ov5650_sizes[SIZE_315K].width) &&
+			(frmi->height == ov5650_sizes[SIZE_315K].height))) {
+		/* The max framerate supported by SIZE_315K capture is 30 fps
+		 */
+		if (frmi->index > 16)
+			return -EINVAL;
+		/* If want to use min frame and there is a smaller size that
+		   qualifies, do no allow this readout
+		 */
+		if ((use_min_readout == 1) &&
+			 (sensor->min_readout.requested_width <=
+				ov5650_sizes[SIZE_80K].width) &&
+			 (sensor->min_readout.requested_height <=
+				ov5650_sizes[SIZE_80K].height)) {
+				DPRINTK_OV5650("ov5650:Readout 80K not "\
+				 "allowed when using Min Size\n");
+				return -EINVAL;
+		}
 	} else {
 		if (frmi->index > 17)
 			return -EINVAL;

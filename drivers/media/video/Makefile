@@ -122,6 +122,9 @@ obj-$(CONFIG_VIDEO_OMAP3) += omap34xxcam.o
 
 obj-$(CONFIG_VIDEO_TCM825X) += tcm825x.o
 obj-$(CONFIG_VIDEO_MT9P012)     += mt9p012.o
+obj-$(CONFIG_VIDEO_OV5650)     += ov5650.o
+obj-$(CONFIG_VIDEO_OV8810)     += ov8810.o
+obj-$(CONFIG_VIDEO_MIPI_DLI_TEST) += mipi_dli.o
 obj-$(CONFIG_VIDEO_OMAP3_HP3A) += hp3a/
 obj-$(CONFIG_VIDEO_OMAP3_HPLENS) += hplens.o
 
@@ -179,8 +182,8 @@ obj-$(CONFIG_VIDEO_AU0828) += au0828/
 
 obj-$(CONFIG_USB_VIDEO_CLASS)	+= uvc/
 obj-$(CONFIG_VIDEO_SAA7164)     += saa7164/
-
-obj-$(CONFIG_VIDEO_IR_I2C)  += ir-kbd-i2c.o
+obj-$(CONFIG_VIDEO_CAM_ISE)     += camise.o
+obj-$(CONFIG_VIDEO_IR_I2C)      += ir-kbd-i2c.o
 
 obj-$(CONFIG_ARCH_DAVINCI)	+= davinci/
 

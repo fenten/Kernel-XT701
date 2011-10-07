@@ -48,7 +48,7 @@
 #include <linux/vmalloc.h>
 #include <linux/pagemap.h>
 
-#include <plat/control.h>
+#include <mach/control.h>
 
 #include "isp.h"
 #include "ispmmu.h"

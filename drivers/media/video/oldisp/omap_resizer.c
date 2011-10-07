@@ -27,8 +27,8 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
-#include <linux/uaccess.h>
 #include <linux/sched.h>
+#include <linux/uaccess.h>
 #include <media/v4l2-dev.h>
 #include <asm/cacheflush.h>
 

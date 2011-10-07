@@ -33,7 +33,6 @@
 #include <linux/led-lm3530.h>
 #include <linux/wl127x-rfkill.h>
 #include <linux/wl127x-test.h>
-#include <linux/omap_mdm_ctrl.h>
 #include <linux/gpio_mapping.h>
 #include <linux/spi/cpcap.h>
 #include <linux/spi/cpcap-regbits.h>
@@ -50,13 +49,12 @@
 #include <plat/mux.h>
 #include <plat/board.h>
 #include <plat/common.h>
-#include <plat/gpmc.h>
 #include <plat/usb.h>
+#include <plat/gpmc.h>
 #include <linux/delay.h>
 #include <plat/control.h>
 #include <plat/hdq.h>
 #include <mach/system.h>
-#include <linux/usb/android_composite.h>
 #include <linux/wakelock.h>
 
 #include "cm-regbits-34xx.h"
@@ -90,6 +88,10 @@
 #if defined(CONFIG_VIDEO_OV5650) || defined(CONFIG_VIDEO_OV5650_MODULE)
 #include <media/ov5650.h>
 #endif
+#if defined(CONFIG_VIDEO_CAM_ISE) || defined(CONFIG_VIDEO_CAM_ISE_MODULE)
+#include <media/camise.h>
+#endif
+
 
 #if defined(CONFIG_LEDS_BD7885)
 #include <linux/leds-bd7885.h>
@@ -103,84 +105,20 @@
 #endif
 #endif
 
-////////////////////////////////////////////////////////////////////////
-// Adding by no change device tree
-/* Display panel Node */
-#define DT_PROP_TOUCH_I2C_ADDRESS       "i2c,address"
-#define DT_PROP_TOUCH_BOOT_I2C_ADDRESS  "boot_i2c_address"
-#define DT_PROP_TOUCH_KEYMAP		"touch_key_map"
-#define DT_PROP_TOUCH_FLAGS		"touchobp-flags"
-#define DT_PROP_TOUCH_CHECKSUM		"nv_checksum"
-#define DT_PROP_TOUCH_ABS_MIN_X		"abs_min_x"
-#define DT_PROP_TOUCH_ABS_MAX_X		"abs_max_x"
-#define DT_PROP_TOUCH_ABS_MIN_Y		"abs_min_y"
-#define DT_PROP_TOUCH_ABS_MAX_Y		"abs_max_y"
-#define DT_PROP_TOUCH_ABS_MIN_P		"abs_min_p"
-#define DT_PROP_TOUCH_ABS_MAX_P		"abs_max_p"
-#define DT_PROP_TOUCH_ABS_MIN_W		"abs_min_w"
-#define DT_PROP_TOUCH_ABS_MAX_W		"abs_max_w"
-#define DT_PROP_TOUCH_FUZZ_X		"fuzz_x"
-#define DT_PROP_TOUCH_FUZZ_Y		"fuzz_y"
-#define DT_PROP_TOUCH_FUZZ_P		"fuzz_p"
-#define DT_PROP_TOUCH_FUZZ_W		"fuzz_w"
-#define DT_PROP_TOUCH_KEY_ARRAY_MAP	"key_array_map"
-#define DT_PROP_TOUCH_KEY_ARRAY_COUNT	"key_array_count"
-#define DT_PROP_TOUCH_T7		"obj_t7"	/* power_cfg */
-#define DT_PROP_TOUCH_T8		"obj_t8"	/* acquire_cfg */
-#define DT_PROP_TOUCH_T9		"obj_t9"	/* multi_touch_cfg */
-#define DT_PROP_TOUCH_T15		"obj_t15"	/* key_array */
-#define DT_PROP_TOUCH_T17		"obj_t17"	/* linear_tbl_cfg */
-#define DT_PROP_TOUCH_T18		"obj_t18"	/* comms_config_cfg */
-#define DT_PROP_TOUCH_T19		"obj_t19"	/* gpio_pwm_cfg */
-#define DT_PROP_TOUCH_T20		"obj_t20"	/* grip_suppression_cfg */
-#define DT_PROP_TOUCH_T22		"obj_t22"	/* noise_suppression_cfg */
-#define DT_PROP_TOUCH_T23		"obj_t23"	/* touch_proximity_cfg */
-#define DT_PROP_TOUCH_T24		"obj_t24"	/* one_touch_gesture_proc_cfg */
-#define DT_PROP_TOUCH_T25		"obj_t25"	/* self_test_cfg */
-#define DT_PROP_TOUCH_T27		"obj_t27"	/* two_touch_gesture_proc_cfg */
-#define DT_PROP_TOUCH_T28		"obj_t28"	/* cte_config_cfg */
-#define DT_PROP_TOUCH_T36		"obj_t36"	/* noise1_suppression_cfg */
+#ifdef CONFIG_EMU_UART_DEBUG
+#include <plat/board-mapphone-emu_uart.h>
+#endif
 
-#define DT_LCD_BACKLIGHT	"/System@0/I2C@0/LCDBacklight@0"
-#define DT_PROP_POWERUP_GEN_CNFG	"power_up_gen_config"
-#define DT_PROP_GEN_CNFG	"gen_config"
-#define DT_PROP_ALS_CNFG	"als_config"
-
-#define DT_PROP_BRIGHTNESS_RAMP		"brightness_ramp"
-#define DT_PROP_ALS_ZONE_INFO		"als_zone_info"
-#define DT_PROP_ALS_RESISTOR_SEL    "als_resistor_sel"
-#define DT_PROP_BRIGHTNESS_CTRL		"brightness_control"
-#define DT_PROP_ZB0		"zone_boundary_0"
-#define DT_PROP_ZB1		"zone_boundary_1"
-#define DT_PROP_ZB2		"zone_boundary_2"
-#define DT_PROP_ZB3		"zone_boundary_3"
-#define DT_PROP_ZT0		"zone_target_0"
-#define DT_PROP_ZT1		"zone_target_1"
-#define DT_PROP_ZT2		"zone_target_2"
-#define DT_PROP_ZT3		"zone_target_3"
-#define DT_PROP_ZT4		"zone_target_4"
-#define DT_PROP_MANUAL_CURRENT		"manual_current"
-#define DT_PROP_UPPER_CURR_SEL		"upper_curr_sel"
-#define DT_PROP_LOWER_CURR_SEL		"lower_curr_sel"
-#define DT_PROP_LENS_LOSS_COEFF		"lens_loss_coeff"
-
-/* Feature Node */
-#define DT_HIGH_LEVEL_FEATURE	"/System@0/Feature@0"
-#define DT_HIGH_LEVEL_FEATURE_HEADSET_UART_EN "feature_headset_uart_en"
-
-/* Sim Card Node */
-#define DT_PATH_SIM_DEV	"/System@0/SimDevice@0"
-#define DT_PROP_SIM_DEV_AVAILABILITY "sim_availability"
-
-
-////////////////////////////////////////////////////////////////////////
+#ifdef CONFIG_INPUT_ALS_IR_ISL29030
+#include <linux/isl29030.h>
+#endif
 
 #define MAPPHONE_IPC_USB_SUSP_GPIO	142
-#define MAPPHONE_AP_TO_BP_FLASH_EN_GPIO	157
 #define MAPPHONE_TOUCH_RESET_N_GPIO	164
 #define MAPPHONE_TOUCH_INT_GPIO		109
 #define MAPPHONE_LM_3530_INT_GPIO	41
 #define MAPPHONE_AKM8973_INT_GPIO	175
+#define MAPPHONE_AKM8975_INT_GPIO	175
 #define MAPPHONE_AUDIO_PATH_GPIO	143
 #define MAPPHONE_BP_READY_AP_GPIO	141
 #define MAPPHONE_BP_READY2_AP_GPIO	59
@@ -192,23 +130,6 @@
 #define MAPPHONE_BPWAKE_STROBE_GPIO	157
 #define MAPPHONE_APWAKE_TRIGGER_GPIO	141
 #define MAPPHONE_AIRC_INT_GPIO        180
-#define DIE_ID_REG_BASE			(L4_WK_34XX_PHYS + 0xA000)
-#define DIE_ID_REG_OFFSET		0x218
-#define MAX_USB_SERIAL_NUM		17
-#define MAPPHONE_VENDOR_ID		0x22B8
-#define MAPPHONE_PRODUCT_ID		0x41D9
-#define MAPPHONE_ADB_PRODUCT_ID		0x41DB
-#define MAPPHONE_RNDIS_PRODUCT_ID	0x41E4
-#define MAPPHONE_RNDIS_ADB_PRODUCT_ID	0x41E5
-#define FACTORY_PRODUCT_ID		0x41E3
-#define FACTORY_ADB_PRODUCT_ID		0x41E2
-
-#ifdef CONFIG_USB_MOT_ANDROID
-#define MAPPHONE_PHONE_PORTAL_PRODUCT_ID               0x41D8
-#define MAPPHONE_PHONE_PORTAL_ADB_PRODUCT_ID           0x41DA
-#define MAPPHONE_MTP_PRODUCT_ID                        0x41D6
-#define MAPPHONE_MTP_ADB_PRODUCT_ID                    0x41DC
-#endif
 
 #define MAPPHONE_MMCPROBE_ENABLED 0
 
@@ -231,7 +152,6 @@
 #define I2C_MAX_DEV_NAME_LEN 16
 #define I2C_BUS_PROP_NAME_LEN 12
 
-static char device_serial[MAX_USB_SERIAL_NUM];
 char *bp_model = "CDMA";
 
 static struct omap_opp mapphone_omap3430_mpu_rate_table[] = {
@@ -349,184 +269,6 @@ static void __init mapphone_init_irq(void)
 	omap_gpio_init();
 }
 
-#define BOOT_MODE_MAX_LEN 30
-static char boot_mode[BOOT_MODE_MAX_LEN+1];
-int __init board_boot_mode_init(char *s)
-
-{
-	strncpy(boot_mode, s, BOOT_MODE_MAX_LEN);
-
-	printk(KERN_INFO "boot_mode=%s\n", boot_mode);
-
-	return 1;
-}
-__setup("androidboot.mode=", board_boot_mode_init);
-
-static char *usb_functions_ums[] = {
-	"usb_mass_storage",
-};
-
-static char *usb_functions_ums_adb[] = {
-	"usb_mass_storage",
-	"adb",
-};
-
-static char *usb_functions_rndis[] = {
-	"rndis",
-};
-
-static char *usb_functions_rndis_adb[] = {
-	"rndis",
-	"adb",
-};
-
-static char *usb_functions_all[] = {
-#ifdef CONFIG_USB_MOT_ANDROID
-	"acm",
-	"usbnet",
-	"mtp",
-#elif defined(CONFIG_USB_ANDROID_ACM)
-	"acm",
-#endif
-#ifdef CONFIG_USB_ANDROID_RNDIS
-	"rndis",
-#endif
-	"usb_mass_storage",
-	"adb",
-};
-
-#ifdef CONFIG_USB_MOT_ANDROID
-static char *usb_functions_phone_portal[] = {
-	"acm",
-	"usbnet",
-	"mtp",
-};
-
-static char *usb_functions_phone_portal_adb[] = {
-	"acm",
-	"usbnet",
-	"mtp",
-	"adb",
-};
-
-static char *usb_functions_mtp[] = {
-	"mtp",
-};
-
-static char *usb_functions_mtp_adb[] = {
-	"mtp",
-	"adb",
-};
-#endif
-
-
-static struct android_usb_product usb_products[] = {
-#ifdef CONFIG_USB_MOT_ANDROID
-	{
-		.product_id     = MAPPHONE_PHONE_PORTAL_PRODUCT_ID,
-		.num_functions  = ARRAY_SIZE(usb_functions_phone_portal),
-		.functions      = usb_functions_phone_portal,
-	},
-	{
-		.product_id     = MAPPHONE_PHONE_PORTAL_ADB_PRODUCT_ID,
-		.num_functions  = ARRAY_SIZE(usb_functions_phone_portal_adb),
-		.functions      = usb_functions_phone_portal_adb,
-	},
-	{
-		.product_id     = MAPPHONE_MTP_PRODUCT_ID,
-		.num_functions  = ARRAY_SIZE(usb_functions_mtp),
-		.functions      = usb_functions_mtp,
-	},
-	{
-		.product_id     = MAPPHONE_PHONE_PORTAL_ADB_PRODUCT_ID,
-		.num_functions  = ARRAY_SIZE(usb_functions_mtp_adb),
-		.functions      = usb_functions_mtp_adb,
-	},
-#endif
-	{
-		.product_id	= MAPPHONE_PRODUCT_ID,
-		.num_functions	= ARRAY_SIZE(usb_functions_ums),
-		.functions	= usb_functions_ums,
-	},
-	{
-		.product_id	= MAPPHONE_ADB_PRODUCT_ID,
-		.num_functions	= ARRAY_SIZE(usb_functions_ums_adb),
-		.functions	= usb_functions_ums_adb,
-	},
-#ifdef CONFIG_USB_ANDROID_RNDIS
-	{
-		.product_id	= MAPPHONE_RNDIS_PRODUCT_ID,
-		.num_functions	= ARRAY_SIZE(usb_functions_rndis),
-		.functions	= usb_functions_rndis,
-	},
-	{
-		.product_id	= MAPPHONE_RNDIS_ADB_PRODUCT_ID,
-		.num_functions	= ARRAY_SIZE(usb_functions_rndis_adb),
-		.functions	= usb_functions_rndis_adb,
-	},
-#endif
-};
-
-static char *factory_usb_functions[] = {
-	"usbnet"
-};
-
-
-static struct android_usb_product factory_usb_products[] = {
-	{
-		.product_id	= FACTORY_PRODUCT_ID,
-		.num_functions	= ARRAY_SIZE(factory_usb_functions),
-		.functions	= factory_usb_functions,
-	},
-};
-
-/* standard android USB platform data */
-static struct android_usb_platform_data andusb_plat = {
-	.vendor_id      = 0x22b8,
-	.product_id     = 0x41DA,
-	.product_name   = "A853",
-	.manufacturer_name	= "Motorola",
-	.serial_number		= device_serial,
-	.num_products = ARRAY_SIZE(usb_products),
-	.products = usb_products,
-	.num_functions = ARRAY_SIZE(usb_functions_all),
-	.functions = usb_functions_all,
-};
-
-/* android USB platform data for factory test mode*/
-static struct android_usb_platform_data andusb_plat_factory = {
-	.vendor_id			= 0x22b8,
-	.product_id			= FACTORY_PRODUCT_ID,
-	.manufacturer_name	= "Motorola",
-	.product_name		= "Motorola A855",
-	.serial_number		= device_serial,
-	.num_products = ARRAY_SIZE(factory_usb_products),
-	.products = factory_usb_products,
-	.num_functions = ARRAY_SIZE(factory_usb_functions),
-	.functions = factory_usb_functions,
-};
-
-static struct platform_device androidusb_device = {
-	.name	= "android_usb",
-	.id	= -1,
-	.dev	= {
-		.platform_data	= &andusb_plat,
-	},
-};
-
-static struct usb_mass_storage_platform_data usbms_plat = {
-	.vendor			= "Motorola",
-	.product		= "A853",
-	.release		= 1,
-};
-
-static struct platform_device usb_mass_storage_device = {
-	.name	= "usb_mass_storage",
-	.id	= -1,
-	.dev	= {
-		.platform_data = &usbms_plat,
-	},
-};
 
 #if defined(CONFIG_VIDEO_MIPI_DLI_TEST)
 static struct platform_device mapphone_mipi_dli_device = {
@@ -534,88 +276,6 @@ static struct platform_device mapphone_mipi_dli_device = {
 	.id = -1,
 };
 #endif
-
-#ifdef CONFIG_USB_ANDROID_RNDIS
-static struct usb_ether_platform_data rndis_pdata = {
-	/* ethaddr is filled by board_serialno_setup */
-	.vendorID	= 0x22b8,
-	.vendorDescr	= "Motorola",
-};
-
-static struct platform_device rndis_device = {
-	.name	= "rndis",
-	.id	= -1,
-	.dev	= {
-		.platform_data = &rndis_pdata,
-	},
-};
-#endif
-
-
-static int cpcap_usb_connected_probe(struct platform_device *pdev)
-{
-	android_usb_set_connected(1);
-	return 0;
-}
-
-static int cpcap_usb_connected_remove(struct platform_device *pdev)
-{
-	android_usb_set_connected(0);
-	return 0;
-}
-
-static struct platform_driver cpcap_usb_connected_driver = {
-	.probe		= cpcap_usb_connected_probe,
-	.remove		= cpcap_usb_connected_remove,
-	.driver		= {
-		.name	= "cpcap_usb_connected",
-		.owner	= THIS_MODULE,
-	},
-};
-
-static void mapphone_gadget_init(void)
-{
-	unsigned int val[2];
-	unsigned int reg;
-#ifdef CONFIG_USB_ANDROID_RNDIS
-	int i;
-	char *src;
-#endif
-
-	reg = DIE_ID_REG_BASE + DIE_ID_REG_OFFSET;
-	val[0] = omap_readl(reg);
-	val[1] = omap_readl(reg + 4);
-
-	snprintf(device_serial, MAX_USB_SERIAL_NUM, "%08X%08X", val[1], val[0]);
-#ifdef CONFIG_USB_ANDROID_RNDIS
-	/* create a fake MAC address from our serial number.
-	 * first byte is 0x02 to signify locally administered.
-	 */
-	rndis_pdata.ethaddr[0] = 0x02;
-	src = device_serial;
-	for (i = 0; *src; i++) {
-		/* XOR the USB serial across the remaining bytes */
-		rndis_pdata.ethaddr[i % (ETH_ALEN - 1) + 1] ^= *src++;
-	}
-#endif
-
-	/* use different USB configuration when in factory test mode */
-	if (bi_powerup_reason() & PU_REASON_FACTORY_CABLE)
-		androidusb_device.dev.platform_data = &andusb_plat_factory;
-
-	platform_device_register(&usb_mass_storage_device);
-#ifdef CONFIG_USB_ANDROID_RNDIS
-	platform_device_register(&rndis_device);
-#endif
-	platform_device_register(&androidusb_device);
-	platform_driver_register(&cpcap_usb_connected_driver);
-}
-
-static void mapphone_andusb_init(void)
-{
-    printk(KERN_INFO" product_name =  %s, product=%s  \n", andusb_plat.product_name, usbms_plat.product );
-	return;
-}
 
 /* Platform device structure for the SIM driver */
 struct platform_device sim_device = {
@@ -716,12 +376,18 @@ static struct omap_board_config_kernel mapphone_config[] __initdata = {
 
 static int mapphone_touch_reset(void)
 {
+	int touch_pwr_en_gpio = 0;
+#ifdef CONFIG_ARM_OF
+	touch_pwr_en_gpio = get_gpio_by_name("touch_pwr_en");
+#endif
 	gpio_direction_output(MAPPHONE_TOUCH_RESET_N_GPIO, 1);
 	msleep(1);
 	gpio_set_value(MAPPHONE_TOUCH_RESET_N_GPIO, 0);
-	msleep(20);
+	msleep(QTM_OBP_SLEEP_RESET_HOLD);
+	if (touch_pwr_en_gpio >= 0)
+		gpio_set_value(touch_pwr_en_gpio, 1);
 	gpio_set_value(MAPPHONE_TOUCH_RESET_N_GPIO, 1);
-	msleep(45);
+	msleep(QTM_OBP_SLEEP_WAIT_FOR_HW_RESET);
 
 	return 0;
 }
@@ -778,6 +444,10 @@ static struct i2c_board_info __initdata mapphone_i2c_bus2_master_board_info[];
 
 static void mapphone_touch_init(void)
 {
+	int touch_reset_n_gpio = MAPPHONE_TOUCH_RESET_N_GPIO;
+	int touch_int_gpio = MAPPHONE_TOUCH_INT_GPIO;
+	int touch_pwr_en_gpio = 0;
+
 #ifdef CONFIG_ARM_OF
 	struct device_node *touch_node;
 	const void *touch_prop;
@@ -792,7 +462,8 @@ static void mapphone_touch_init(void)
 		}
 
 		if ((touch_prop = of_get_property(touch_node, DT_PROP_TOUCH_I2C_ADDRESS, &len))) {
-			mapphone_i2c_bus1_master_board_info[0].addr = *((int *)touch_prop);
+			mapphone_i2c_bus1_master_board_info[0].addr =
+				*((int *)touch_prop);
 		}
 
 		touch_val = of_get_property(touch_node, DT_PROP_TOUCH_FLAGS, &len);
@@ -912,20 +583,42 @@ static void mapphone_touch_init(void)
 
 		of_node_put(touch_node);
 	}
-#endif
 
-	gpio_request(MAPPHONE_TOUCH_RESET_N_GPIO, "mapphone touch reset");
-	gpio_direction_output(MAPPHONE_TOUCH_RESET_N_GPIO, 1);
+	touch_pwr_en_gpio = get_gpio_by_name("touch_pwr_en");
+
+	touch_reset_n_gpio = get_gpio_by_name("touch_panel_rst");
+	if (touch_reset_n_gpio < 0) {
+		printk(KERN_DEBUG"mapphone_touch_init: can't get touch_panel_rst from device_tree\n");
+		touch_reset_n_gpio = MAPPHONE_TOUCH_RESET_N_GPIO;
+	}
+
+	touch_int_gpio = get_gpio_by_name("touch_panel_int");
+	if (touch_int_gpio < 0) {
+		printk(KERN_DEBUG"mapphone_touch_init: can't get touch_panel_int from device_tree\n");
+		touch_int_gpio = MAPPHONE_TOUCH_INT_GPIO;
+	} else 	{
+		mapphone_i2c_bus1_master_board_info[0].irq =
+				OMAP_GPIO_IRQ(touch_int_gpio);
+	}
+
+#endif
+	if (touch_pwr_en_gpio >= 0) {
+		gpio_request(touch_pwr_en_gpio, "mapphone touch power enable");
+		gpio_direction_output(touch_pwr_en_gpio, 1);
+	}
+
+	gpio_request(touch_reset_n_gpio, "mapphone touch reset");
+	gpio_direction_output(touch_reset_n_gpio, 1);
 	omap_cfg_reg(H19_34XX_GPIO164_OUT);
 
-	gpio_request(MAPPHONE_TOUCH_INT_GPIO, "mapphone touch irq");
-	gpio_direction_input(MAPPHONE_TOUCH_INT_GPIO);
-	omap_cfg_reg(D25_34XX_GPIO109);
+	gpio_request(touch_int_gpio, "mapphone touch irq");
+	gpio_direction_input(touch_int_gpio);
+	omap_cfg_reg(AG17_34XX_GPIO99);
 }
 
 static struct lm3530_platform_data omap3430_als_light_data;
 
-static void mapphone_als_init(void)
+static void __init mapphone_als_init(void)
 {
 	int lm3530_int_gpio = MAPPHONE_LM_3530_INT_GPIO;
 	int lm3530_reset_gpio;
@@ -933,7 +626,6 @@ static void mapphone_als_init(void)
 	struct device_node *als_node;
 	const u8 *als_val;
 	int len = 0;
-
 	als_node = of_find_node_by_path(DT_LCD_BACKLIGHT);
 	if (als_node != NULL) {
 		als_val = of_get_property(als_node, DT_PROP_POWERUP_GEN_CNFG,
@@ -1065,6 +757,18 @@ static void mapphone_als_init(void)
 		else
 			pr_err("%s: Cann't get lens loss coeff\n", __func__);
 
+		als_val = of_get_property(als_node, DT_PROP_MANUAL_ALS_CONFIG,
+									&len);
+		if (als_val && len)
+			omap3430_als_light_data.manual_als_config = *als_val;
+		else
+			pr_err("%s: Cann't get manual als config\n", __func__);
+
+		als_val = of_get_property(als_node, DT_PROP_ALS_ENABLED, &len);
+		if (als_val && len)
+			omap3430_als_light_data.als_enabled = *als_val;
+		else
+			pr_err("%s: Cann't get manual als config\n", __func__);
 		of_node_put(als_node);
 	}
 
@@ -1152,76 +856,81 @@ static struct qtm_touch_keyarray_cfg mapphone_key_array_data[] = {
 };
 
 static struct qtouch_ts_platform_data mapphone_ts_platform_data = {
-	.flags		= (QTOUCH_SWAP_XY |
-			   QTOUCH_USE_MULTITOUCH |
-			   QTOUCH_CFG_BACKUPNV |
-			   QTOUCH_EEPROM_CHECKSUM),
+	.flags		=	(QTOUCH_SWAP_XY |
+				QTOUCH_USE_MULTITOUCH |
+				QTOUCH_CFG_BACKUPNV |
+				QTOUCH_EEPROM_CHECKSUM),
 	.irqflags	= (IRQF_TRIGGER_FALLING | IRQF_TRIGGER_LOW),
 	.abs_min_x	= 0,
 	.abs_max_x	= 1024,
 	.abs_min_y	= 0,
-	.abs_max_y	= 960,
+	.abs_max_y	= 904,
 	.abs_min_p	= 0,
 	.abs_max_p	= 255,
 	.abs_min_w	= 0,
 	.abs_max_w	= 15,
-        .x_delta        = 400,
-        .y_delta        = 250,
+	.x_delta	= 400,
+	.y_delta	= 250,
 	.nv_checksum	= 0xf429,
+	.boot_i2c_addr	= 0x24,
+	.fw_version	= 0x16,
+	.build_version	= 0xab,
+	.base_fw_version	= 0x16, /* dummy for TTSKT */
 	.fuzz_x		= 0,
 	.fuzz_y		= 0,
 	.fuzz_p		= 2,
 	.fuzz_w		= 2,
 	.hw_reset	= mapphone_touch_reset,
 	.key_array = {
-		.cfg		= mapphone_key_array_data,
-		.keys		= NULL,
-		.num_keys	= 0,
+		.cfg            = mapphone_key_array_data,
+		.keys           = NULL,
+		.num_keys       = 0,
 	},
 	.power_cfg	= {
-		.idle_acq_int	= 0x0a,
+		.idle_acq_int	= 0x10,
 		.active_acq_int	= 0xff,
 		.active_idle_to	= 0x32,
 	},
 	.acquire_cfg	= {
-		.charge_time	= 0x08,
+		.charge_time    = 0x08,
 		.reserve0	= 0x00,
 		.touch_drift	= 0x0a,
 		.drift_susp	= 0x01,
 		.touch_autocal	= 0x32,
 		.sync		= 0,
-		.anti_cal_susp	= 0x01,
-		.anti_cal_sthr	= 0x00,
+		.anti_cal_susp  = 0x05,
+		.anti_cal_sthr  = 0x0,
 	},
 	.multi_touch_cfg	= {
 		.ctrl		= 0x0b,
 		.x_origin	= 0,
 		.y_origin	= 0,
-		.x_size		= 0x12,
-		.y_size		= 0x0a,
+		.x_size		= 18,
+		.y_size		= 10,
 		.aks_cfg	= 0,
-		.burst_len	= 0x11,
-		.tch_det_thr	= 0x24,
+		.burst_len      = 0x11,
+		.tch_det_thr    = 0x24,
 		.tch_det_int	= 0x02,
-		.orient		= 0,
-		.mrg_to		= 0x19,
-		.mov_hyst_init	= 0x14,
+		.orient         = 0,
+		.mrg_to         = 0x19,
+		.mov_hyst_init	= 0x05,
 		.mov_hyst_next	= 0x05,
-		.mov_filter	= 0x30,
-		.num_touch	= 0x02,
-		.merge_hyst	= 0x05,
-		.merge_thresh	= 0x05,
-		.amp_hyst	= 0,
-		.x_res		= 0x0000,
-		.y_res		= 0x0000,
-		.x_low_clip	= 0x05,
-		.x_high_clip	= 0x00,
-		.y_low_clip	= 0x00,
-		.y_high_clip	= 0x05,
-		.x_edge_ori	= 0x00,
-		.x_edge_cdist	= 0x00,
-		.y_edge_ori	= 0x00,
-		.y_edge_cdist	= 0x00,
+		.mov_filter	= 0,
+		.num_touch	= 2,
+		.merge_hyst	= 5,
+		.merge_thresh	= 5,
+		.amp_hyst       = 0,
+		.x_res = 0x0000,
+		.y_res = 0x0000,
+		.x_low_clip = 0x05,
+		.x_high_clip = 0x00,
+		.y_low_clip = 0x00,
+		.y_high_clip = 0x04,
+		.x_edge_ori     = 0x00,
+		.x_edge_cdist   = 0x00,
+		.y_edge_ori     = 0x00,
+		.y_edge_cdist   = 0x00,
+		.max_pos_jump	= 0x00,
 	},
 	.linear_tbl_cfg = {
 		.ctrl = 0x00,
@@ -1253,10 +962,10 @@ static struct qtouch_ts_platform_data mapphone_ts_platform_data = {
 		.duty_cycle_1		= 0,
 		.duty_cycle_2		= 0,
 		.duty_cycle_3		= 0,
-		.trigger_0              = 0,
-		.trigger_1              = 0,
-		.trigger_2              = 0,
-		.trigger_3              = 0,
+		.trigger_0		= 0,
+		.trigger_1		= 0,
+		.trigger_2		= 0,
+		.trigger_3		= 0,
 	},
 	.com_cfg = {
 		.ctrl		= 0x00,
@@ -1276,60 +985,60 @@ static struct qtouch_ts_platform_data mapphone_ts_platform_data = {
 		.shpthr2	= 0x00,
 	},
 	.noise_suppression_cfg = {
-		.ctrl			= 0x05,
-		.reserve0		= 0x0000,
-		.gcaf_upper_limit	= 0x0019,
-		.gcaf_lower_limit	= 0xffe7,
-		.gcaf_num_active	= 0x04,
-		.noise_threshold	= 0x12,
-		.reserve1		= 0,
-		.freq_hop_scale		= 0x01,
-		.burst_freq_0		= 0x06,
-		.burst_freq_1		= 0x0b,
-		.burst_freq_2		= 0x0f,
-		.burst_freq_3		= 0x13,
-		.burst_freq_4		= 0x15,
-		.gcaf_num_idle		= 0x04,
+		.ctrl                   = 0x85,
+		.reserve0               = 0x0000,
+		.gcaf_upper_limit       = 0x0019,
+		.gcaf_lower_limit       = 0xffe7,
+		.gcaf_num_active        = 0x04,
+		.noise_threshold        = 0x14,
+		.reserve1               = 0,
+		.freq_hop_scale         = 0x01,
+		.burst_freq_0           = 0x06,
+		.burst_freq_1           = 0x0b,
+		.burst_freq_2           = 0x0f,
+		.burst_freq_3           = 0x13,
+		.burst_freq_4           = 0x15,
+		.gcaf_num_idle          = 0x04,
 	},
 	.one_touch_gesture_proc_cfg = {
-		.ctrl			= 0,
-		.reserve0		= 0,
-		.gesture_enable		= 0,
-		.pres_proc		= 0,
-		.tap_time_out		= 0,
-		.flick_time_out		= 0,
-		.drag_time_out		= 0,
-		.short_press_time_out	= 0,
-		.long_press_time_out	= 0,
-		.repeat_press_time_out	= 0,
-		.flick_threshold	= 0,
-		.drag_threshold		= 0,
-		.tap_threshold		= 0,
-		.throw_threshold	= 0,
+		.ctrl                   = 0,
+		.reserve0               = 0,
+		.gesture_enable         = 0,
+		.pres_proc              = 0,
+		.tap_time_out           = 0,
+		.flick_time_out         = 0,
+		.drag_time_out          = 0,
+		.short_press_time_out   = 0,
+		.long_press_time_out    = 0,
+		.repeat_press_time_out  = 0,
+		.flick_threshold        = 0,
+		.drag_threshold         = 0,
+		.tap_threshold          = 0,
+		.throw_threshold        = 0,
 	},
 	.self_test_cfg = {
-		.ctrl			= 0,
-		.command		= 0,
-		.high_signal_limit_0	= 0,
-		.low_signal_limit_0	= 0,
-		.high_signal_limit_1	= 0,
-		.low_signal_limit_1	= 0,
+		.ctrl                   = 0,
+		.command                = 0,
+		.high_signal_limit_0    = 9999,
+		.low_signal_limit_0     = 1000,
+		.high_signal_limit_1    = 0,
+		.low_signal_limit_1     = 0,
 	},
 	.two_touch_gesture_proc_cfg = {
-		.ctrl			= 0,
-		.reserved0		= 0,
-		.reserved1		= 0,
-		.gesture_enable		= 0,
-		.rotate_threshold	= 0,
-		.zoom_threshold		= 0,
+		.ctrl                   = 0,
+		.reserved0              = 0,
+		.reserved1              = 0,
+		.gesture_enable         = 0,
+		.rotate_threshold       = 0,
+		.zoom_threshold         = 0,
 	},
 	.cte_config_cfg = {
-		.ctrl			= 1,
-		.command		= 0,
-		.mode			= 3,
-		.idle_gcaf_depth	= 4,
-		.active_gcaf_depth	= 0x20,
-		.voltage		= 0x1e,
+		.ctrl                   = 1,
+		.command                = 0,
+		.mode                   = 3,
+		.idle_gcaf_depth        = 0x0f,
+		.active_gcaf_depth      = 0x3f,
+		.voltage                = 0x1e,
 	},
 	.noise1_suppression_cfg = {
 		.ctrl		= 0x00,
@@ -1338,13 +1047,13 @@ static struct qtouch_ts_platform_data mapphone_ts_platform_data = {
 		.duty_cycle	= 0x00,
 	},
 	.userdata = {
-		.data_0		= 0x49,
+		.data_0		= 0x00,
 		.data_1		= 0x00,
-		.data_2		= 0x4C,
+		.data_2		= 0x00,
 		.data_3		= 0x00,
-		.data_4		= 0x48,
+		.data_4		= 0x00,
 		.data_5		= 0x00,
-		.data_6		= 0x4A,
+		.data_6		= 0x00,
 		.data_7		= 0x00,
 	},
 	.vkeys			= {
@@ -1352,7 +1061,6 @@ static struct qtouch_ts_platform_data mapphone_ts_platform_data = {
 		.keys		= mapphone_touch_vkeys,
 	},
 };
-
 
 static struct lm3530_platform_data omap3430_als_light_data = {
 	.power_up_gen_config = 0x0b,
@@ -1375,6 +1083,8 @@ static struct lm3530_platform_data omap3430_als_light_data = {
 	.upper_curr_sel = 6,
 	.lower_curr_sel = 3,
 	.lens_loss_coeff = 6,
+	.manual_als_config = 0x64,
+	.als_enabled = 1,
 };
 
 static struct lm3554_platform_data mapphone_camera_flash_3554 = {
@@ -1397,10 +1107,10 @@ static struct lm3559_platform_data mapphone_camera_flash_3559 = {
 	.enable_reg_def = 0x00,
 	.gpio_reg_def = 0x00,
 	.adc_delay_reg_def = 0xc0,
-	.vin_monitor_def = 0xc0,
-	.torch_brightness_def = 0xd2,
-	.flash_brightness_def = 0xdd,
-	.flash_duration_def = 0x6f,
+	.vin_monitor_def = 0xff,
+	.torch_brightness_def = 0x5b,
+	.flash_brightness_def = 0xaa,
+	.flash_duration_def = 0x0f,
 	.flag_reg_def = 0x00,
 	.config_reg_1_def = 0x6a,
 	.config_reg_2_def = 0x00,
@@ -1419,6 +1129,9 @@ static struct lm3559_platform_data mapphone_camera_flash_3559 = {
 #ifdef CONFIG_SENSORS_AIRC
 extern struct airc_platform_data mapphone_airc_data;
 #endif
+#ifdef CONFIG_INPUT_ALS_IR_ISL29030
+extern struct isl29030_platform_data isl29030_pdata;
+#endif
 
 static struct i2c_board_info __initdata
 	mapphone_i2c_bus1_board_info[I2C_BUS_MAX_DEVICES];
@@ -1426,6 +1139,8 @@ static struct i2c_board_info __initdata
 	mapphone_i2c_bus2_board_info[I2C_BUS_MAX_DEVICES];
 static struct i2c_board_info __initdata
 	mapphone_i2c_bus3_board_info[I2C_BUS_MAX_DEVICES];
+
+extern struct adp8870_backlight_platform_data adp8870_pdata;
 
 static struct i2c_board_info __initdata
 	mapphone_i2c_bus1_master_board_info[] = {
@@ -1439,6 +1154,16 @@ static struct i2c_board_info __initdata
 		.platform_data = &omap3430_als_light_data,
 		.irq = OMAP_GPIO_IRQ(MAPPHONE_LM_3530_INT_GPIO),
 	},
+#ifdef CONFIG_HDMI_TDA19989
+	{
+		I2C_BOARD_INFO("tda19989", 0x70),
+	},
+#endif
+
+	{
+		I2C_BOARD_INFO("adp8870", 0x2B),
+		.platform_data = &adp8870_pdata,
+	},
 #ifdef CONFIG_SENSORS_AIRC
 	{
 		I2C_BOARD_INFO("airc", 0x50),
@@ -1446,9 +1171,17 @@ static struct i2c_board_info __initdata
 		.irq = OMAP_GPIO_IRQ(MAPPHONE_AIRC_INT_GPIO),
 	},
 #endif
+#ifdef CONFIG_INPUT_ALS_IR_ISL29030
+	{
+		I2C_BOARD_INFO(LD_ISL29030_NAME, 0x44),
+		.platform_data = &isl29030_pdata,
+	},
+#endif
 };
 
 extern struct lis331dlh_platform_data mapphone_lis331dlh_data;
+extern struct akm8975_platform_data mapphone_akm8975_pdata;
+
 static struct i2c_board_info __initdata
 	mapphone_i2c_bus2_master_board_info[] = {
 	{
@@ -1463,11 +1196,15 @@ static struct i2c_board_info __initdata
 		I2C_BOARD_INFO("kxtf9", 0x0F),
 		.platform_data = &mapphone_kxtf9_data,
 	},
-
 	{
 		I2C_BOARD_INFO(LD_LM3530_NAME, 0x38),
 		.platform_data = &omap3430_als_light_data,
 		.irq = OMAP_GPIO_IRQ(MAPPHONE_LM_3530_INT_GPIO),
+	},
+	{
+		I2C_BOARD_INFO("akm8975", 0x0C),
+		.platform_data = &mapphone_akm8975_pdata,
+		.irq = OMAP_GPIO_IRQ(MAPPHONE_AKM8975_INT_GPIO),
 	},
 };
 
@@ -1492,12 +1229,6 @@ static struct i2c_board_info __initdata
 	},
 #endif
 
-#ifdef CONFIG_HDMI_TDA19989
-	{
-		I2C_BOARD_INFO("tda19989", 0x70),
-	},
-#endif
-
 #if CONFIG_KEYBOARD_ADP5588
 	{
 		I2C_BOARD_INFO(ADP5588_KEYPAD_NAME, ADP5588_I2C_ADDRESS),
@@ -1511,7 +1242,18 @@ static struct i2c_board_info __initdata
 		.platform_data = &mapphone_ov8810_platform_data,
 	},
 #endif
-
+#if defined(CONFIG_VIDEO_OV5650)
+	{
+		I2C_BOARD_INFO("ov5650", OV5650_I2C_ADDR),
+		.platform_data = &mapphone_ov5650_platform_data,
+	},
+#endif
+#if defined(CONFIG_VIDEO_CAM_ISE)
+	{
+		I2C_BOARD_INFO("camise", CAMISE_I2C_ADDR),
+		.platform_data = &mapphone_camise_platform_data,
+	},
+#endif
 #ifdef CONFIG_VIDEO_OMAP3_HPLENS
 	{
 		I2C_BOARD_INFO("HP_GEN_LENS", 0x04),
@@ -1576,9 +1318,61 @@ static struct i2c_board_info *get_board_info
 void initialize_device_specific_data(void)
 {
 #ifdef CONFIG_ARM_OF
+	u8 dev_available = 0;
+	struct device_node *node;
+	int len = 0;
+	const uint32_t *val;
+
 	/* Check camera flash led type */
+	/* LM3559 */
+	node = of_find_node_by_path(DT_PATH_LM3559);
+	if (node != NULL) {
+		val = of_get_property(node, "device_available", &len);
+		if (val && len)
+			dev_available =  *(u8 *)val;
+	}
+
+	if (dev_available) {
+		val =
+			of_get_property(
+				node, "lm3559_flags", &len);
+		if (val && len)
+			mapphone_camera_flash_3559.flags = *val;
+		else
+			pr_err("%s: Can't get flags\n", __func__);
+	}
+
 	/* LM3554 */
-	mapphone_camera_flash_3554.flags = 1;
+	node = of_find_node_by_path(DT_PATH_LM3554);
+	if (node != NULL) {
+		val = of_get_property(node, "device_available", &len);
+		if (val && len)
+			mapphone_camera_flash_3554.flags = *val;
+		val = of_get_property(node, "flash_duration_def", &len);
+		if (val && len)
+			mapphone_camera_flash_3554.flash_duration_def = *val;
+
+		val = of_get_property(node, "flash_brightness_def", &len);
+		if (val && len)
+			mapphone_camera_flash_3554.flash_brightness_def = *val;
+
+	}
+
+#if defined(CONFIG_VIDEO_MIPI_DLI_TEST)
+	/* MIPI DLI */
+	node = of_find_node_by_path(DT_HIGH_LEVEL_FEATURE);
+	if (node != NULL) {
+		val =
+		of_get_property(node, "feature_mipi_cam", NULL);
+		if (NULL != val) {
+			if (*val) {
+				platform_device_register(
+					&mapphone_mipi_dli_device);
+				printk(KERN_INFO "Enabling MIPI DLI Test");
+			}
+		}
+	}
+#endif
 
 #endif /*CONFIG_ARM_OF*/
 }
@@ -1594,24 +1388,25 @@ static int initialize_i2c_bus_info
 {
 	int dev_cnt = 0;
 #ifdef CONFIG_ARM_OF
+	struct device_node *bus_node;
 	const void *feat_prop;
 	char *device_names;
 	char dev_name[I2C_MAX_DEV_NAME_LEN];
 	int device_name_len, i, j;
 	struct i2c_board_info *master_entry;
 	char prop_name[I2C_BUS_PROP_NAME_LEN];
-	static char *i2c_devices[] = {
-			"qtouch-obp-ts,lm3530_led,airc",
-			"akm8973,lis331dlh,kxtf9" ,
-			"HP_GEN_LENS,mt9p012,lm3554_led"
-	};
 
 	j = 0;
 
-	if ( bus_num >= 4) 
+	bus_node = of_find_node_by_path(DT_PATH_I2C);
+	if (bus_node == NULL || board_info == NULL)
 		return dev_cnt;
 
-	feat_prop = i2c_devices[bus_num -1];
+	snprintf(prop_name, I2C_BUS_PROP_NAME_LEN,
+		"bus%1ddevices", bus_num);
+
+	feat_prop = of_get_property(bus_node,
+			prop_name, NULL);
 	if (NULL != feat_prop) {
 		device_names = (char *)feat_prop;
 		printk(KERN_INFO
@@ -1709,188 +1504,6 @@ extern void __init mapphone_flash_init(void);
 extern void __init mapphone_gpio_iomux_init(void);
 
 
-#if defined(CONFIG_USB_EHCI_HCD) || defined(CONFIG_USB_EHCI_HCD_MODULE)
-
-static int mapphone_usb_port_startup(struct platform_device *dev, int port)
-{
-	int r;
-
-	if (port == 2) {
-		r = gpio_request(MAPPHONE_IPC_USB_SUSP_GPIO, "ipc_usb_susp");
-		if (r < 0) {
-			printk(KERN_WARNING "Could not request GPIO %d"
-			       " for IPC_USB_SUSP\n",
-			       MAPPHONE_IPC_USB_SUSP_GPIO);
-			return r;
-		}
-		gpio_direction_output(MAPPHONE_IPC_USB_SUSP_GPIO, 0);
-	} else {
-		return -EINVAL;
-	}
-	return 0;
-}
-
-static void mapphone_usb_port_shutdown(struct platform_device *dev, int port)
-{
-	if (port == 2)
-		gpio_free(MAPPHONE_IPC_USB_SUSP_GPIO);
-}
-
-
-static void mapphone_usb_port_suspend(struct platform_device *dev,
-				    int port, int suspend)
-{
-	if (port == 2)
-		gpio_set_value(MAPPHONE_IPC_USB_SUSP_GPIO, suspend);
-}
-
-static int omap_usbhost_bus_check_ctrl_standby(void);
-static struct ehci_hcd_omap_platform_data usb_platform_data = {
-	.port_data = {
-		{ .flags = 0x0, }, /* disabled */
-		{ .flags = 0x0, }, /* disabled */
-		{
-			.flags = EHCI_HCD_OMAP_FLAG_ENABLED |
-			EHCI_HCD_OMAP_FLAG_AUTOIDLE |
-			EHCI_HCD_OMAP_FLAG_NOBITSTUFF,
-			.mode = EHCI_HCD_OMAP_MODE_UTMI_PHY_4PIN,
-			.startup = mapphone_usb_port_startup,
-			.shutdown = mapphone_usb_port_shutdown,
-			.suspend = mapphone_usb_port_suspend,
-		},
-	},
-	.usbhost_standby_status = omap_usbhost_bus_check_ctrl_standby,
-};
-
-static struct resource ehci_resources[] = {
-	{
-		.start	= OMAP34XX_EHCI_BASE,
-		.end	= OMAP34XX_EHCI_BASE + SZ_1K - 1,
-		.flags	= IORESOURCE_MEM,
-	},
-	{
-		.start	= OMAP34XX_UHH_CONFIG_BASE,
-		.end	= OMAP34XX_UHH_CONFIG_BASE + SZ_1K - 1,
-		.flags	= IORESOURCE_MEM,
-	},
-	{
-		.start	= OMAP34XX_USBTLL_BASE,
-		.end	= OMAP34XX_USBTLL_BASE + SZ_4K - 1,
-		.flags	= IORESOURCE_MEM,
-	},
-	{         /* general IRQ */
-		.start	= INT_34XX_EHCI_IRQ,
-		.flags	= IORESOURCE_IRQ,
-	}
-};
-
-static u64 ehci_dmamask = ~(u32)0;
-static struct platform_device ehci_device = {
-	.name		= "ehci-omap",
-	.id		= 0,
-	.dev = {
-		.dma_mask		= &ehci_dmamask,
-		.coherent_dma_mask	= 0xffffffff,
-		.platform_data		= &usb_platform_data,
-	},
-	.num_resources	= ARRAY_SIZE(ehci_resources),
-	.resource	= ehci_resources,
-};
-#endif
-
-static int omap_usbhost_bus_check_ctrl_standby(void)
-{
-	u32 val;
-
-	val = cm_read_mod_reg(OMAP3430ES2_USBHOST_MOD, CM_IDLEST);
-	if (val & OMAP3430ES2_ST_USBHOST_STDBY_MASK)
-		return 1;
-	else
-		return 0;
-}
-
-#if defined(CONFIG_USB_OHCI_HCD) || defined(CONFIG_USB_OHCI_HCD_MODULE)
-
-
-static struct resource ohci_resources[] = {
-	[0] = {
-		.start	= OMAP34XX_OHCI_BASE,
-		.end	= OMAP34XX_OHCI_BASE + SZ_1K - 1,
-		.flags	= IORESOURCE_MEM,
-	},
-	{
-		.start	= OMAP34XX_UHH_CONFIG_BASE,
-		.end	= OMAP34XX_UHH_CONFIG_BASE + SZ_1K - 1,
-		.flags	= IORESOURCE_MEM,
-	},
-	{
-		.start	= OMAP34XX_USBTLL_BASE,
-		.end	= OMAP34XX_USBTLL_BASE + SZ_4K - 1,
-		.flags	= IORESOURCE_MEM,
-	},
-	{         /* general IRQ */
-		.start	= INT_34XX_OHCI_IRQ,
-		.flags	= IORESOURCE_IRQ,
-	}
-};
-
-static u64 ohci_dmamask = ~(u32)0;
-
-static struct omap_usb_config dummy_usb_config = {
-	.port_data = {
-		{ .flags = 0x0, }, /* disabled */
-		{ .flags = 0x0, }, /* disabled */
-		{
-			.flags = EHCI_HCD_OMAP_FLAG_ENABLED |
-			EHCI_HCD_OMAP_FLAG_AUTOIDLE |
-			EHCI_HCD_OMAP_FLAG_NOBITSTUFF,
-			.mode = EHCI_HCD_OMAP_MODE_UTMI_PHY_4PIN,
-			.startup = mapphone_usb_port_startup,
-			.shutdown = mapphone_usb_port_shutdown,
-			.suspend = mapphone_usb_port_suspend,
-		},
-	},
-	.usbhost_standby_status	= omap_usbhost_bus_check_ctrl_standby,
-	.usb_remote_wake_gpio = MAPPHONE_BP_READY2_AP_GPIO,
-};
-
-static struct platform_device ohci_device = {
-	.name		= "ohci",
-	.id		= 0,
-	.dev = {
-		.dma_mask		= &ohci_dmamask,
-		.coherent_dma_mask	= 0xffffffff,
-		.platform_data	= &dummy_usb_config,
-	},
-	.num_resources	= ARRAY_SIZE(ohci_resources),
-	.resource	= ohci_resources,
-};
-#endif /* OHCI specific data */
-
-
-static void __init mapphone_ehci_init(void)
-{
-	if (!strcmp(boot_mode, "charger"))
-		return;
-
-	omap_cfg_reg(AF5_34XX_GPIO142);		/*  IPC_USB_SUSP      */
-	omap_cfg_reg(AD1_3430_USB3FS_PHY_MM3_RXRCV);
-	omap_cfg_reg(AD2_3430_USB3FS_PHY_MM3_TXDAT);
-	omap_cfg_reg(AC1_3430_USB3FS_PHY_MM3_TXEN_N);
-	omap_cfg_reg(AE1_3430_USB3FS_PHY_MM3_TXSE0);
-
-#if defined(CONFIG_USB_EHCI_HCD) || defined(CONFIG_USB_EHCI_HCD_MODULE)
-	if (!is_cdma_phone()) {
-		usb_platform_data.port_data[2].mode = EHCI_HCD_OMAP_MODE_ULPI_TLL_SDR;
-		platform_device_register(&ehci_device);
-	}
-#endif
-#if defined(CONFIG_USB_OHCI_HCD) || defined(CONFIG_USB_OHCI_HCD_MODULE)
-	if (is_cdma_phone())
-		platform_device_register(&ohci_device);
-#endif
-}
-
 static void __init mapphone_sdrc_init(void)
 {
 	/* Ensure SDRC pins are mux'd for self-refresh */
@@ -1900,20 +1513,48 @@ static void __init mapphone_sdrc_init(void)
 
 static void __init mapphone_serial_init(void)
 {
+	int bpwake_strobe_gpio = MAPPHONE_BPWAKE_STROBE_GPIO;
 #ifdef CONFIG_ARM_OF
-	int gps_uart_port = 0x01;
-	static char *  uart_flowctl_ctsrts[] ={  "0x40" ,  "0xC0",  "0x40" } ;
+	struct device_node *uart_node;
+	const void *uart_prop;
+	struct device_node *dt_node;
+	const void *dt_prop;
 
-    printk(KERN_INFO " Steve : Enter mapphone_serial_init \n"); // by Steve Kim (w21521)
-	omap_serial_ctsrts_init((unsigned char *) uart_flowctl_ctsrts);
-	omap_uart_set_gps_port(gps_uart_port);
-    printk(KERN_INFO "mapphone_serial_init : gps_uart_port =%d \n", gps_uart_port);// by Steve Kim (w21521)		
-#endif
-	
+	uart_node = of_find_node_by_path(DT_PATH_UART);
+	if (uart_node) {
+		uart_prop = of_get_property(uart_node,
+					DT_PROP_UART_HW_FLOW_CONTROL, NULL);
+		if (uart_prop)
+			omap_serial_ctsrts_init((unsigned char *) uart_prop);
+
+		uart_prop = of_get_property(uart_node,
+					DT_PROP_UART_PORT_FOR_GPS, NULL);
+		if (uart_prop)
+			omap_uart_set_gps_port(*(int *) uart_prop);
+
+		uart_prop = of_get_property(uart_node,
+					DT_PROP_UART_PADCONF_FOR_UART0, NULL);
+		if (uart_prop)
+			omap_uart_set_uart0_padconf(*(int *) uart_prop);
+
+		of_node_put(uart_node);
+	}
+
 	/* Disable ttyS2 if uart debug is disabled in the device tree.
 	 * This disables the serial console, preventing headset static
 	 * that occured when the kernel wrote to the serial console.
 	 */
+	dt_node = of_find_node_by_path(DT_HIGH_LEVEL_FEATURE);
+	if (NULL != dt_node) {
+		dt_prop = of_get_property(dt_node,
+				DT_HIGH_LEVEL_FEATURE_HEADSET_UART_EN, NULL);
+		if (NULL != dt_prop)
+			if (*(u8 *)dt_prop == 0)
+				mapphone_uart_config.enabled_uarts &= ~(1 << 2);
+
+		of_node_put(dt_node);
+	}
+#endif
 
 	omap_cfg_reg(AA8_34XX_UART1_TX);
 	omap_cfg_reg(Y8_34XX_UART1_RX);
@@ -1923,7 +1564,10 @@ static void __init mapphone_serial_init(void)
 	omap_cfg_reg(AD25_34XX_UART2_RX);
 	omap_cfg_reg(AB25_34XX_UART2_RTS);
 	omap_cfg_reg(AB26_34XX_UART2_CTS);
-	omap_serial_init(MAPPHONE_BPWAKE_STROBE_GPIO, 0x01);
+	bpwake_strobe_gpio = get_gpio_by_name("ipc_bpwake_strobe");
+	if (bpwake_strobe_gpio < 0)
+		bpwake_strobe_gpio = MAPPHONE_BPWAKE_STROBE_GPIO;
+	omap_serial_init(bpwake_strobe_gpio, 0x01 << 2);
 }
 
 
@@ -2022,7 +1666,7 @@ extern void omap_uart_block_sleep(int num);
 static struct wake_lock baseband_wakeup_wakelock;
 static irqreturn_t mapphone_bpwake_irqhandler(int irq, void *unused)
 {
-	omap_uart_block_sleep(0);
+	omap_uart_block_sleep(2);
 	/*
 	 * uart_block_sleep keeps uart clock active for 500 ms,
 	 * prevent suspend for 1 sec to be safe
@@ -2035,12 +1679,17 @@ static int mapphone_bpwake_probe(struct platform_device *pdev)
 {
 	int rc;
 
-	gpio_request(MAPPHONE_APWAKE_TRIGGER_GPIO, "BP -> AP IPC trigger");
-	gpio_direction_input(MAPPHONE_APWAKE_TRIGGER_GPIO);
+	int apwake_trigger_gpio;
+	apwake_trigger_gpio = get_gpio_by_name("ipc_apwake_trigger");
+	if (apwake_trigger_gpio < 0)
+		apwake_trigger_gpio = MAPPHONE_APWAKE_TRIGGER_GPIO;
+
+	gpio_request(apwake_trigger_gpio, "BP -> AP IPC trigger");
+	gpio_direction_input(apwake_trigger_gpio);
 
 	wake_lock_init(&baseband_wakeup_wakelock, WAKE_LOCK_SUSPEND, "bpwake");
 
-	rc = request_irq(gpio_to_irq(MAPPHONE_APWAKE_TRIGGER_GPIO),
+	rc = request_irq(gpio_to_irq(apwake_trigger_gpio),
 			 mapphone_bpwake_irqhandler,
 			 IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
 			 "Remote Wakeup", NULL);
@@ -2050,15 +1699,19 @@ static int mapphone_bpwake_probe(struct platform_device *pdev)
 		       "Failed requesting APWAKE_TRIGGER irq (%d)\n", rc);
 		return rc;
 	}
-
-	enable_irq_wake(gpio_to_irq(MAPPHONE_APWAKE_TRIGGER_GPIO));
+	enable_irq_wake(gpio_to_irq(apwake_trigger_gpio));
 	return 0;
 }
 
 static int mapphone_bpwake_remove(struct platform_device *pdev)
 {
+	int apwake_trigger_gpio ;
+
 	wake_lock_destroy(&baseband_wakeup_wakelock);
-	free_irq(gpio_to_irq(MAPPHONE_APWAKE_TRIGGER_GPIO), NULL);
+	apwake_trigger_gpio = get_gpio_by_name("ipc_apwake_trigger");
+	if (apwake_trigger_gpio < 0)
+		apwake_trigger_gpio = MAPPHONE_APWAKE_TRIGGER_GPIO;
+	free_irq(gpio_to_irq(apwake_trigger_gpio), NULL);
 	return 0;
 }
 
@@ -2196,11 +1849,6 @@ void change_vio_mode(int source, int value)
 
 static void mapphone_pm_init(void)
 {
-	sleep_while_idle = 1;
-
-	/* enable_off_mode = 1; */
-	/* omap3_pm_off_mode_enable(enable_off_mode); */
-
 	omap3_pm_init_vc(&mapphone_prm_setup);
 
 	/* Set CPCAP SW1/SW2 I2C CNTL Reg to 0x45 (PSM/PSM mode, VPLL enabled)
@@ -2209,17 +1857,17 @@ static void mapphone_pm_init(void)
 	omap3_bypass_cmd(CPCAP_SRI2C_SLAVE_ADDR_VDD1,
 			CPCAP_SMPS_VOL_CNTL, 0x45);
 	omap3_bypass_cmd(CPCAP_SRI2C_SLAVE_ADDR_VDD1,
-			CPCAP_SMPS_VOL_OPP1, 0x20);
+			CPCAP_SMPS_VOL_OPP1, 0x13);
 	omap3_bypass_cmd(CPCAP_SRI2C_SLAVE_ADDR_VDD1,
 			CPCAP_SMPS_VOL_OPP2, 0x32);
 
-	/* SW2, OPP1 for RET Voltage --- 1.0V,
+	/* SW2, OPP1 for RET Voltage --- 0.8375V,
 	 * OPP2 for ON Voltge --- 1.175V(OPP3)
 	 */
 	omap3_bypass_cmd(CPCAP_SRI2C_SLAVE_ADDR_VDD2,
 			CPCAP_SMPS_VOL_CNTL, 0x45);
 	omap3_bypass_cmd(CPCAP_SRI2C_SLAVE_ADDR_VDD2,
-			CPCAP_SMPS_VOL_OPP1, 0x20);
+			CPCAP_SMPS_VOL_OPP1, 0x13);
 	omap3_bypass_cmd(CPCAP_SRI2C_SLAVE_ADDR_VDD2,
 			CPCAP_SMPS_VOL_OPP2, 0x2E);
 
@@ -2461,6 +2109,12 @@ static void __init mapphone_bt_init(void)
 	}
 	mapphone_wl1271_pdata.bt_nshutdown_gpio = bt_enable_gpio;
 
+	/* if no DC-DC converter, expose rfkill */
+	if (!is_cpcap_vio_supply_converter()) {
+		printk(KERN_DEBUG "mapphone_bt_init: misc_cpcap not null\n");
+		mapphone_wl1271_pdata.pwr_ctl = 1;
+	}
+
 	bt_wake_gpio = get_gpio_by_name("bt_wake_b");
 	if (bt_wake_gpio < 0) {
 		printk(KERN_DEBUG "mapphone_bt_init: cannot retrieve bt_wake_b gpio from device tree\n");
@@ -2491,102 +2145,11 @@ static void __init mapphone_bt_init(void)
 	platform_device_register(&mapphone_wl1271_test_device);
 }
 
-static struct omap_mdm_ctrl_platform_data omap_mdm_ctrl_platform_data;
-
-static struct platform_device omap_mdm_ctrl_platform_device = {
-	.name = OMAP_MDM_CTRL_MODULE_NAME,
-	.id = -1,
-	.dev = {
-		.platform_data = &omap_mdm_ctrl_platform_data,
-	},
-};
-
-static int __init mapphone_omap_mdm_ctrl_init(void)
-{
-	if (!is_cdma_phone())
-		return -ENODEV;
-
-	omap_mdm_ctrl_platform_data.bp_ready_ap_gpio =
-		get_gpio_by_name("ipc_i_bp_ready");
-	if (omap_mdm_ctrl_platform_data.bp_ready_ap_gpio < 0) {
-		printk(KERN_DEBUG "mapphone_omap_mdm_ctrl_init: "
-			"can't get ipc_i_bp_ready from device_tree\n");
-		omap_mdm_ctrl_platform_data.bp_ready_ap_gpio =
-			MAPPHONE_BP_READY_AP_GPIO;
-	}
-
-	omap_mdm_ctrl_platform_data.bp_ready2_ap_gpio =
-		get_gpio_by_name("ipc_i_bp_ready2");
-	if (omap_mdm_ctrl_platform_data.bp_ready2_ap_gpio < 0) {
-		printk(KERN_DEBUG "mapphone_omap_mdm_ctrl_init: "
-			"can't get ipc_i_bp_ready2 from device_tree\n");
-		omap_mdm_ctrl_platform_data.bp_ready2_ap_gpio =
-			MAPPHONE_BP_READY2_AP_GPIO;
-	}
-
-	omap_mdm_ctrl_platform_data.bp_resout_gpio =
-		get_gpio_by_name("ipc_i_bp_resout");
-	if (omap_mdm_ctrl_platform_data.bp_resout_gpio < 0) {
-		printk(KERN_DEBUG "mapphone_omap_mdm_ctrl_init: "
-			"can't get ipc_i_bp_resout from device_tree\n");
-		omap_mdm_ctrl_platform_data.bp_resout_gpio =
-			MAPPHONE_BP_RESOUT_GPIO;
-	}
-
-	omap_mdm_ctrl_platform_data.bp_pwron_gpio =
-		get_gpio_by_name("ipc_o_bp_pwron");
-	if (omap_mdm_ctrl_platform_data.bp_pwron_gpio < 0) {
-		printk(KERN_DEBUG "mapphone_omap_mdm_ctrl_init: "
-			"can't get ipc_o_bp_pwron from device_tree\n");
-		omap_mdm_ctrl_platform_data.bp_pwron_gpio =
-			MAPPHONE_BP_PWRON_GPIO;
-	}
-
-	omap_mdm_ctrl_platform_data.ap_to_bp_pshold_gpio =
-		get_gpio_by_name("ipc_o_bp_pshold");
-	if (omap_mdm_ctrl_platform_data.ap_to_bp_pshold_gpio < 0) {
-		printk(KERN_DEBUG "mapphone_omap_mdm_ctrl_init: "
-			"can't get ipc_o_bp_pshold from device_tree\n");
-		omap_mdm_ctrl_platform_data.ap_to_bp_pshold_gpio =
-			MAPPHONE_AP_TO_BP_PSHOLD_GPIO;
-	}
-
-	omap_mdm_ctrl_platform_data.ap_to_bp_flash_en_gpio =
-		get_gpio_by_name("ipc_o_bp_flash_en");
-	if (omap_mdm_ctrl_platform_data.ap_to_bp_flash_en_gpio < 0) {
-		printk(KERN_DEBUG "mapphone_omap_mdm_ctrl_init: "
-			"can't get ipc_o_bp_flash_en from device_tree\n");
-		omap_mdm_ctrl_platform_data.ap_to_bp_flash_en_gpio =
-			MAPPHONE_AP_TO_BP_FLASH_EN_GPIO;
-	}
-
-	gpio_request(omap_mdm_ctrl_platform_data.bp_ready2_ap_gpio,
-		"BP Flash Ready");
-	gpio_direction_input(omap_mdm_ctrl_platform_data.bp_ready2_ap_gpio);
-	omap_cfg_reg(T4_34XX_GPIO59_DOWN);
-
-	gpio_request(omap_mdm_ctrl_platform_data.bp_resout_gpio,
-		"BP Reset Output");
-	gpio_direction_input(omap_mdm_ctrl_platform_data.bp_resout_gpio);
-	omap_cfg_reg(AE3_34XX_GPIO139_DOWN);
-
-	gpio_request(omap_mdm_ctrl_platform_data.bp_pwron_gpio, "BP Power On");
-	gpio_direction_output(omap_mdm_ctrl_platform_data.bp_pwron_gpio, 0);
-	omap_cfg_reg(AH3_34XX_GPIO137_OUT);
-
-	gpio_request(omap_mdm_ctrl_platform_data.ap_to_bp_pshold_gpio,
-		"AP to BP PS Hold");
-	gpio_direction_output(
-		omap_mdm_ctrl_platform_data.ap_to_bp_pshold_gpio, 0);
-	omap_cfg_reg(AF3_34XX_GPIO138_OUT);
-
-	return platform_device_register(&omap_mdm_ctrl_platform_device);
-}
 
 static struct omap_vout_config mapphone_vout_platform_data = {
-	.max_width = 864,
-	.max_height = 648,
-	.max_buffer_size = 0x112000,
+	.max_width = 1280,
+	.max_height = 720,
+	.max_buffer_size = 0x1C3000,
 	.num_buffers = 9, /* 8 for camera/video playback, 1 for HDMI */
 	.num_devices = 2,
 	.device_ids = {1, 2},
@@ -2606,12 +2169,27 @@ static void __init mapphone_vout_init(void)
 	const void *panel_prop;
 	struct omap_vout_config *platform_data;
 
-	platform_data = (struct omap_vout_config *)
-	mapphone_vout_device.dev.platform_data;
+	panel_node = of_find_node_by_path(DT_PATH_VIDEO_OUT);
 
-	platform_data->max_width = 864;
-	platform_data->max_height = 648;
-	platform_data->max_buffer_size = 0x112000;
+	if (panel_node != NULL) {
+		platform_data = (struct omap_vout_config *)
+			mapphone_vout_device.dev.platform_data;
+
+		panel_prop = of_get_property(panel_node, "max_width", NULL);
+		if (panel_prop)
+			platform_data->max_width = *(u16 *)panel_prop;
+
+		panel_prop = of_get_property(panel_node, "max_height", NULL);
+		if (panel_prop)
+			platform_data->max_height = *(u16 *)panel_prop;
+
+		panel_prop = of_get_property(panel_node, "max_buffer_size",
+						 NULL);
+		if (panel_prop)
+			platform_data->max_buffer_size = *(u32 *)panel_prop;
+
+		of_node_put(panel_node);
+	}
 #endif
 	platform_device_register(&mapphone_vout_device);
 }
@@ -2761,6 +2339,10 @@ static void __init mapphone_init(void)
 
 	mapphone_bp_model_init();
 	mapphone_padconf_init();
+#ifdef CONFIG_EMU_UART_DEBUG
+	/* emu-uart function will override devtree iomux setting */
+	activate_emu_uart();
+#endif
 	mapphone_gpio_mapping_init();
 	mapphone_ramconsole_init();
 	mapphone_omap_mdm_ctrl_init();
@@ -2771,7 +2353,7 @@ static void __init mapphone_init(void)
 	mapphone_als_init();
 	mapphone_panel_init();
 	mapphone_sensors_init();
-	//mapphone_camera_init();
+	mapphone_camera_init();
 	mapphone_touch_init();
 	mapphone_audio_init();
 	usb_musb_init();
@@ -2791,7 +2373,6 @@ static void __init mapphone_init(void)
 	mapphone_sgx_init();
 	mapphone_power_off_init();
 	mapphone_gadget_init();
-	mapphone_andusb_init();
 	mapphone_sim_init();
 #ifdef CONFIG_MEM_DUMP
     reset_proc_init();

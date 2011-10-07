@@ -35,16 +35,6 @@
 #include <linux/adp5588_keypad.h>
 #endif
 
-//////////////////////////////////////////////////////////////////////
-// Adding by no change device tree
-#define DT_PROP_KEYPAD_ADP5588  "adp5588_keypad"
-#define DT_KPAD_LED		"/System@0/KeypadBacklight@0"
-
-#define DT_PROP_ADP5588_KPAD_LED "adp5588_kpad_led"
-
-
-
-//////////////////////////////////////////////////////////////////////
 
 static unsigned int mapphone_col_gpios[] = { 43, 53, 54, 55, 56, 57, 58, 63 };
 static unsigned int mapphone_row_gpios[] = { 34, 35, 36, 37, 38, 39, 40, 41 };
@@ -154,9 +144,13 @@ struct adp5588_platform_data mapphone_adp5588_pdata = {
 };
 #endif
 
+static struct gpio_event_direct_entry mapphone_keypad_switch_map[] = {
+	{GPIO_SLIDER,		SW_LID}
+};
+
 static int fixup(int index)
 {
-       int slide_open = gpio_get_value(GPIO_SLIDER);
+       int slide_open = gpio_get_value(mapphone_keypad_switch_map[0].gpio);
        if (!slide_open)
 		return mapphone_keymap_closed[index];
        return 1;
@@ -176,11 +170,6 @@ static struct gpio_event_matrix_info mapphone_keypad_matrix_info = {
 	.poll_time.tv.nsec = 20 * NSEC_PER_MSEC,
 	.flags = GPIOKPF_LEVEL_TRIGGERED_IRQ | GPIOKPF_REMOVE_PHANTOM_KEYS |
 		 GPIOKPF_PRINT_UNMAPPED_KEYS /*| GPIOKPF_PRINT_MAPPED_KEYS*/
-};
-
-static struct gpio_event_direct_entry mapphone_keypad_switch_map[] = {
-	{ GPIO_SILENCE_KEY,	SW_HEADPHONE_INSERT },
-	{ GPIO_SLIDER,		SW_LID}
 };
 
 static struct gpio_event_input_info mapphone_keypad_switch_info = {
@@ -215,15 +204,17 @@ static int mapphone_reset_keys_up[] = {
 	0
 };
 
+static int mapphone_reset_keys_down[] = {
+	KEY_VOLUMEUP,
+	KEY_VOLUMEDOWN,
+	KEY_END,
+	0
+};
+
 static struct keyreset_platform_data mapphone_reset_keys_pdata = {
-	.crash_key = KEY_SPACE,
+	.crash_key = KEY_END,
 	.keys_up = mapphone_reset_keys_up,
-	.keys_down = {
-		KEY_LEFTSHIFT,
-		KEY_RIGHTALT,
-		KEY_BACKSPACE,
-		0
-	},
+	.keys_down = mapphone_reset_keys_down,
 };
 
 struct platform_device mapphone_reset_keys_device = {
@@ -285,11 +276,42 @@ static void mapphone_dt_adp5588_init(struct device_node *kp_node)
 }
 #endif
 
+#ifdef CONFIG_INPUT_KEYRESET
+static int mapphone_dt_kpreset_init(void)
+{
+	struct device_node *kpreset_node;
+	const void *kpreset_prop;
+	kpreset_node = of_find_node_by_path(DT_PATH_KEYRESET);
+	if (kpreset_node) {
+		kpreset_prop = of_get_property(kpreset_node, \
+				DT_PROP_KEYRESET_UP, NULL);
+		if (kpreset_prop)
+			memcpy(mapphone_reset_keys_up, kpreset_prop, \
+				sizeof(mapphone_reset_keys_up) - sizeof(int));
+
+		kpreset_prop = of_get_property(kpreset_node, \
+				DT_PROP_KEYRESET_DOWN, NULL);
+		if (kpreset_prop)
+			memcpy(mapphone_reset_keys_down, kpreset_prop, \
+				sizeof(mapphone_reset_keys_down) - sizeof(int));
+
+		kpreset_prop = of_get_property(kpreset_node, \
+				DT_PROP_KEYRESET_CRASH, NULL);
+		if (kpreset_prop)
+			mapphone_reset_keys_pdata.crash_key =\
+				*(int *)kpreset_prop;
+		of_node_put(kpreset_node);
+	}
+	return kpreset_node ? 0 : -ENODEV;
+}
+#endif
+
 #ifdef CONFIG_ARM_OF
 static int __init mapphone_dt_kp_init(void)
 {
 	struct device_node *kp_node;
 	const void *kp_prop;
+	int slider_gpio;
 
 	if ((kp_node = of_find_node_by_path(DT_PATH_KEYPAD))) {
 		if ((kp_prop = of_get_property(kp_node, \
@@ -317,6 +339,11 @@ static int __init mapphone_dt_kp_init(void)
 			mapphone_keypad_matrix_info.keymap = \
 				(unsigned short *)kp_prop;
 
+		slider_gpio = get_gpio_by_name("slider_data");
+		if (slider_gpio < 0)
+			slider_gpio = GPIO_SLIDER;
+		mapphone_keypad_switch_map[0].gpio = slider_gpio;
+
 		kp_prop = of_get_property(kp_node, \
 				DT_PROP_KEYPAD_CLOSED_MAPS, NULL);
 		if (kp_prop) {
@@ -342,25 +369,19 @@ static int __init mapphone_init_keypad(void)
 		printk(KERN_INFO "Keypad: using non-dt configuration\n");
 #endif
 
+#ifdef CONFIG_INPUT_KEYRESET
+	if (mapphone_dt_kpreset_init())
+		printk(KERN_INFO "Keypadreset init failed\n");
+#endif
+
 	/* keypad rows */
-	omap_cfg_reg(N4_34XX_GPIO34);
-	omap_cfg_reg(M4_34XX_GPIO35);
-	omap_cfg_reg(L4_34XX_GPIO36);
 	omap_cfg_reg(K4_34XX_GPIO37);
-	omap_cfg_reg(T3_34XX_GPIO38);
 	omap_cfg_reg(R3_34XX_GPIO39);
-	omap_cfg_reg(N3_34XX_GPIO40);
-	omap_cfg_reg(M3_34XX_GPIO41);
 
 	/* keypad columns */
 	omap_cfg_reg(K3_34XX_GPIO43_OUT);
-	omap_cfg_reg(V8_34XX_GPIO53_OUT);
-	omap_cfg_reg(U8_34XX_GPIO54_OUT);
-	omap_cfg_reg(T8_34XX_GPIO55_OUT);
 	omap_cfg_reg(R8_34XX_GPIO56_OUT);
 	omap_cfg_reg(P8_34XX_GPIO57_OUT);
-	omap_cfg_reg(N8_34XX_GPIO58_OUT);
-	omap_cfg_reg(L8_34XX_GPIO63_OUT);
 
 	/* switches */
 	omap_cfg_reg(AB2_34XX_GPIO177);

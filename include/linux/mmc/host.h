@@ -194,6 +194,7 @@ struct mmc_host {
 	int			claim_cnt;	/* "claim" nesting count */
 
 	struct delayed_work	detect;
+	int			init_delay;	/* Delay in msec */
 
 	const struct mmc_bus_ops *bus_ops;	/* current bus driver */
 	unsigned int		bus_refs;	/* reference counter */
@@ -261,6 +262,7 @@ extern int mmc_resume_bus(struct mmc_host *host);
 
 extern int mmc_suspend_host(struct mmc_host *, pm_message_t);
 extern int mmc_resume_host(struct mmc_host *);
+extern int mmc_reinit_host(struct mmc_host *);
 
 extern void mmc_power_save_host(struct mmc_host *host);
 extern void mmc_power_restore_host(struct mmc_host *host);

@@ -178,10 +178,10 @@ void hp3a_framework_stop(struct hp3a_fh *fh)
 	spin_unlock_irqrestore(&g_tc.stats_lock, irqflags);
 
 	if (temp) {
-	/* Internal buffer clean up. */
-	for (i = 0; i < fh->buffer_count; ++i)
-		unmap_buffer_from_kernel(&(temp[i]));
-	kfree(temp);
+		/* Internal buffer clean up. */
+		for (i = 0; i < fh->buffer_count; ++i)
+			unmap_buffer_from_kernel(&(temp[i]));
+		kfree(temp);
 	}
 	fh->buffer_count = 0;
 
