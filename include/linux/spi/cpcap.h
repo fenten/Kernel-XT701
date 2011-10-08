@@ -38,7 +38,6 @@
 #define CPCAP_IRQ_INT3_INDEX 32
 #define CPCAP_IRQ_INT4_INDEX 48
 #define CPCAP_IRQ_INT5_INDEX 64
-#define CONSIDER_CABLE_STATUS
 
 enum cpcap_regulator_id {
 	CPCAP_SW5,
@@ -769,9 +768,15 @@ int cpcap_uc_stop(struct cpcap_device *cpcap, enum cpcap_macro macro);
 unsigned char cpcap_uc_status(struct cpcap_device *cpcap,
 			      enum cpcap_macro macro);
 
-#ifdef CONSIDER_CABLE_STATUS
-void set_accy_status(unsigned char accy_status);
-#endif
+#ifdef CONFIG_PM_DBG_DRV
+void cpcap_irq_pm_dbg_suspend(void);
+void cpcap_irq_pm_dbg_resume(void);
+int cpcap_uc_ram_write(struct cpcap_device *cpcap, unsigned short address,
+		     unsigned short num_words, unsigned short *data);
+
+int cpcap_uc_ram_read(struct cpcap_device *cpcap, unsigned short address,
+		    unsigned short num_words, unsigned short *data);
+#endif /* CONFIG_PM_DBG_DRV */
 
 #if defined(CONFIG_LEDS_FLASH_RESET)
 int cpcap_direct_misc_write(unsigned short reg, unsigned short value,\

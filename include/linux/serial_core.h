@@ -509,6 +509,7 @@ uart_handle_dcd_change(struct uart_port *uport, unsigned int status)
 	}
 }
 
+extern int mapphone_umts_model;
 /**
  *	uart_handle_cts_change - handle a change of clear-to-send state
  *	@uport: uart_port structure for the open port
@@ -536,6 +537,8 @@ uart_handle_cts_change(struct uart_port *uport, unsigned int status)
 			}
 		}
 	}
+	if ((!mapphone_umts_model) && (uport->mapbase == 0x4806a000))
+		printk(KERN_INFO "UART1 hw_stopped = %d\n", tty->hw_stopped);
 }
 
 #include <linux/tty_flip.h>

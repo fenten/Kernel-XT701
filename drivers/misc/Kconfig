@@ -285,6 +285,13 @@ config SENSORS_AKM8973_AKMD
 	help
 	 Support for the AKM8973 tri-axis magnetometer (compass)
 
+config SENSORS_AKM8975
+	tristate "AKM8975 Magnetometer"
+	default n
+	depends on I2C
+	help
+	 Support for the AKM8975 tri-axis magnetometer
+
 config SENSORS_LIS331DLH
 	tristate "LIS331DLH Accelerometer"
 	default n
@@ -379,6 +386,11 @@ config VIB_PWM
         bool "PWM Vibrator"
         default n
 
+config VIB_PWM_SWEEP
+	bool "PWM Vibrator Sweep signal"
+	depends on VIB_PWM
+	default n
+
 config WL127X_TEST
 	tristate "TI wl127x Bluetooth GPIO test driver for board-sholes"
 	depends on (MACH_SHOLES || MACH_MAPPHONE) && WL127X_RFKILL && BT
@@ -390,13 +402,27 @@ config SYSPANIC
 	tristate "SYSPANIC driver used to detect BP panics"
 	default n
 
+config NETMETER
+	tristate "netmeter driver used to moniter ip data traffic"
+	default n
+
+config TCMD_DRIVER
+	bool "Motorola tcmd driver"
+	default n
+
+config OMAP_DEV_TYPE_DRV
+        bool "Motorola OMAP Device Type Driver"
+        default n
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
 source "drivers/misc/ts27010mux/Kconfig"
 source "drivers/misc/modem_pm_driver/Kconfig
+source "drivers/misc/smc/Kconfig"
 source "drivers/misc/sec/Kconfig"
 source "drivers/misc/netmux/Kconfig"
 source "drivers/misc/netmux_linkdriver/Kconfig"
+source "drivers/misc/camera_misc/Kconfig"
 
 endif # MISC_DEVICES

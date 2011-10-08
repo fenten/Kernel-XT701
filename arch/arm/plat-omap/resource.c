@@ -19,7 +19,8 @@
 #include <linux/errno.h>
 #include <linux/err.h>
 #include <linux/slab.h>
-
+#include <plat/omap34xx.h>
+#include <plat/omap-pm.h>
 #include <plat/resource.h>
 
 /*
@@ -89,6 +90,8 @@ static struct shared_resource *resource_lookup(const char *name)
 	return res;
 }
 
+static int max_constraint;
+
 /**
  * update_resource_level - Regenerates and updates the curr_level of the res
  * @resp: Pointer to the resource
@@ -105,8 +108,26 @@ static int update_resource_level(struct shared_resource *resp)
 	struct users_list *user;
 	unsigned long target_level;
 	int ret = 0;
+	int max_level;
+
+	if (!strcmp(resp->name, "vdd1_max")) {
+		max_level = MAX_VDD1_OPP;
+		max_constraint = MAX_VDD1_OPP;
+
+		mutex_lock(&resp->resource_mutex);
+		list_for_each_entry(user, &resp->users_list, node)
+			if (user->level < max_level)
+				max_constraint = user->level;
+		mutex_unlock(&resp->resource_mutex);
+		pr_debug("%s max_constraint = %d\n", __func__,
+					max_constraint);
+
+		resp = _resource_lookup("vdd1_opp");
+		return update_resource_level(resp);
+	}
 
 	mutex_lock(&resp->resource_mutex);
+
 	/* Regenerate the target_value for the resource */
 	if (resp->flags & RES_TYPE_PERFORMANCE) {
 		target_level = RES_PERFORMANCE_DEFAULTLEVEL;
@@ -125,8 +146,14 @@ static int update_resource_level(struct shared_resource *resp)
 	}
 	mutex_unlock(&resp->resource_mutex);
 
+	if (strcmp(resp->name, "vdd1_opp") == 0) {
+			if ((max_constraint != 0) &&
+					(target_level > max_constraint))
+				target_level = max_constraint;
+	}
 	pr_debug("SRF: Changing Level for resource %s to %ld\n",
 				resp->name, target_level);
+
 	ret = resp->ops->change_level(resp, target_level);
 	if (ret) {
 		printk(KERN_ERR "Unable to Change"

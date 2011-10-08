@@ -47,7 +47,6 @@ Module.symvers
 #
 include/asm
 include/asm-*/asm-offsets.h
-include/asm-*/mach-types.h
 include/config
 include/linux/autoconf.h
 include/linux/compile.h
@@ -76,7 +75,3 @@ GTAGS
 *.orig
 *~
 \#*#
-
-# temp config file
-__ext_mapphone_defconfig
-

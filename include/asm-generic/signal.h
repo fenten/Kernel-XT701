@@ -90,33 +90,33 @@
 #define SIGSTKSZ	8192
 
 #ifndef __ASSEMBLY__
-//typedef struct {
-//	unsigned long sig[_NSIG_WORDS];
-//} sigset_t;
+typedef struct {
+	unsigned long sig[_NSIG_WORDS];
+} sigset_t;
 
 /* not actually used, but required for linux/syscalls.h */
 typedef unsigned long old_sigset_t;
 
 #include <asm-generic/signal-defs.h>
 
-//struct sigaction {
-//	__sighandler_t sa_handler;
-//	unsigned long sa_flags;
+struct sigaction {
+	__sighandler_t sa_handler;
+	unsigned long sa_flags;
 #ifdef SA_RESTORER
-//	__sigrestore_t sa_restorer;
+	__sigrestore_t sa_restorer;
 #endif
-//	sigset_t sa_mask;		/* mask last for extensibility */
-//};
+	sigset_t sa_mask;		/* mask last for extensibility */
+};
 
-//struct k_sigaction {
-//	struct sigaction sa;
-//};
+struct k_sigaction {
+	struct sigaction sa;
+};
 
-//typedef struct sigaltstack {
-//	void __user *ss_sp;
-//	int ss_flags;
-//	size_t ss_size;
-//} stack_t;
+typedef struct sigaltstack {
+	void __user *ss_sp;
+	int ss_flags;
+	size_t ss_size;
+} stack_t;
 
 #ifdef __KERNEL__
 

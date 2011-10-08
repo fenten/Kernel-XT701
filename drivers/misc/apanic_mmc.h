@@ -15,4 +15,9 @@
 
 extern int log_buf_copy(char *dest, int idx, int len);
 extern void log_buf_clear(void);
+
+#ifdef CONFIG_OMAP_WATCHDOG
 extern void memdump_wdt_disable(void);
+#else
+#define memdump_wdt_disable() do {} while (0);
+#endif

@@ -430,8 +430,17 @@ void omap_set_dma_src_params(int lch, int src_port, int src_amode,
 		dma_write((u16)src_start, CSSA_L(lch));
 	}
 
-	if (cpu_class_is_omap2())
+	if (cpu_class_is_omap2()) {
 		dma_write(src_start, CSSA(lch));
+
+		/* try to enable burst & packed mode */
+		l = dma_read(CSDP(lch));
+		l |= OMAP_DMA_DATA_BURST_16 << 7;
+		if (src_amode == OMAP_DMA_AMODE_POST_INC)
+			l |= 1 << 6;
+		dma_write(l, CSDP(lch));
+	}
+
 
 	dma_write(src_ei, CSEI(lch));
 	dma_write(src_fi, CSFI(lch));
@@ -546,8 +555,16 @@ void omap_set_dma_dest_params(int lch, int dest_port, int dest_amode,
 		dma_write(dest_start, CDSA_L(lch));
 	}
 
-	if (cpu_class_is_omap2())
+	if (cpu_class_is_omap2()) {
 		dma_write(dest_start, CDSA(lch));
+
+		/* try to enable burst & packed mode */
+		l = dma_read(CSDP(lch));
+		l |= OMAP_DMA_DATA_BURST_16 << 14;
+		if (dest_amode == OMAP_DMA_AMODE_POST_INC)
+			l |= 1 << 13;
+		dma_write(l, CSDP(lch));
+	}
 
 	dma_write(dst_ei, CDEI(lch));
 	dma_write(dst_fi, CDFI(lch));
@@ -2482,6 +2499,11 @@ static int __init omap_init_dma(void)
 		dma_chan_count = 0;
 		return 0;
 	}
+
+	/* Reserve last 8 channels for SMC sw */
+	if (cpu_is_omap34xx() &&
+			(omap_type() != OMAP2_DEVICE_TYPE_GP))
+		dma_chan_count = dma_chan_count - 8;
 
 	spin_lock_init(&lcd_dma.lock);
 	spin_lock_init(&dma_chan_lock);

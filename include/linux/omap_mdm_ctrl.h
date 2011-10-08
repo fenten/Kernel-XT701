@@ -27,6 +27,11 @@
 #define GPIO_INTERRUPT_COUNT   3
 
 struct omap_mdm_ctrl_platform_data {
+	int (*power_off)(void);
+	int (*power_up)(int);
+	int (*reset)(int);
+	unsigned int (*get_bp_status)(void);
+	void (*set_ap_status)(unsigned int);
 	unsigned int bp_ready_ap_gpio;
 	unsigned int bp_ready2_ap_gpio;
 	unsigned int bp_resout_gpio;

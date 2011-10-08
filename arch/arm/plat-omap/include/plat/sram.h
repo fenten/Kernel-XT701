@@ -75,4 +75,8 @@ extern void omap_push_sram_idle(void);
 static inline void omap_push_sram_idle(void) {}
 #endif /* CONFIG_PM */
 
+#ifdef CONFIG_OMAP_SECURE_FIQ_HACK
+extern unsigned long omap_get_sram_va(void);
+#endif
+
 #endif

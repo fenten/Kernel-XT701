@@ -54,10 +54,10 @@ struct lm3559_platform_data {
 	u8 privacy_reg_def;
 	u8 msg_ind_reg_def;
 	u8 msg_ind_blink_reg_def;
-    u8 pwm_reg_def;
+	u8 pwm_reg_def;
 	u8 torch_enable_val;
-    u8 flash_enable_val;
-    u8 privacy_enable_val;
+	u8 flash_enable_val;
+	u8 privacy_enable_val;
 	u8 pwm_val;
 	u8 msg_ind_val;
 	u8 msg_ind_blink_val;

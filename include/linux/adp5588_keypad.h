@@ -30,8 +30,9 @@
 #ifdef __KERNEL__
 #define ADP5588_I2C_ADDRESS 0x34
 
+/* Motorola Platform requires keypad devices to be named as "sholes-xxx" */
 #define ADP5588_KEYPAD_NAME    "sholes-keypad"
-#define ADP5588_BACKLIGHT_NAME "adp5588-backlight"
+#define ADP5588_BACKLIGHT_NAME "sholes-backlight"
 
 /* These are the default GPIOs for ADP5588's INT and RESET. They can */
 /* be overriden by configuration provided in device tree.            */

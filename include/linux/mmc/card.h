@@ -30,6 +30,7 @@ struct mmc_csd {
 	unsigned int		tacc_ns;
 	unsigned int		r2w_factor;
 	unsigned int		max_dtr;
+	unsigned int		erase_size;
 	unsigned int		read_blkbits;
 	unsigned int		write_blkbits;
 	unsigned int		capacity;

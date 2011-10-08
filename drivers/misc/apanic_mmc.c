@@ -597,10 +597,11 @@ static void apanic_mmc_memdump(void)
 	struct apanic_data *ctx = &drv_ctx;
 	struct memdump_header *hdr = (struct memdump_header *)drv_ctx.bounce;
 
-	memdump_wdt_disable();
 	if (!memdump_ctx.memdump_hd || !memdump_ctx.mmc_memdump_ops ||
 			!memdump_ctx.mmc_memdump_ops->panic_probe)
 		return;
+
+	memdump_wdt_disable();
 	if (memdump_ctx.mmc_memdump_ops->panic_probe(memdump_ctx.memdump_hd,
 			memdump_ctx.mmc_memdump_ops->type)) {
 		printk(KERN_ERR "apanic: full memeory dump backing device"

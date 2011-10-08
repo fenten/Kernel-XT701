@@ -62,15 +62,15 @@ int ftrace_modify_code(unsigned long pc, unsigned char *old_code,
 		"    movne  %0, #2    \n"
 		"3:\n"
 
-		".pushsection .fixup, \"ax\"\n"
+		".section .fixup, \"ax\"\n"
 		"4:  mov  %0, #1  \n"
 		"    b    3b      \n"
-		".popsection\n"
+		".previous\n"
 
-		".pushsection __ex_table, \"a\"\n"
+		".section __ex_table, \"a\"\n"
 		"    .long 1b, 4b \n"
 		"    .long 2b, 4b \n"
-		".popsection\n"
+		".previous\n"
 
 		: "=r"(err), "=r"(replaced)
 		: "r"(pc), "r"(new), "r"(old), "0"(err), "1"(replaced)

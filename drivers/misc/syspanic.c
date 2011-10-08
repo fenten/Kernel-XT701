@@ -41,6 +41,8 @@
 #include <linux/interrupt.h>
 #include <linux/device.h>
 #include <linux/timer.h>
+#include <linux/io.h>
+#include <plat/mailbox.h>
 #include <linux/delay.h>
 #ifdef CONFIG_HAS_WAKELOCK
 #include <linux/wakelock.h>
@@ -81,16 +83,13 @@ enum sysp_state {
  * Internal representation of the syspanic driver.
  */
 struct SysPanicDriverType {
-	struct semaphore sem; /**< Semaphore used to serialize I/O operations */
-	unsigned char openFlag; /**< Bit indicating the driver is being used by
-	 user-space */
 	wait_queue_head_t waitQueue; /**< Wait queue used for sleeping */
 	struct timer_list timerList;
 #ifdef CONFIG_HAS_WAKELOCK
 	struct wake_lock syspanic_wake_lock;
 #endif
 	atomic_t state;
-
+	mbox_msg_t panic_id;
 };
 
 /*=============================================================================
@@ -132,29 +131,15 @@ static void syspTimeout(unsigned long ptr);
  */
 static irqreturn_t irqHandler(int irq, void *data);
 
-/**
- * \brief Callback function when user-space invokes open()
- *
- * \param inode     - Pointer to inode structure
- * \param filp      - Pointer to open file structure
- *
- * \return Return Type \n
- * - Zero     - Success
- * - Non-Zero - An error has occurred
- */
-static int syspanicOpen(struct inode *inode, struct file *filp);
+
 
 /**
- * \brief Callback function when user-space invokes close()
+ * \brief Callback function when user-space invokes read()
  *
- * \param inode     - Pointer to inode structure
- * \param filp      - Pointer to open file structure
- *
- * \return Return Type \n
- * - Zero     - Success
- * - Non-Zero - An error has occurred
+ * \return Return size read
  */
-static int syspanicRelease(struct inode *inode, struct file *filp);
+static ssize_t syspanicRead(struct file *f, __user char *buf, size_t sz,
+		loff_t *off);
 
 /**
  * \brief Callback function when user-space invokes select()
@@ -188,14 +173,14 @@ static void syspanicFreeIRQ(void);
  * Each member points to a corresponding function
  */
 static const struct file_operations syspanicFops = { .owner = THIS_MODULE,
-		.open = syspanicOpen, .release = syspanicRelease,
-		.poll = syspanicPoll, };
+		.poll = syspanicPoll,
+		.read = syspanicRead, };
 
 static struct class *syspanic_class;
 struct device *syspanic_device_class;
 static int major_syspanic;
 static struct SysPanicDriverType sysp; /**< Internal structure of syspanic */
-
+static struct omap_mbox *wrigley_mbox;
 /*=============================================================================
  LOCAL FUNCTIONS
  =============================================================================*/
@@ -227,10 +212,12 @@ static int __init syspanicInit(void)
 		return (int) syspanic_device_class;
 	}
 
-	/* Initialize internal structures */
-	sema_init(&sysp.sem, 1);
+	wrigley_mbox = omap_mbox_get("wrigley");
+	if (IS_ERR(wrigley_mbox)) {
+		printk(KERN_INFO "Syspanic cannot get wrigley mbox\n");
+		wrigley_mbox = NULL;
+	}
 
-	sysp.openFlag = 0;
 	init_waitqueue_head(&sysp.waitQueue);
 
 	init_timer(&sysp.timerList);
@@ -269,46 +256,23 @@ static void __exit syspanicExit(void)
 #ifdef CONFIG_HAS_WAKELOCK
 	wake_lock_destroy(&sysp.syspanic_wake_lock);
 #endif
+	if (wrigley_mbox)
+		omap_mbox_put(wrigley_mbox);
 
 	printk(KERN_INFO "Unloaded SysPanic device driver\n");
 }
 
-static int syspanicOpen(struct inode *inode, struct file *filp)
+static ssize_t syspanicRead(struct file *f, __user char *buf, size_t sz,
+		loff_t *off)
 {
-	/* Hold the semaphore */
-	if (down_interruptible(&sysp.sem))
-		return -ERESTARTSYS;
+	int len = sizeof(sysp.panic_id);
 
-	/* Checks if device is already opened */
-	if (sysp.openFlag) {
-		up(&sysp.sem);
-		return -EBUSY;
+	if (*off == 0 && sz >= len) {
+		if (copy_to_user(buf, &sysp.panic_id, len))
+			return -EFAULT;
+		*off += len;
+		return len;
 	}
-	DPRINTK("syspanic opened\n");
-	/* Sets the flag to open */
-	sysp.openFlag = 1;
-
-	/* Release the semaphore and return */
-	up(&sysp.sem);
-
-	return 0;
-}
-
-static int syspanicRelease(struct inode *inode, struct file *filp)
-{
-#ifdef CONFIG_HAS_WAKELOCK
-	wake_unlock(&sysp.syspanic_wake_lock);
-#endif
-
-	/* Hold the semaphore */
-	if (down_interruptible(&sysp.sem))
-		return -ERESTARTSYS;
-	DPRINTK("syspanic closed\n");
-	/* Clears open flag */
-	sysp.openFlag = 0;
-
-	/* Release the semaphore and return */
-	up(&sysp.sem);
 	return 0;
 }
 
@@ -358,11 +322,20 @@ static irqreturn_t irqHandler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+static void sysGetPanicId(void)
+{
+	if (!wrigley_mbox)
+		return;
+	if (!wrigley_mbox->ops->fifo_empty(wrigley_mbox))
+		sysp.panic_id = wrigley_mbox->ops->fifo_read(wrigley_mbox);
+}
+
 static unsigned int syspanicPoll(struct file *filp, poll_table * wait)
 {
 	poll_wait(filp, &sysp.waitQueue, wait);
 	switch (atomic_read(&sysp.state)) {
 	case SYSP_PANIC:
+		sysGetPanicId();
 		return POLLIN;
 	case SYSP_MEMORY_PANIC:
 		return POLLRDNORM;
