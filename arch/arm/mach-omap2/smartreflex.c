@@ -69,6 +69,11 @@
 
 /* The number of steps for NTargets margins */
 #define NUM_STEPS_MARGIN			6
+/* The number of steps for 1.2G OPP NTargets margins */
+#define NUM_STEPS_MARGIN_1_2G 			4
+/* The number of steps for 1.0G OPP NTargets margins */
+#define NUM_STEPS_MARGIN_1_0G                   2
+
 
 #define SR_REGADDR(offset)	(sr->srbase_addr + (offset))
 
@@ -174,8 +179,8 @@ struct omap_sr {
 	u8 num_opp;
 	u8 opp_boundary;
 	u8 last_opp;
-	u32 errgain[4];
-	u32 errminlimit[4];
+	u32 errgain[6];
+	u32 errminlimit[6];
 };
 
 /* Smart Reflex 1 structure */
@@ -1413,7 +1418,8 @@ static int srvp_enable(struct omap_sr *sr, u32 target_opp)
 #define MAX_STABILIZATION_COUNT 100
 #define MAX_LOOP_COUNT		(MAX_STABILIZATION_COUNT * 5)
 #define ADJUSTED_VSEL_MARGIN_IN_STEP           3
-#define MAX_ADJUSTED_VSEL      0x43    /* MAX volt limit to 1.4375V */
+#define ADJUSTED_VSEL_MARGIN_IN_STEP_1_2G      2
+#define MAX_ADJUSTED_VSEL      0x42    /* MAX volt limit to 1.4275V */
 int sr_recalibrate(struct omap_opp *opp, u32 t_opp, u32 c_opp)
 {
 	u32 max_loop_count = MAX_LOOP_COUNT;
@@ -1421,6 +1427,8 @@ int sr_recalibrate(struct omap_opp *opp, u32 t_opp, u32 c_opp)
 	u32 vdd, target_opp_no;
 	u8 new_v = 0;
 	u8 high_v = 0;
+	u16 current_vsel;
+	int ret;
 	struct omap_sr_vp *vp;
 	struct omap_sr *sr;
 
@@ -1437,7 +1445,9 @@ int sr_recalibrate(struct omap_opp *opp, u32 t_opp, u32 c_opp)
 				target_opp_no);
 		return 0;
 	}
-
+	/* Save Current vsel */
+	current_vsel =  prm_read_mod_reg(OMAP3430_GR_MOD,
+				vp->prm_vpx_voltage_offset);
 	/* Start Smart reflex */
 	sr_vp_enable_both(t_opp, c_opp);
 	/* We need to wait for SR to stabilize before we start sampling */
@@ -1470,6 +1480,7 @@ int sr_recalibrate(struct omap_opp *opp, u32 t_opp, u32 c_opp)
 		pr_err("%s: %d:%d exited with voltages 0x%02x 0x%02x\n",
 			__func__, vdd, target_opp_no, new_v, high_v);
 	}
+
 	opp[target_opp_no].sr_nval = sr_read_reg(sr, SENVAL);
 	if (cpu_is_omap3630())
 		opp[target_opp_no].sr_err = sr_read_reg(sr, SENERROR_36XX);
@@ -1482,17 +1493,32 @@ int sr_recalibrate(struct omap_opp *opp, u32 t_opp, u32 c_opp)
 	 * Add 3-Steps margin to the adjusted vsel
 	 * Set max volt limit to 1.4375 volt
 	 */
-	if (omap_ctrl_readl(OMAP36XX_CONTROL_FUSE_OPP4_VDD1) != 0)
-		high_v += ADJUSTED_VSEL_MARGIN_IN_STEP;
+	switch (omap_rev_id()) {
+	case OMAP_3630:
+	default:
+		if (omap_ctrl_readl(OMAP36XX_CONTROL_FUSE_OPP4_VDD1) != 0)
+			high_v += ADJUSTED_VSEL_MARGIN_IN_STEP;
+		break;
+	case OMAP_3630_1200:
+		if (omap_ctrl_readl(OMAP36XX_CONTROL_FUSE_OPP5_VDD1) != 0) {
+			if ((VDD1_OPP == vdd) && (target_opp_no == VDD1_OPP5))
+				high_v += ADJUSTED_VSEL_MARGIN_IN_STEP_1_2G;
+			else
+				high_v += ADJUSTED_VSEL_MARGIN_IN_STEP;
+		}
+	}
+
 	if (high_v  > MAX_ADJUSTED_VSEL)
 		high_v = MAX_ADJUSTED_VSEL;
 
-
-
 	opp[target_opp_no].sr_adjust_vsel = high_v;
 
-	pr_debug("Calibrate:Exit %s [vdd%d: opp%d] %02x loops=[%d,%d]\n",
-		__func__, vdd, target_opp_no, high_v,
+	/* ForceUpdate sr adjust vsel */
+	ret =
+		SR_CHOSEN_VOLTAGE_UPDATE_MECH(sr, target_opp_no, high_v,
+					current_vsel);
+	pr_debug("Calibrate:Exit %s [vdd%d: opp%d] %02x->%02x loops=[%d,%d]\n",
+		__func__, vdd, target_opp_no, current_vsel, high_v,
 		max_loop_count, exit_loop_on);
 
 	return 0;
@@ -1800,12 +1826,23 @@ static void sr1_init(struct omap_sr *sr)
 	if (cpu_is_omap3630()) {
 		sr->sr_errconfig_value |= ERRCONFIG_36XX_VPBOUNDINTEN |
 					ERRCONFIG_36XX_VPBOUNDINTST;
-
+		if (omap_rev_id() == OMAP_3630_1200) {
+			sr->opp_nvalue[4] =
+			omap_ctrl_readl(OMAP36XX_CONTROL_FUSE_OPP5_VDD1);
+				sr->opp_nvalue[4] = ApplyAdj(
+					sr->opp_nvalue[4],
+					3.0*12.5*NUM_STEPS_MARGIN_1_2G,
+					2.6*12.5*NUM_STEPS_MARGIN_1_2G);
+		}
 		sr->opp_nvalue[3] =
 		   omap_ctrl_readl(OMAP36XX_CONTROL_FUSE_OPP4_VDD1);
 		if (sr->opp_nvalue[3] != 0x0) {
 			pr_info("SR1 : Fused Nvalues for %d OPP\n",
 							sr->num_opp);
+			sr->opp_nvalue[3] = ApplyAdj(
+				sr->opp_nvalue[3],
+				3.0*12.5*NUM_STEPS_MARGIN_1_0G,
+				2.6*12.5*NUM_STEPS_MARGIN_1_0G);
 			sr->opp_nvalue[2] =
 			   omap_ctrl_readl(OMAP36XX_CONTROL_FUSE_OPP3_VDD1);
 			sr->opp_nvalue[1] =
@@ -1829,11 +1866,21 @@ static void sr1_init(struct omap_sr *sr)
 		sr->errminlimit[1] = SR1_36XX_ERRMINLIMIT_OPP2;
 		sr->errminlimit[2] = SR1_36XX_ERRMINLIMIT_OPP3;
 		sr->errminlimit[3] = SR1_36XX_ERRMINLIMIT_OPP4;
+		sr->errminlimit[4] = SR1_36XX_ERRMINLIMIT_OPP5;
 		sr->errgain[0] = SR1_36XX_ERRGAIN_OPP1;
 		sr->errgain[1] = SR1_36XX_ERRGAIN_OPP2;
 		sr->errgain[2] = SR1_36XX_ERRGAIN_OPP3;
 		sr->errgain[3] = SR1_36XX_ERRGAIN_OPP4;
+		sr->errgain[4] = SR1_36XX_ERRGAIN_OPP5;
 
+		if (omap_rev_id() == OMAP_3630_1200) {
+			if (sr->opp_nvalue[4]) {
+				pr_info("VDD1 - OPP5 -  1.2G Nvalue = 0x%X\n",
+					sr->opp_nvalue[4]);
+			} else
+				pr_info("VDD1 - OPP5 -  Not Fused for \
+					 OMAP3630 1.2G Chip.\n");
+		}
 		pr_info("VDD1 - OPP4 -  1G Nvalue = 0x%X\n",
 				sr->opp_nvalue[3]);
 		pr_info("VDD1 - OPP3 - 800 Nvalue = 0x%X\n",

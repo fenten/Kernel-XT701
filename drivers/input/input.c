@@ -25,6 +25,10 @@
 #include <linux/rcupdate.h>
 #include <linux/smp_lock.h>
 
+#ifdef CONFIG_PM_DEEPSLEEP
+#include <linux/suspend.h>
+#endif
+
 MODULE_AUTHOR("Vojtech Pavlik <vojtech@suse.cz>");
 MODULE_DESCRIPTION("Input core");
 MODULE_LICENSE("GPL");
@@ -45,6 +49,8 @@ static unsigned int input_abs_bypass_init_data[] __initdata = {
 	ABS_MT_TOOL_TYPE,
 	ABS_MT_BLOB_ID,
 	ABS_MT_TRACKING_ID,
+	ABS_DISTANCE,
+	ABS_RUDDER,
 	0
 };
 static unsigned long input_abs_bypass[BITS_TO_LONGS(ABS_CNT)];
@@ -201,6 +207,10 @@ static void input_handle_event(struct input_dev *dev,
 			}
 
 			disposition = INPUT_PASS_TO_HANDLERS;
+#ifdef CONFIG_PM_DEEPSLEEP
+			if (get_deepsleep_mode() && code != KEY_END)
+				disposition = INPUT_IGNORE_EVENT;
+#endif
 		}
 		break;
 
@@ -210,6 +220,10 @@ static void input_handle_event(struct input_dev *dev,
 
 			__change_bit(code, dev->sw);
 			disposition = INPUT_PASS_TO_HANDLERS;
+#ifdef CONFIG_PM_DEEPSLEEP
+			if (get_deepsleep_mode() && value == 0)
+				disposition = INPUT_IGNORE_EVENT;
+#endif
 		}
 		break;
 

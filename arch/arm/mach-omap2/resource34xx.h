@@ -30,9 +30,6 @@
 #include <plat/omap-pm.h>
 #include <plat/omap34xx.h>
 
-extern void lock_scratchpad_sem(void);
-extern void unlock_scratchpad_sem(void);
-
 /*
  * mpu_latency/core_latency are used to control the cpuidle C state.
  */
@@ -268,6 +265,12 @@ static struct shared_resource vdd1_opp = {
 	.ops            = &opp_res_ops,
 };
 
+static struct shared_resource vdd1_max = {
+	.name           = "vdd1_max",
+	.omap_chip      = OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.ops            = &opp_res_ops,
+};
+
 /* Throughput in KiB/s */
 static struct bus_throughput_db l3_throughput_db = {
 	.throughput[0] = 0,
@@ -326,6 +329,7 @@ struct shared_resource *resources_omap[] __initdata = {
 	&vdd2_opp,
 	&mpu_freq,
 	&dsp_freq,
+	&vdd1_max,
 	NULL
 };
 

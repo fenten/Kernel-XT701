@@ -59,6 +59,7 @@
  *                           should not be removed and causes rmmod to panic  *
  *   2010/04/28  Motorola    Format cleanup                                   *
  *   2010/08/12  Motorola    Temp kernel memory allocation fix                *
+ *   2010/09/03  Motorola    Enable proc logging for Engineering builds only  *
  ******************************************************************************/
 
 /* netmux_usb_linkdriver.c is responsible for communicating with the NetMUX  *
@@ -763,8 +764,10 @@ static int WriteLDLogCommand(struct file *file, const char *buffer,
 
 static void LDProcCleanup(void)
 {
+#ifdef CONFIG_DEBUG_NETMUX
 	remove_proc_entry("linkdriver", 0);
 	kfree(ld_info);
+#endif
 }
 
 /*
@@ -787,6 +790,7 @@ void LDInit(void)
 	wake_lock_init(&usb_to_netmux, WAKE_LOCK_SUSPEND,
 		       "LD_usb_to_netmux");
 
+#ifdef CONFIG_DEBUG_NETMUX
 	LDLogState[0] = '0';
 	LDLogState[1] = '\0';
 
@@ -803,6 +807,7 @@ void LDInit(void)
 		remove_proc_entry("linkdriver", 0);
 		goto unregDev;
 	}
+#endif
 	/* Populate channel desc and open USB channel for data transfer */
 	ipc_channel_desc.type = HW_CTRL_IPC_PACKET_DATA;
 	ipc_channel_desc.index = USB_CHANNEL;

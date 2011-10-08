@@ -40,6 +40,10 @@ extern struct omap_opp *mpu_opps;
 extern struct omap_opp *dsp_opps;
 extern struct omap_opp *l3_opps;
 
+extern unsigned short get_opp_id(struct omap_opp *opp_freq_table,
+				unsigned long freq);
+extern unsigned short get_opp_from_target_level(struct omap_opp *opp_freq_table,
+						int target_level);
 /*
  * agent_id values for use with omap_pm_set_min_bus_tput():
  *
@@ -245,7 +249,44 @@ const struct omap_opp *omap_pm_dsp_get_opp_table(void);
  * information that code receives from the DSP/BIOS load estimator is the
  * target OPP ID; hence, this interface.  No return value.
  */
-void omap_pm_dsp_set_min_opp(u8 opp_id);
+void omap_pm_dsp_set_min_opp(struct device *dev, unsigned long f);
+
+/**
+ * omap_pm_vdd1_set_max_opp - receive desired opp_id for VDD1
+ * @opp_id: max opp id which VDD1 can scale to
+ *
+ * Set the max constraint on VDD1 can scale to. Today, SRF only sets
+ * constraint in terms of min constraint. This feature is added for
+ * some usecase which requires the system to scale to a particular max
+ * limit, and needs the max limit to be set dynamically.
+ * However, once the max limit is lowered, it doesn't ignore any requests
+ * beyond that but honors those request and once the constraint
+ * is removed it will fall back to that level considering the current request
+ * on the resource.
+ *
+ * NOTE: This has to be used cautiously else you will end up restraining the
+ * system max limit and hence the performance/speed.
+ */
+void omap_pm_vdd1_set_max_opp(u8 opp_id);
+
+/**
+ * omap_pm_vdd1_set_max_opp - receive desired opp_id for VDD1
+ * @opp_id: max opp id which VDD1 can scale to
+ *
+ * Set the max constraint on VDD1 can scale to. Today, SRF only sets
+ * constraint in terms of min constraint. This feature is added for
+ * some usecase which requires the system to scale to a particular max
+ * limit, and needs the max limit to be set dynamically.
+ * However, once the max limit is lowered, it doesn't ignore any requests
+ * beyond that but honors those request and once the constraint
+ * is removed it will fall back to that level considering the current request
+ * on the resource.
+ *
+ * NOTE: This has to be used cautiously else you will end up restraining the
+ * system max limit and hence the performance/speed.
+ */
+void omap_pm_vdd1_set_max_opp(u8 opp_id);
+
 
 /**
  * omap_pm_dsp_get_opp - report the current DSP OPP ID

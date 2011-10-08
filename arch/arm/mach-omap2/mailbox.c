@@ -259,6 +259,8 @@ static struct omap_mbox_ops omap2_mbox_ops = {
  * MAILBOX 1: ARM <- DSP.
  * MAILBOX 2: ARM -> IVA,
  * MAILBOX 3: ARM <- IVA.
+ * MAILBOX 4: ARM -> wrigley c55,
+ * MAILBOX 5: ARM <- wrigley c55,
  */
 
 /* FIXME: the following structs should be filled automatically by the user id */
@@ -336,6 +338,28 @@ struct omap_mbox mbox_2_info = {
 };
 EXPORT_SYMBOL(mbox_2_info);
 
+/* OMAP+wrigley specific data structure. */
+static struct omap_mbox2_priv omap2_mbox_wrigley_priv = {
+	.tx_fifo = {
+		.msg		= MAILBOX_MESSAGE(4),
+		.fifo_stat	= MAILBOX_FIFOSTATUS(4),
+	},
+	.rx_fifo = {
+		.msg		= MAILBOX_MESSAGE(5),
+		.msg_stat	= MAILBOX_MSGSTATUS(5),
+	},
+	.irqenable	= MAILBOX_IRQENABLE(4),
+	.irqstatus	= MAILBOX_IRQSTATUS(4),
+	.notfull_bit	= MAILBOX_IRQ_NOTFULL(4),
+	.newmsg_bit	= MAILBOX_IRQ_NEWMSG(5),
+	.irqdisable	= MAILBOX_IRQENABLE(5),
+};
+
+struct omap_mbox mbox_wrigley_info = {
+	.name	= "wrigley",
+	.ops	= &omap2_mbox_ops,
+	.priv	= &omap2_mbox_wrigley_priv,
+};
 
 #if defined(CONFIG_ARCH_OMAP2420) /* IVA */
 static struct omap_mbox2_priv omap2_mbox_iva_priv = {
@@ -388,8 +412,8 @@ static int __devinit omap2_mbox_probe(struct platform_device *pdev)
 		mbox_1_info.irq = res->start;
 		ret = omap_mbox_register(&pdev->dev, &mbox_1_info);
 	} else {
-		mbox_dsp_info.irq = res->start;
-		ret = omap_mbox_register(&pdev->dev, &mbox_dsp_info);
+		mbox_wrigley_info.irq = res->start;
+		ret = omap_mbox_register(&pdev->dev, &mbox_wrigley_info);
 	}
 	if (ret)
 		goto err_dsp;
@@ -436,8 +460,9 @@ static int __devexit omap2_mbox_remove(struct platform_device *pdev)
 	if (cpu_is_omap44xx()) {
 		omap_mbox_unregister(&mbox_2_info);
 		omap_mbox_unregister(&mbox_1_info);
-	} else
-		omap_mbox_unregister(&mbox_dsp_info);
+	} else {
+		omap_mbox_unregister(&mbox_wrigley_info);
+	}
 	iounmap(mbox_base);
 	return 0;
 }

@@ -19,6 +19,7 @@
 #include <plat/omap-pm.h>
 
 unsigned int wakeup_timer_nseconds;
+static int vdd1_max_level;
 
 #ifdef CONFIG_OMAP_PM_SRF
 static ssize_t vdd_opp_show(struct kobject *, struct kobj_attribute *, char *);
@@ -26,6 +27,9 @@ static ssize_t vdd_opp_store(struct kobject *k, struct kobj_attribute *,
 			  const char *buf, size_t n);
 static struct kobj_attribute vdd1_opp_attr =
 	__ATTR(vdd1_opp, 0644, vdd_opp_show, vdd_opp_store);
+
+static struct kobj_attribute vdd1_max_attr =
+	__ATTR(vdd1_max, 0644, vdd_opp_show, vdd_opp_store);
 
 static struct kobj_attribute vdd2_opp_attr =
 	__ATTR(vdd2_opp, 0644, vdd_opp_show, vdd_opp_store);
@@ -44,7 +48,9 @@ static int vdd2_locked;
 static ssize_t vdd_opp_show(struct kobject *kobj, struct kobj_attribute *attr,
 			 char *buf)
 {
-	if (attr == &vdd1_opp_attr)
+	if (attr == &vdd1_max_attr)
+		return sprintf(buf, "%u\n", vdd1_max_level);
+	else if (attr == &vdd1_opp_attr)
 		return sprintf(buf, "%hu\n", resource_get_level("vdd1_opp"));
 	else if (attr == &vdd2_opp_attr)
 		return sprintf(buf, "%hu\n", resource_get_level("vdd2_opp"));
@@ -106,6 +112,9 @@ static ssize_t vdd_opp_store(struct kobject *kobj, struct kobj_attribute *attr,
 			return -EINVAL;
 		}
 		resource_set_opp_level(VDD2_OPP, value, flags);
+	} else if (attr == &vdd1_max_attr) {
+		omap_pm_vdd1_set_max_opp(value);
+		vdd1_max_level = value;
 	} else {
 		return -EINVAL;
 	}
@@ -120,6 +129,12 @@ static int __init omap_pm_init(void)
 #ifdef CONFIG_OMAP_PM_SRF
 	error = sysfs_create_file(power_kobj,
 				  &vdd1_opp_attr.attr);
+	if (error) {
+		printk(KERN_ERR "sysfs_create_file failed: %d\n", error);
+		return error;
+	}
+	error = sysfs_create_file(power_kobj,
+				  &vdd1_max_attr.attr);
 	if (error) {
 		printk(KERN_ERR "sysfs_create_file failed: %d\n", error);
 		return error;

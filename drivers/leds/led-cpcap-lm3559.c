@@ -225,10 +225,11 @@ static ssize_t ld_lm3559_registers_store(struct device *dev,
 		return -1;
 	}
 
-	if (sscanf(buf, "%s %x", name, &value) != 2) {
+	if (sscanf(buf, "%29s %x", name, &value) != 2) {
 		pr_err("%s:unable to parse input\n", __func__);
 		return -1;
 	}
+	name[sizeof(name)-1] = '\0';
 
 	reg_count = sizeof(lm3559_regs) / sizeof(lm3559_regs[0]);
 	for (i = 0; i < reg_count; i++) {
@@ -507,6 +508,17 @@ static ssize_t lm3559_strobe_store(struct device *dev,
 		if (err) {
 			pr_err("%s: Writing to 0x%X failed %i\n",
 				__func__, LM3559_FLASH_BRIGHTNESS, err);
+			return -EIO;
+		}
+
+		/* Flash driver will automatically switch from flash to torch mode
+		** if the flash driver is detecting low battery or getting a phone
+		** call. Need to have pre-defined torch brightness for this case */
+		err = lm3559_write_reg(torch_data, LM3559_TORCH_BRIGHTNESS,
+			torch_data->pdata->torch_brightness_def);
+		if (err) {
+			pr_err("%s: Writing to 0x%X failed %i\n",
+				__func__, LM3559_TORCH_BRIGHTNESS, err);
 			return -EIO;
 		}
 
@@ -1184,3 +1196,4 @@ module_exit(cpcap_lm3559_exit);
 
 MODULE_DESCRIPTION("Lighting driver for LM3559");
 MODULE_AUTHOR("MOTOROLA");
+MODULE_LICENSE("GPL");

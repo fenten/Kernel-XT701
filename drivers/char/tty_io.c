@@ -870,6 +870,7 @@ EXPORT_SYMBOL(start_tty);
  *	read calls may be outstanding in parallel.
  */
 
+extern int mapphone_umts_model;
 static ssize_t tty_read(struct file *file, char __user *buf, size_t count,
 			loff_t *ppos)
 {
@@ -893,8 +894,16 @@ static ssize_t tty_read(struct file *file, char __user *buf, size_t count,
 	else
 		i = -EIO;
 	tty_ldisc_deref(ld);
-	if (i > 0)
+	if (i > 0) {
 		inode->i_atime = current_fs_time(inode->i_sb);
+
+		if ((!mapphone_umts_model) &&
+			(strncmp("ts0710mux", file->f_path.dentry->d_name.name,
+			strlen("ts0710mux")) == 0)) {
+			printk(KERN_INFO "%s [RX] count = %d\n", __func__, i);
+		}
+	}
+
 	return i;
 }
 
@@ -980,6 +989,13 @@ static inline ssize_t do_tty_write(
 		ret = -EFAULT;
 		if (copy_from_user(tty->write_buf, buf, size))
 			break;
+		if ((!mapphone_umts_model) &&
+			(strncmp("ts0710mux", file->f_path.dentry->d_name.name,
+			strlen("ts0710mux")) == 0)) {
+			printk(KERN_INFO "%s [TX] count = %d\n",
+					__func__, size);
+		}
+
 		ret = write(tty, file, tty->write_buf, size);
 		if (ret <= 0)
 			break;

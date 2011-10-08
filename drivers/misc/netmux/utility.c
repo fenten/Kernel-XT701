@@ -49,6 +49,7 @@
 #include "utility.h"
 #include "packet.h"
 #include "debug.h"
+#include <linux/delay.h>
 
 
 #define COMMBUFF_TAG_INDEX_COUNT         4
@@ -190,10 +191,13 @@ COMMBUFF *int_alloc_commbuff(int32 size)
 {
 	COMMBUFF *newcommbuff;
 
-	newcommbuff = alloc_skb(size, GFP_ATOMIC);
-	if (!newcommbuff)
-		PANIC(netmuxPanicSKBFail1,
-		      "NetMUX PANIC: Unable to allocate commbuff\n");
+	do {
+		newcommbuff = alloc_skb(size, GFP_ATOMIC);
+		if (!newcommbuff) {
+			printk("Unable to allocate commbuff,wait\n");
+			mdelay(50);
+		}
+	} while (newcommbuff == NULL);
 
 	skb_put(newcommbuff, size);
 
@@ -236,10 +240,13 @@ COMMBUFF *commbuff_split(COMMBUFF *orig, int32 off)
 	if (!off || off >= orig->len)
 		return 0;
 
-	splitbuff = skb_clone(orig, GFP_ATOMIC);
-	if (!splitbuff)
-		PANIC(netmuxPanicSKBFail3,
-		      "NetMUX PANIC: Unable to allocate commbuff\n");
+	do {
+		splitbuff = skb_clone(orig, GFP_ATOMIC);
+		if (!splitbuff) {
+			printk("Unable to allocate commbuff,wait\n");
+			mdelay(50);
+		}
+	} while (splitbuff == NULL);
 
 	skb_trim(orig, off);
 	skb_pull(splitbuff, off);
@@ -266,11 +273,15 @@ COMMBUFF *commbuff_merge(COMMBUFF *focus, COMMBUFF *source)
 		return focus;
 	}
 
-	newcommbuff = alloc_skb(focus->len + source->len, GFP_ATOMIC);
-	if (!newcommbuff)
-		PANIC(netmuxPanicSKBFail4,
-		      "NetMUX PANIC: Unable to allocate commbuff\n");
+	do {
 
+		newcommbuff = alloc_skb(focus->len + source->len, GFP_ATOMIC);
+		if (!newcommbuff) {
+			printk("Unable to allocate commbuff,wait\n");
+			mdelay(50);
+		}
+
+	} while (newcommbuff == NULL);
 	data = skb_put(newcommbuff, focus->len);
 	memcpy(data, focus->data, focus->len);
 

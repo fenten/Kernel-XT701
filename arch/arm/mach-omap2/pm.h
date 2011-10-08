@@ -17,6 +17,7 @@ extern u32 enable_off_mode;
 extern u32 sleep_while_idle;
 extern u32 voltage_off_while_idle;
 extern unsigned int wakeup_timer_nseconds;
+extern u32 enable_abb_mode;
 
 extern void *omap3_secure_ram_storage;
 extern void omap3_pm_off_mode_enable(int);
@@ -25,6 +26,9 @@ extern int omap3_can_sleep(void);
 extern int set_pwrdm_state(struct powerdomain *pwrdm, u32 state);
 extern int omap3_idle_init(void);
 extern void vfp_pm_save_context(void);
+
+extern void lock_scratchpad_sem(void);
+extern void unlock_scratchpad_sem(void);
 
 struct prm_setup_vc {
 	u16 clksetup;
@@ -97,10 +101,14 @@ extern int omap2_pm_debug;
 extern void pm_dbg_update_time(struct powerdomain *pwrdm, int prev);
 extern int pm_dbg_regset_save(int reg_set);
 extern int pm_dbg_regset_init(int reg_set);
+extern void pm_dbg_show_core_regs(void);
+extern void pm_dbg_show_wakeup_source(void);
 #else
 #define pm_dbg_update_time(pwrdm, prev) do {} while (0);
 #define pm_dbg_regset_save(reg_set) do {} while (0);
 #define pm_dbg_regset_init(reg_set) do {} while (0);
+#define pm_dbg_show_core_regs() do {} while (0);
+#define pm_dbg_show_wakeup_source() do {} while (0);
 #endif /* CONFIG_PM_DEBUG */
 
 extern void omap24xx_idle_loop_suspend(void);
@@ -116,5 +124,11 @@ extern unsigned int omap34xx_suspend_sz;
 extern unsigned int save_secure_ram_context_sz;
 extern unsigned int omap24xx_cpu_suspend_sz;
 extern unsigned int omap34xx_cpu_suspend_sz;
+
+#if defined(CONFIG_PM)
+extern void enable_omap3630_toggle_l2_on_restore(void);
+#else
+static inline void enable_omap3630_toggle_l2_on_restore(void) { }
+#endif
 
 #endif

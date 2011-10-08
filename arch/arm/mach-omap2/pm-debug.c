@@ -56,7 +56,6 @@ int omap2_pm_debug;
 	regs[reg_count++].val = \
 			 __raw_readl(OMAP2_L4_IO_ADDRESS(0x480fe000 + (off)))
 
-static int __init pm_dbg_init(void);
 
 void omap2_pm_dump(int mode, int resume, unsigned int us)
 {
@@ -163,6 +162,8 @@ void omap2_pm_dump(int mode, int resume, unsigned int us)
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 
+static int __init pm_dbg_init(void);
+
 static void pm_dbg_regset_store(u32 *ptr);
 
 struct dentry *pm_dbg_dir;
@@ -218,6 +219,21 @@ static const struct pm_module_def omap3_pm_reg_modules[] = {
 	{ "", 0, 0, 0, 0 },
 };
 
+#define OMAP3_PADCONF_BASE		0x48002000
+#define PADCONF_WAKEUP_ENABLE_MASK	(1 << 14)
+
+#define PAD_ADDRESS_SECTION 5
+static struct {
+	unsigned int start;
+	unsigned int end;
+} pad_range[PAD_ADDRESS_SECTION] = {
+	{ 0x0030, 0x014C },
+	{ 0x0158, 0x0264 },
+	{ 0x05A0, 0x05F8 },
+	{ 0x0A00, 0x0A24 },
+	{ 0x0A4C, 0x0A58 },
+};
+
 #define PM_DBG_MAX_REG_SETS 4
 
 static void *pm_dbg_reg_set[PM_DBG_MAX_REG_SETS];
@@ -228,7 +244,6 @@ static int pm_dbg_get_regset_size(void)
 
 	if (regset_size == 0) {
 		int i = 0;
-
 		while (pm_dbg_reg_modules[i].name[0] != 0) {
 			regset_size += pm_dbg_reg_modules[i].high +
 				4 - pm_dbg_reg_modules[i].low;
@@ -324,6 +339,195 @@ int pm_dbg_regset_save(int reg_set)
 		return -EINVAL;
 
 	pm_dbg_regset_store(pm_dbg_reg_set[reg_set-1]);
+
+	return 0;
+}
+
+#define CORE_REGS_LEN 360
+void pm_dbg_show_core_regs(void)
+{
+	int i = 0;
+	int j = 0;
+	unsigned long val = 0;
+	int regs;
+	u32 *ptr;
+	static char core_buf[CORE_REGS_LEN];
+	char *pbuf;
+
+	if (pm_dbg_reg_set[0] == NULL)
+		return;
+	else
+		ptr = pm_dbg_reg_set[0];
+
+	memset(core_buf, 0, CORE_REGS_LEN);
+
+	while (pm_dbg_reg_modules[i].name[0] != 0) {
+		if (strcmp(pm_dbg_reg_modules[i].name, "CORE") ||
+			pm_dbg_reg_modules[i].type != MOD_CM) {
+			ptr += ((pm_dbg_reg_modules[i].high + 4
+				- pm_dbg_reg_modules[i].low)/4);
+			i++;
+			continue;
+		}
+		/* print the core domain CM registers only.*/
+		printk(KERN_INFO "MOD: CM_%s (%08x)\n",
+			pm_dbg_reg_modules[i].name,
+			(u32)(OMAP3430_CM_BASE +
+			pm_dbg_reg_modules[i].offset));
+
+		regs = 0;
+		pbuf = core_buf;
+		for (j = pm_dbg_reg_modules[i].low;
+			j <= pm_dbg_reg_modules[i].high; j += 4) {
+			val = *(ptr++);
+			if (val && (CORE_REGS_LEN-(pbuf-core_buf)) > 20) {
+				pbuf += snprintf(pbuf,
+					CORE_REGS_LEN-(pbuf-core_buf),
+					"%02x => %08lx ", j, val);
+				regs++;
+				if (regs % 4 == 0)
+					pbuf += snprintf(pbuf,
+					CORE_REGS_LEN-(pbuf-core_buf), "\n");
+			}
+		}
+		printk(KERN_INFO "%s\n", core_buf);
+		break;
+	}
+}
+
+#define WAKEUP_SOURCE_LEN 512
+void pm_dbg_show_wakeup_source(void)
+{
+	u32 val = 0;
+	int len = 0;
+	static char buf[WAKEUP_SOURCE_LEN];
+	char *pbuf;
+	u32 gpio_bit = 0;
+
+	/* print the real wkup sources */
+	memset(buf, 0, WAKEUP_SOURCE_LEN);
+	pbuf = buf;
+	len = WAKEUP_SOURCE_LEN - (pbuf - buf);
+	if (len > 16)
+		pbuf += snprintf(pbuf, len, "WAKEDUP BY: ");
+
+	val = prm_read_mod_reg(WKUP_MOD, PM_WKST);
+	val &= prm_read_mod_reg(WKUP_MOD, OMAP3430_PM_MPUGRPSEL);
+	len = WAKEUP_SOURCE_LEN - (pbuf - buf);
+	if (val && len > 30)
+		pbuf += snprintf(pbuf, len, "WKUP_MOD(0x%x), ", val);
+
+	val = prm_read_mod_reg(CORE_MOD, PM_WKST1);
+	val &= prm_read_mod_reg(CORE_MOD, OMAP3430_PM_MPUGRPSEL);
+	len = WAKEUP_SOURCE_LEN - (pbuf - buf);
+	if (val && len > 30)
+		pbuf += snprintf(pbuf, len, "CORE_MOD(0x%x), ", val);
+
+	val = prm_read_mod_reg(CORE_MOD, OMAP3430ES2_PM_WKST3);
+	val &= prm_read_mod_reg(CORE_MOD, OMAP3430ES2_PM_MPUGRPSEL3);
+	len = WAKEUP_SOURCE_LEN - (pbuf - buf);
+	if (val && len > 30)
+		pbuf += snprintf(pbuf, len, "CORE3_MOD(0x%x), ", val);
+
+	val = prm_read_mod_reg(OMAP3430_PER_MOD, PM_WKST);
+	val &= prm_read_mod_reg(OMAP3430_PER_MOD, OMAP3430_PM_MPUGRPSEL);
+	len = WAKEUP_SOURCE_LEN - (pbuf - buf);
+	if (val && len > 30)
+		pbuf += snprintf(pbuf, len, "PER_MOD(0x%x), ", val);
+
+	val = prm_read_mod_reg(OMAP3430ES2_USBHOST_MOD, PM_WKST);
+	val &= prm_read_mod_reg(OMAP3430ES2_USBHOST_MOD, OMAP3430_PM_MPUGRPSEL);
+	len = WAKEUP_SOURCE_LEN - (pbuf - buf);
+	if (val && len > 30)
+		pbuf += snprintf(pbuf, len, "USBHOST(0x%x), ", val);
+
+	val = prm_read_mod_reg(OCP_MOD, OMAP3_PRM_IRQSTATUS_MPU_OFFSET);
+	len = WAKEUP_SOURCE_LEN - (pbuf - buf);
+	if (val && len > 30)
+		pbuf += snprintf(pbuf, len, "MPU_IRQSTATUS(0x%x), ", val);
+
+	val = __raw_readl(OMAP2_L4_IO_ADDRESS(OMAP34XX_IC_BASE + (0x0098)));
+	len = WAKEUP_SOURCE_LEN - (pbuf - buf);
+	if (val && len > 30)
+		pbuf += snprintf(pbuf, len, "INTC_IRQ0(0x%x), ", val);
+
+	len = WAKEUP_SOURCE_LEN - (pbuf - buf);
+	if ((val & (1<<29)) && len > 20) {
+		gpio_bit = __raw_readl(OMAP2_L4_IO_ADDRESS(0x48310018)) &
+			__raw_readl(OMAP2_L4_IO_ADDRESS(0x4831001C));
+		pbuf += snprintf(pbuf, len, "GPIO1(0x%x), ", gpio_bit);
+	}
+	len = WAKEUP_SOURCE_LEN - (pbuf - buf);
+	if ((val & (1<<30)) && len > 20) {
+		gpio_bit = __raw_readl(OMAP2_L4_IO_ADDRESS(0x49050018)) &
+			__raw_readl(OMAP2_L4_IO_ADDRESS(0x4905001C));
+		pbuf += snprintf(pbuf, len, "GPIO2(0x%x), ", gpio_bit);
+	}
+	len = WAKEUP_SOURCE_LEN - (pbuf - buf);
+	if ((val & (1<<31)) && len > 20) {
+		gpio_bit = __raw_readl(OMAP2_L4_IO_ADDRESS(0x49052018)) &
+			__raw_readl(OMAP2_L4_IO_ADDRESS(0x4905201C));
+		pbuf += snprintf(pbuf, len, "GPIO3(0x%x), ", gpio_bit);
+	}
+
+	val = __raw_readl(OMAP2_L4_IO_ADDRESS(OMAP34XX_IC_BASE + (0x00b8)));
+	len = WAKEUP_SOURCE_LEN - (pbuf - buf);
+	if (val && len > 30)
+		pbuf += snprintf(pbuf, len, "INTC_IRQ1(0x%x), ", val);
+
+	len = WAKEUP_SOURCE_LEN - (pbuf - buf);
+	if ((val & (1<<0)) && len > 20) {
+		gpio_bit = __raw_readl(OMAP2_L4_IO_ADDRESS(0x49054018)) &
+			__raw_readl(OMAP2_L4_IO_ADDRESS(0x4905401C));
+		pbuf += snprintf(pbuf, len, "GPIO4(0x%x), ", gpio_bit);
+	}
+	len = WAKEUP_SOURCE_LEN - (pbuf - buf);
+	if ((val & (1<<1)) && len > 20) {
+		gpio_bit = __raw_readl(OMAP2_L4_IO_ADDRESS(0x49056018)) &
+			__raw_readl(OMAP2_L4_IO_ADDRESS(0x4905601C));
+		pbuf += snprintf(pbuf, len, "GPIO5(0x%x), ", gpio_bit);
+	}
+	len = WAKEUP_SOURCE_LEN - (pbuf - buf);
+	if ((val & (1<<2)) && len > 20) {
+		gpio_bit = __raw_readl(OMAP2_L4_IO_ADDRESS(0x49058018)) &
+			__raw_readl(OMAP2_L4_IO_ADDRESS(0x4905801C));
+		pbuf += snprintf(pbuf, len, "GPIO6(0x%x), ", gpio_bit);
+	}
+
+	val = __raw_readl(OMAP2_L4_IO_ADDRESS(OMAP34XX_IC_BASE + (0x00d8)));
+	len = WAKEUP_SOURCE_LEN - (pbuf - buf);
+	if (val && len > 30)
+		pbuf += snprintf(pbuf, len, "INTC_IRQ2(0x%x)", val);
+
+	printk(KERN_INFO "%s\n", buf);
+}
+
+static int pm_dbg_show_padconf_regs(struct seq_file *s, void *unused)
+{
+	unsigned int i, j;
+	int counts;
+	unsigned short val;
+
+	for (i = 0; i < PAD_ADDRESS_SECTION; i++) {
+		seq_printf(s, "padconf[ %04x --> %04x]",
+				pad_range[i].start, pad_range[i].end);
+		counts = 0;
+		for (j = pad_range[i].start; j <= pad_range[i].end; j += 4) {
+			if (counts++ % 4 == 0)
+				seq_printf(s, "\n%04X:  ", j);
+
+			/* read the low 16 bits */
+			val = omap_readw(OMAP3_PADCONF_BASE + j);
+			seq_printf(s, " %04x%s", val,
+				(val & PADCONF_WAKEUP_ENABLE_MASK) ? "*" : " ");
+
+			/* read the high 16 bits */
+			val = omap_readw(OMAP3_PADCONF_BASE + j + 2);
+			seq_printf(s, "	%04x%s", val,
+				(val & PADCONF_WAKEUP_ENABLE_MASK) ? "*" : " ");
+		}
+		seq_printf(s, "\n");
+	}
 
 	return 0;
 }
@@ -447,6 +651,11 @@ static int pm_dbg_reg_open(struct inode *inode, struct file *file)
 	return single_open(file, pm_dbg_show_regs, inode->i_private);
 }
 
+static int pm_dbg_reg_padconf_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, pm_dbg_show_padconf_regs, inode->i_private);
+}
+
 static const struct file_operations debug_fops = {
 	.open           = pm_dbg_open,
 	.read           = seq_read,
@@ -459,6 +668,13 @@ static const struct file_operations debug_reg_fops = {
 	.read           = seq_read,
 	.llseek         = seq_lseek,
 	.release        = single_release,
+};
+
+static const struct file_operations debug_reg_padconf_fops = {
+	.open		= pm_dbg_reg_padconf_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
 };
 
 int pm_dbg_regset_init(int reg_set)
@@ -603,12 +819,19 @@ static int __init pm_dbg_init(void)
 
 		}
 
+	(void) debugfs_create_file("padconf", S_IRUGO,
+		pm_dbg_dir, NULL, &debug_reg_padconf_fops);
+
 	(void) debugfs_create_file("enable_off_mode", S_IRUGO | S_IWUGO, d,
 				   &enable_off_mode, &pm_dbg_option_fops);
 	(void) debugfs_create_file("sleep_while_idle", S_IRUGO | S_IWUGO, d,
 				   &sleep_while_idle, &pm_dbg_option_fops);
 	(void) debugfs_create_file("wakeup_timer_seconds", S_IRUGO | S_IWUGO, d,
 				   &wakeup_timer_seconds, &pm_dbg_option_fops);
+
+	if (cpu_is_omap3630())
+		(void) debugfs_create_file("enable_abb_mode", S_IRUGO | S_IWUGO,
+				d, &enable_abb_mode, &pm_dbg_option_fops);
 
 	/* Only enable for >= ES2.1 . Going to 0V on anything under
 	 * ES2.1 will eventually cause a crash */

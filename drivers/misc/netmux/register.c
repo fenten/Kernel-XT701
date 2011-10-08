@@ -41,6 +41,7 @@
  *   2009/07/10  Motorola    Update send buffers number                       *
  *   2009/08/06  Motorola    Change permission for /proc/netmuxlog to 660     *
  *   2010/04/28  Motorola    Format cleanup                                   *
+ *   2010/09/03  Motorola    Enable proc logging for Engineering builds only  *
  ******************************************************************************/
 
 /* register.c handles the communication process between a link driver and a   */
@@ -332,6 +333,7 @@ static int WriteNetmuxLogCommand(struct file *file, const char *buffer,
 
 void NetmuxLogInit(void)
 {
+#ifdef CONFIG_DEBUG_NETMUX
 	NetmuxLogState = alloc_mem(LOG_COMMAND_LEN);
 	NetmuxLogState[0] = '0';
 	NetmuxLogState[1] = '\0';
@@ -344,4 +346,5 @@ void NetmuxLogInit(void)
 		proc_netmux_log_entry->read_proc = GetNetmuxLogState;
 		proc_netmux_log_entry->write_proc = WriteNetmuxLogCommand;
 	}
+#endif
 }

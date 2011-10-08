@@ -176,11 +176,13 @@
 #define SR1_36XX_ERRMINLIMIT_OPP2	(0xF9)
 #define SR1_36XX_ERRMINLIMIT_OPP3	(0xFA)
 #define SR1_36XX_ERRMINLIMIT_OPP4	(0xFA)
+#define SR1_36XX_ERRMINLIMIT_OPP5	(0xFA)
 
 #define SR1_36XX_ERRGAIN_OPP1	(0x0C)
 #define SR1_36XX_ERRGAIN_OPP2	(0x16)
 #define SR1_36XX_ERRGAIN_OPP3	(0x23)
 #define SR1_36XX_ERRGAIN_OPP4	(0x27)
+#define SR1_36XX_ERRGAIN_OPP5	(0x27)
 
 #define SR2_ERRWEIGHT			(0x04 << 16)
 #define SR2_ERRMAXLIMIT			(0x02 << 8)
@@ -309,6 +311,7 @@ int sr_recalibrate(struct omap_opp *opp, u32 target_opp, u32 current_opp)
 }
 #endif
 
+#include <linux/dcache.h>
 #ifdef __SR_DEBUG
 int sr_debugfs_create_entries(struct dentry *d);
 #else

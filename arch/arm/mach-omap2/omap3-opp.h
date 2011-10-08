@@ -4,6 +4,7 @@
 #include <plat/omap-pm.h>
 
 /* MPU speeds */
+#define S1200M	1200000000
 #define S1000M	1000000000
 #define S800M	800000000
 #define S720M   720000000
@@ -28,6 +29,7 @@
 #define S180M   180000000
 #define S130M	130000000
 #define S90M    90000000
+#define S65M    65000000
 
 /* L3 speeds */
 #define S50M	50000000

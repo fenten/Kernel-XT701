@@ -185,15 +185,67 @@ const struct omap_opp *omap_pm_dsp_get_opp_table(void)
 	return dsp_opps;
 }
 
-void omap_pm_dsp_set_min_opp(u8 opp_id)
+static struct device dummy_vdd1_dev;
+void omap_pm_vdd1_set_max_opp(u8 opp_id)
 {
-	if (opp_id == 0) {
+	pr_debug("OMAP PM: requests constraint for max OPP ID\n");
+
+	if (opp_id != 0)
+		resource_request("vdd1_max", &dummy_vdd1_dev, opp_id);
+	 else
+		resource_request("vdd1_max", &dummy_vdd1_dev, MAX_VDD1_OPP);
+}
+EXPORT_SYMBOL(omap_pm_vdd1_set_max_opp);
+
+static bool vdd1_max_opp;
+
+void omap_pm_dsp_set_min_opp(struct device *dev, unsigned long f)
+{
+	u8 opp_id;
+
+	if (!dev) {
 		WARN_ON(1);
 		return;
+	};
+
+	pr_debug("OMAP PM: DSP requests minimum VDD1 opp, \
+			 dsp freq requested is %lu\n", f);
+
+	/* DSP uses KHz clock. */
+	f *= 1000;
+	if (cpu_is_omap3630() && (omap_rev_id() == OMAP_3630_1200)) {
+
+		unsigned long min_dsp_freq = dsp_opps[MIN_VDD1_OPP].rate;
+		int dsp_target;
+
+		/* Set Vdd1 Max Constraint according to dsp freq*/
+
+		/*
+		 * check if dsp freq requested is above 65MHz, if yes set
+		 * max opp to 4, which limits scaling to max VDD1 1G only.
+		 * if dsp freq drops below opp1 260M, release constraint,
+		 * max vdd1 1.2G can be reached.
+		 */
+		if ((f > min_dsp_freq) && !vdd1_max_opp) {
+			vdd1_max_opp = 1;
+			omap_pm_vdd1_set_max_opp(MAX_VDD1_OPP - 1);
+		} else if ((f <= min_dsp_freq) && vdd1_max_opp) {
+			omap_pm_vdd1_set_max_opp(0);
+			vdd1_max_opp = 0;
+		}
+		/*
+		 * DSP table has 65MHz as OPP5, give OPP1-260MHz
+		 * when DSP request 65MHz.
+		 */
+		if (f == min_dsp_freq) {
+			dsp_target =  get_opp_from_target_level(dsp_opps,
+							 VDD1_OPP1);
+			f = dsp_opps[dsp_target].rate;
+		}
 	}
 
-	pr_debug("OMAP PM: DSP requests minimum VDD1 OPP to be %d\n", opp_id);
-
+	/* Get opp id to set VDD1 constraint*/
+	opp_id = get_opp_id(dsp_opps + MAX_VDD1_OPP, f);
 	/*
 	 * For now pass a dummy_dev struct for SRF to identify the caller.
 	 * Maybe its good to have DSP pass this as an argument
@@ -346,10 +398,12 @@ u8 omap_pm_get_max_vdd1_opp()
 		case OMAP_3630:
 		default:
 			return VDD1_OPP4;
-		case OMAP_3630_800:
+		case OMAP_3630_0800:
 			return VDD1_OPP3;
 		case OMAP_3630_1000:
 			return VDD1_OPP4;
+		case OMAP_3630_1200:
+			return VDD1_OPP5;
 		}
 	} else {
 		if (omap_rev() < OMAP3430_REV_ES3_1)

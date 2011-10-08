@@ -159,14 +159,17 @@ static int curr_vdd1_opp;
 static int curr_vdd2_opp;
 static DEFINE_MUTEX(dvfs_mutex);
 
-static unsigned short get_opp(struct omap_opp *opp_freq_table,
+unsigned short get_opp_id(struct omap_opp *opp_freq_table,
 		unsigned long freq)
 {
 	struct omap_opp *prcm_config;
 	prcm_config = opp_freq_table;
 
-	if (prcm_config->rate <= freq)
+	if (prcm_config->rate == freq)
 		return prcm_config->opp_id; /* Return the Highest OPP */
+	else
+		prcm_config--;
+
 	for (; prcm_config->rate; prcm_config--)
 		if (prcm_config->rate < freq)
 			return (prcm_config+1)->opp_id;
@@ -174,6 +177,27 @@ static unsigned short get_opp(struct omap_opp *opp_freq_table,
 			return prcm_config->opp_id;
 	/* Return the least OPP */
 	return (prcm_config+1)->opp_id;
+}
+
+/**
+ * get_opp_from_target_level - get a opp from target level
+ */
+unsigned short get_opp_from_target_level(struct omap_opp *opp_freq_table,
+		int target_level)
+{
+	int i;
+
+	for (i = 1; i <= MAX_VDD1_OPP; i++)
+		if (opp_freq_table[i].opp_id == target_level)
+			break;
+
+	if (i > MAX_VDD1_OPP) {
+		printk(KERN_ERR "OMAP-PM: Error: target level=%d\n",
+			 target_level);
+		i = VDD1_OPP1;
+	}
+
+	return i;
 }
 
 /**
@@ -194,14 +218,14 @@ void init_opp(struct shared_resource *resp)
 		vdd1_resp = resp;
 		dpll1_clk = clk_get(NULL, "dpll1_ck");
 		dpll2_clk = clk_get(NULL, "dpll2_ck");
-		resp->curr_level = get_opp(mpu_opps + MAX_VDD1_OPP,
+		resp->curr_level = get_opp_id(mpu_opps + MAX_VDD1_OPP,
 				dpll1_clk->rate);
 		curr_vdd1_opp = resp->curr_level;
 	} else if (strcmp(resp->name, "vdd2_opp") == 0) {
 		vdd2_resp = resp;
 		dpll3_clk = clk_get(NULL, "dpll3_m2_ck");
 		l3_clk = clk_get(NULL, "l3_ick");
-		resp->curr_level = get_opp(l3_opps + MAX_VDD2_OPP,
+		resp->curr_level = get_opp_id(l3_opps + MAX_VDD2_OPP,
 				l3_clk->rate);
 		curr_vdd2_opp = resp->curr_level;
 	}
@@ -246,12 +270,27 @@ static int program_opp_freq(int res, int target_level, int current_level)
 {
 	int ret = 0, l3_div;
 	int *curr_opp;
+	int dsp_target, dsp_curr;
 
-	lock_scratchpad_sem();
 	if (res == VDD1_OPP) {
 		curr_opp = &curr_vdd1_opp;
-		clk_set_rate(dpll1_clk, mpu_opps[target_level].rate);
-		clk_set_rate(dpll2_clk, dsp_opps[target_level].rate);
+		dsp_target = get_opp_from_target_level(dsp_opps, target_level);
+		dsp_curr = get_opp_from_target_level(dsp_opps, current_level);
+
+		/* With the enabling of the 1.2G/65M OPP for Droid2WE
+		 * There is a very short window of time when the system
+		 * would be running at 1.2G/800M. To avoid this for safe volt,
+		 * change dsp freq rate and then ARM rate.
+		 */
+		if ((mpu_opps[target_level].rate > mpu_opps[current_level].rate)
+			&& (dsp_opps[dsp_target].rate < dsp_opps[dsp_curr].rate)
+		   ) {
+			clk_set_rate(dpll2_clk, dsp_opps[dsp_target].rate);
+			clk_set_rate(dpll1_clk, mpu_opps[target_level].rate);
+		} else {
+			clk_set_rate(dpll1_clk, mpu_opps[target_level].rate);
+			clk_set_rate(dpll2_clk, dsp_opps[dsp_target].rate);
+		}
 #ifndef CONFIG_CPU_FREQ
 		/*Update loops_per_jiffy if processor speed is being changed*/
 		loops_per_jiffy = compute_lpj(loops_per_jiffy,
@@ -265,15 +304,9 @@ static int program_opp_freq(int res, int target_level, int current_level)
 		ret = clk_set_rate(dpll3_clk,
 				l3_opps[target_level].rate * l3_div);
 	}
-	if (ret) {
-		unlock_scratchpad_sem();
+	if (ret)
 		return current_level;
-	}
 
-#ifdef CONFIG_PM
-	omap3_save_scratchpad_contents();
-#endif
-	unlock_scratchpad_sem();
 	*curr_opp = target_level;
 	return target_level;
 }
@@ -524,10 +557,10 @@ int set_freq(struct shared_resource *resp, u32 target_level)
 		return 0;
 
 	if (strcmp(resp->name, "mpu_freq") == 0) {
-		vdd1_opp = get_opp(mpu_opps + MAX_VDD1_OPP, target_level);
+		vdd1_opp = get_opp_id(mpu_opps + MAX_VDD1_OPP, target_level);
 		resource_request("vdd1_opp", &dummy_mpu_dev, vdd1_opp);
 	} else if (strcmp(resp->name, "dsp_freq") == 0) {
-		vdd1_opp = get_opp(dsp_opps + MAX_VDD1_OPP, target_level);
+		vdd1_opp = get_opp_id(dsp_opps + MAX_VDD1_OPP, target_level);
 		resource_request("vdd1_opp", &dummy_dsp_dev, vdd1_opp);
 	}
 	resp->curr_level = target_level;

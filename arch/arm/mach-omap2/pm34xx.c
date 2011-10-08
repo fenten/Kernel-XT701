@@ -71,6 +71,7 @@ u32 enable_off_mode;
 u32 sleep_while_idle;
 u32 wakeup_timer_seconds;
 u32 voltage_off_while_idle;
+u32 enable_abb_mode;
 
 struct power_state {
 	struct powerdomain *pwrdm;
@@ -116,9 +117,6 @@ static struct prm_setup_vc prm_setup = {
 	.vdd_ch_conf = OMAP3430_CMD1 | OMAP3430_RAV1,
 	.vdd_i2c_cfg = OMAP3430_MCODE_SHIFT | OMAP3430_HSEN | OMAP3430_SREN,
 };
-
-unsigned short enable_abb_mode = 1;
-EXPORT_SYMBOL(enable_abb_mode);
 
 static inline void omap3_per_save_context(void)
 {
@@ -264,8 +262,7 @@ static int prcm_clear_mod_irqs(s16 module, u8 regs)
 			 */
 			if (module == OMAP3430ES2_USBHOST_MOD)
 				clken |= 1 << OMAP3430ES2_EN_USBHOST2_SHIFT;
-			if (module != OMAP3430ES2_USBHOST_MOD)
-				cm_set_mod_reg_bits(clken, module, fclk_off);
+			cm_set_mod_reg_bits(clken, module, fclk_off);
 			prm_write_mod_reg(wkst, module, wkst_off);
 			wkst = prm_read_mod_reg(module, wkst_off);
 			c++;
@@ -524,6 +521,19 @@ void omap_sram_idle(void)
 	if (regset_save_on_suspend)
 		pm_dbg_regset_save(2);
 
+	/*
+	* FIXME:
+	* In the case of wakeup from MPU OFF, ROM code will bring EMU clock
+	* domain up, which leads to extra current consumption. So temporarily
+	* work around it until the change from ROM code.
+	*/
+	if (regset_save_on_suspend) {
+		/* Disable WDT1 iclk */
+		cm_rmw_mod_reg_bits(1 << 4, 0, WKUP_MOD, CM_ICLKEN);
+		/* Software supervised sleep on EMU clock domain */
+		cm_rmw_mod_reg_bits(0x3, 0x1, OMAP3430_EMU_MOD, CM_CLKSTCTRL);
+	}
+
 	/* Restore normal SDRC POWER settings */
 	if (omap_rev() >= OMAP3430_REV_ES3_0 &&
 	    omap_type() != OMAP2_DEVICE_TYPE_GP &&
@@ -659,6 +669,17 @@ int set_pwrdm_state(struct powerdomain *pwrdm, u32 state)
 	if (cur_state == state)
 		return ret;
 
+	/*
+	 * check if bridge has hibernated? if yes then just return success
+	 * If OFF mode is not enabled, sleep switch is performed for IVA
+	 * which is not necessory.
+	 * REVISIT: Bridge has to set powerstate based on enable_off_mode state
+	 */
+	if (!strcmp(pwrdm->name, "iva2_pwrdm")) {
+		if (cur_state == PWRDM_POWER_OFF)
+			return ret;
+	}
+
 	if (pwrdm_read_pwrst(pwrdm) < PWRDM_POWER_ON) {
 		omap2_clkdm_wakeup(pwrdm->pwrdm_clkdms[0]);
 		sleep_switch = 1;
@@ -762,6 +783,8 @@ restore:
 				"target state %d\n",
 				pwrst->pwrdm->name,
 				pwrdm_read_next_pwrst(pwrst->pwrdm));
+			if (pwrst->pwrdm == core_pwrdm)
+				pm_dbg_show_core_regs();
 			ret = -1;
 		}
 		set_pwrdm_state(pwrst->pwrdm, pwrst->saved_state);
@@ -771,7 +794,7 @@ restore:
 	else {
 		printk(KERN_INFO "Successfully put all powerdomains "
 		       "to target state\n");
-		/* vktx63 : only for debug dump_mod_wkst_reg(); */
+		pm_dbg_show_wakeup_source();
 	}
 
 	return ret;
@@ -1288,7 +1311,6 @@ static struct notifier_block prcm_notifier = {
 static int panic_prepare_reboot(struct notifier_block *this,
 					unsigned long code, void *x)
 {
-	set_opps_max(true);
 	return NOTIFY_DONE;
 }
 
@@ -1302,9 +1324,23 @@ static int __init omap3_pm_init(void)
 {
 	struct power_state *pwrst, *tmp;
 	int ret;
+	u32 reg;
 
 	if (!cpu_is_omap34xx())
 		return -ENODEV;
+
+	/*
+	 * Issue: failure is seen after second or minutes of operation
+	 * while doing intensive DSP operation like video record
+	 * or playback. It only happen on phones using SEC silicon
+	 *
+	 * Workaround: Disable MEM RTA (Retention Till Access)
+	 * for second source Samsung OMAP3630 Silicon
+	 */
+	if (omap_is_SEC()) {
+		reg = omap_ctrl_readl(OMAP36XX_CONTROL_MEM_RTA_CTRL);
+		omap_ctrl_writel(0x0, OMAP36XX_CONTROL_MEM_RTA_CTRL);
+	}
 
 	printk(KERN_ERR "Power Management for TI OMAP3.\n");
 
@@ -1420,6 +1456,16 @@ static int __init omap3_pm_init(void)
 	register_reboot_notifier(&prcm_notifier);
 	atomic_notifier_chain_register(&panic_notifier_list,
 					&prcm_panic_notifier);
+
+	sleep_while_idle = 1;
+	if (cpu_is_omap3630())
+		enable_abb_mode = 1;
+	/* Enable the l2 cache toggling in sleep logic */
+	if (cpu_is_omap3630())
+		enable_omap3630_toggle_l2_on_restore();
+	enable_off_mode = 1;
+	omap3_pm_off_mode_enable(enable_off_mode);
+
 err1:
 	return ret;
 err2:
@@ -1616,43 +1662,6 @@ int omap3630_abb_change_active_opp(u32 target_opp_no)
 			OMAP3_PRM_IRQSTATUS_MPU_OFFSET);
 	return 0;
 }
-
-static ssize_t abb_show(struct kobject *kobj, struct kobj_attribute *attr,
-		char *buf)
-{
-	return sprintf(buf, "%hu\n", enable_abb_mode);
-}
-
-static ssize_t abb_store(struct kobject *kobj, struct kobj_attribute *attr,
-		const char *buf, size_t n)
-{
-	unsigned short value;
-
-	if (sscanf(buf, "%hu", &value) != 1) {
-		printk(KERN_ERR "abb_store: Invalid value\n");
-		return -EINVAL;
-	}
-	enable_abb_mode = value;
-	omap3630_abb_change_active_opp(resource_get_level("vdd1_opp"));
-	return n;
-}
-
-static struct kobj_attribute enable_abb_mode_attr =
-__ATTR(enable_abb_mode, 0644, abb_show, abb_store);
-
-/**
- * @brief omap_abb_init - abb initialization
- *
- * @return  0
- */
-static int __init omap_abb_init(void)
-{
-	if (sysfs_create_file(power_kobj, &enable_abb_mode_attr.attr))
-		pr_warning("abb: sysfs_create_file failed\n");
-
-	return 0;
-}
-late_initcall(omap_abb_init);
 
 #ifdef CONFIG_OMAP_SMARTREFLEX_CLASS1P5
 static ssize_t sr_adjust_vsel_show(struct kobject *kobj,

@@ -43,6 +43,7 @@
 #include "prm-regbits-34xx.h"
 #include "cm.h"
 #include "cm-regbits-34xx.h"
+#include "pm.h"
 
 static const struct clkops clkops_noncore_dpll_ops;
 
@@ -945,6 +946,9 @@ static int omap3_core_dpll_m2_set_rate(struct clk *clk, unsigned long rate)
 		 sdrc_cs1->rfr_ctrl, sdrc_cs1->actim_ctrla,
 		 sdrc_cs1->actim_ctrlb, sdrc_cs1->mr);
 
+	/* Here irq already disabled */
+	lock_scratchpad_sem();
+
 	if (sdrc_cs1)
 		omap3_configure_core_dpll(
 				  new_div, unlock_dll, c, rate > clk->rate,
@@ -958,6 +962,11 @@ static int omap3_core_dpll_m2_set_rate(struct clk *clk, unsigned long rate)
 				  sdrc_cs0->rfr_ctrl, sdrc_cs0->actim_ctrla,
 				  sdrc_cs0->actim_ctrlb, sdrc_cs0->mr,
 				  0, 0, 0, 0);
+
+#ifdef CONFIG_PM
+	omap3_save_scratchpad_contents();
+#endif
+	unlock_scratchpad_sem();
 
 	return 0;
 }
@@ -1210,6 +1219,10 @@ int __init omap2_clk_init(void)
 	struct omap_clk *c;
 	/* u32 clkrate; */
 	u32 cpu_clkflg;
+
+	/* Get omap3630 revision id from devtree for sw tiering*/
+	if (cpu_is_omap3630())
+		get_omap3630_revision_id();
 
 	if (cpu_is_omap34xx()) {
 		cpu_mask = RATE_IN_343X;
