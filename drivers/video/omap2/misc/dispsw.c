@@ -13,7 +13,6 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/delay.h>
 #include <linux/mutex.h>
 #include <linux/pagemap.h>
 #include <linux/platform_device.h>
@@ -26,6 +25,8 @@
 #include "dispsw-mr.h"
 #include "dispsw-rotate.h"
 
+#include <linux/delay.h>
+#include <linux/io.h>
 /*=========================================================================*/
 /* These are platform dependent and should be provided in another manner.  */
 
@@ -706,6 +707,9 @@ static void dispsw_get_planes(struct dispsw_cmd *cmd)
 	}
 }
 
+#define DISPC_BASE			0x48050400
+#define DISPC_GO_WAIT_COUNT		10000
+#define DISPC_CONTROL			0x0040
 static void dispsw_unset_display(struct omap_dss_device *dssdev,
 				struct omap_overlay_manager *dssmgr)
 {
@@ -713,10 +717,26 @@ static void dispsw_unset_display(struct omap_dss_device *dssdev,
 	struct omap_overlay *ovl;
 	int i;
 	int rc;
+	int bit = 0;
 
+	extern void dss_clk_enable(int);
+	extern void dss_clk_disable(int);
 	DBG("Disconnecting %s from %s\n", dssdev->name, dssmgr->name);
 
-	dssdev->panel.config = OMAP_DSS_LCD_TFT;
+	/* This is a temporary hack */
+	if (strcmp(dssdev->name, dssmgr->name) != 0) {
+		dss_clk_enable(3);
+		for (i = 0; i < DISPC_GO_WAIT_COUNT; i++) {
+			bit = ((__raw_readl(ioremap(DISPC_BASE, SZ_1K) + DISPC_CONTROL) & 32) >> 5);
+
+			if (bit == 1)
+				udelay(2);
+			else
+				break;
+		}
+		dss_clk_disable(3);
+	}
+
 	/* Ignore the errors as we are unsetting */
 	dssdev->disable(dssdev);
 
@@ -802,7 +822,6 @@ static int dispsw_switch_to_display(struct dispsw_cmd *cmd,
 	int rc;
 
 	if (dssmgr->device) {
-		msleep(400);
 		olddev = dssmgr->device;
 		dispsw_unset_display(dssmgr->device, dssmgr);
 	}

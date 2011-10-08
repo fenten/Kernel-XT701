@@ -565,6 +565,7 @@ static struct platform_device ohci_device = {
 };
 #endif /* OHCI specific data */
 
+extern void set_cdma_modem_interface(unsigned int number);
 
 void mapphone_init_modem_interface(void)
 {
@@ -585,6 +586,12 @@ void mapphone_init_modem_interface(void)
 		return;
 	}
 	prop = of_get_property(node, DT_PROP_CHOSEN_MODEM_IFACE_NUM, NULL);
+	if (prop) {
+		pr_err("Setting the Modem Interface num to %d\n", *(u8 *)prop);
+		set_cdma_modem_interface(*(u8 *)prop);
+	} else
+		set_cdma_modem_interface(0);
+
 	of_node_put(node);
 	return;
 }

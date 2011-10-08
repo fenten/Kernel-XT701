@@ -3142,9 +3142,6 @@ static int dsi_set_update_mode(struct omap_dss_device *dssdev,
 
 	WARN_ON(!mutex_is_locked(&dsi.bus_lock));
 
-	DSSDBG("dsi_set_update_mode cur(%d) req(%d)\n",
-		dsi.update_mode, mode);
-
 	if (dsi.update_mode != mode) {
 		dsi.update_mode = mode;
 
@@ -3743,9 +3740,8 @@ static int dsi_core_init(void)
 static int dsi_display_enable(struct omap_dss_device *dssdev)
 {
 	int r = 0;
-	static int reset_dsi;
 
-	DSSINFO("dsi_display_enable\n");
+	DSSDBG("dsi_display_enable\n");
 
 	mutex_lock(&dsi.lock);
 	dsi_bus_lock();
@@ -3770,17 +3766,10 @@ static int dsi_display_enable(struct omap_dss_device *dssdev)
 	if (r)
 		goto err2;
 #else
-	if (reset_dsi) {
-		r = _dsi_reset();
-		if (r)
-			goto err2;
-	} else {
-		DSSINFO("Skip dsi SW reset\n");
-		dsi_vc_enable(DSI_CMD_VC, 0);
-		dsi_vc_enable(DSI_VIDEO_VC, 0);
-		reset_dsi = 1;
-	}
+	dsi_vc_enable(DSI_CMD_VC, 0);
+	dsi_vc_enable(DSI_VIDEO_VC, 0);
 #endif
+
 
 	dsi_core_init();
 
@@ -3829,7 +3818,7 @@ err0:
 
 static void dsi_display_disable(struct omap_dss_device *dssdev)
 {
-	DSSINFO("dsi_display_disable\n");
+	DSSDBG("dsi_display_disable\n");
 
 	dsi.error_recovery.enabled = false;
 	cancel_work_sync(&dsi.error_recovery.work);
@@ -3864,7 +3853,7 @@ end:
 
 static int dsi_do_display_suspend(struct omap_dss_device *dssdev)
 {
-	DSSINFO("dsi_do_display_suspend\n");
+	DSSDBG("dsi_do_display_suspend\n");
 
 	complete_all(&dsi.update_completion);
 
@@ -3910,7 +3899,7 @@ static int dsi_do_display_resume(struct omap_dss_device *dssdev)
 {
 	int r;
 
-	DSSINFO("dsi_do_display_resume\n");
+	DSSDBG("dsi_do_display_resume\n");
 
 	if (dssdev->state != OMAP_DSS_DISPLAY_SUSPENDED) {
 		DSSERR("dssdev not suspended\n");

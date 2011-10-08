@@ -1465,12 +1465,8 @@ static int omapfb_alloc_fbmem_display(struct fb_info *fbi, unsigned long size,
 			DBG("adjusting fb mem size for VRFB, %u -> %lu\n",
 					w * h * bytespp, size);
 		} else {
-#ifdef CONFIG_PVR_OMAP_DSS2
 		/* pvr drivers require double buffered fb */
 		size = w * h * bytespp * 2 + 8192;
-#else
-		size = w * h * bytespp;
-#endif
 		}
 	}
 
@@ -1740,10 +1736,8 @@ void suspend(struct early_suspend *h)
 	struct fb_info *fbi = info->fbi;
 	struct omap_dss_device *display = fb2display(fbi);
 
-	printk("-------------enter: omapfb_suspend()\n");
 	if (display->suspend)
 		display->suspend(display);
-	printk("-------------leave: omapfb_suspend()\n");
 }
 
 void resume(struct early_suspend *h)
@@ -1753,10 +1747,8 @@ void resume(struct early_suspend *h)
 	struct fb_info *fbi = info->fbi;
 	struct omap_dss_device *display = fb2display(fbi);
 
-	printk("-------------enter: omapfb_resume()\n");
 	if (display->resume)
 		display->resume(display);
-	printk("-------------leave: omapfb_resume()\n");
 }
 
 struct suspend_info suspend_info = {

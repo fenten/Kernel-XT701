@@ -22,8 +22,6 @@
 #error CONFIG_USER_PANEL_DRIVER must be defined for Mapphone to compile
 #endif
 
-/*#define DEBUG*/
-
 #ifdef DEBUG
 #define DBG(format, ...) (printk(KERN_DEBUG "mapphone-panel: " format, \
 				## __VA_ARGS__))
@@ -101,9 +99,9 @@ enum omap_dss_device_disp_pxl_fmt {
 static struct omap_video_timings mapphone_panel_timings = {
 	.x_res          = 480,
 	.y_res          = 854,
-	/*.pixel_clock  = 27600,*/
-	.dsi1_pll_fclk	= 136000,
-	.dsi2_pll_fclk  = 136000,
+	/*.pixel_clock  = 25000,*/
+	.dsi1_pll_fclk	= 100000,
+	.dsi2_pll_fclk  = 100000,
 	.hfp            = 0,
 	.hsw            = 2,
 	.hbp            = 2,
@@ -285,6 +283,9 @@ static int mapphone_panel_display_on(struct omap_dss_device *dssdev)
 static int mapphone_panel_dt_panel_probe(struct omap_dss_device *dssdev,
 						int *pixel_size)
 {
+	struct device_node *panel_node;
+	const void *panel_prop;
+	int panel_pixel_fmt;
 	struct mapphone_data *map_data = (struct mapphone_data *) dssdev->data;
 
 	if (mapphone_panel_device_read_dt == true)
@@ -292,52 +293,83 @@ static int mapphone_panel_dt_panel_probe(struct omap_dss_device *dssdev,
 
 	DBG("dt_panel_probe\n");
 
-	/* Retrieve the panel DSI timing */
-	mapphone_panel_timings.x_res = 480;
+	panel_node = of_find_node_by_path(DT_PATH_DISPLAY1);
+	if (panel_node != NULL) {
+		/* Retrieve the panel DSI timing */
+		panel_prop = of_get_property(panel_node, "width", NULL);
+		if (panel_prop != NULL)
+			mapphone_panel_timings.x_res = *(u16 *)panel_prop;
 
-	mapphone_panel_timings.y_res = 854;
+		panel_prop = of_get_property(panel_node, "height", NULL);
+		if (panel_prop != NULL)
+			mapphone_panel_timings.y_res = *(u16 *)panel_prop;
 
-	mapphone_panel_timings.hfp = 0;
+		panel_prop = of_get_property(panel_node,
+						"dispc_timing_hfp", NULL);
+		if (panel_prop != NULL)
+			mapphone_panel_timings.hfp = *(u16 *)panel_prop;
 
-	mapphone_panel_timings.hsw = 2;
+		panel_prop = of_get_property(panel_node,
+						"dispc_timing_hsw", NULL);
+		if (panel_prop != NULL)
+			mapphone_panel_timings.hsw = *(u16 *)panel_prop;
 
-	mapphone_panel_timings.hbp = 2;
+		panel_prop = of_get_property(panel_node,
+						"dispc_timing_hbp", NULL);
+		if (panel_prop != NULL)
+			mapphone_panel_timings.hbp = *(u16 *)panel_prop;
 
-	mapphone_panel_timings.vfp = 0;
+		panel_prop = of_get_property(panel_node,
+						"dispc_timing_vfp", NULL);
+		if (panel_prop != NULL)
+			mapphone_panel_timings.vfp = *(u16 *)panel_prop;
 
-	mapphone_panel_timings.vsw = 1;
+		panel_prop = of_get_property(panel_node,
+						"dispc_timing_vsw", NULL);
+		if (panel_prop != NULL)
+			mapphone_panel_timings.vsw = *(u16 *)panel_prop;
 
-	mapphone_panel_timings.vbp = 1;
+		panel_prop = of_get_property(panel_node,
+						"dispc_timing_vbp", NULL);
+		if (panel_prop != NULL)
+			mapphone_panel_timings.vbp = *(u16 *)panel_prop;
 
-	map_data->te_scan_line = 0x300;
+		panel_prop = of_get_property(panel_node,
+						"te_scan_line", NULL);
+		if (panel_prop != NULL)
+			map_data->te_scan_line = *(u32 *)panel_prop;
 
-	mapphone_panel_timings.w = 46;
+		panel_prop = of_get_property(panel_node,
+						"phy_width_mm", NULL);
+		if (panel_prop != NULL)
+			mapphone_panel_timings.w = *(u16 *)panel_prop;
 
-	mapphone_panel_timings.h = 82;
+		panel_prop = of_get_property(panel_node,
+						"phy_height_mm", NULL);
+		if (panel_prop != NULL)
+			mapphone_panel_timings.h = *(u16 *)panel_prop;
 
-	mapphone_panel_timings.dsi1_pll_fclk = 136000;
+		panel_prop = of_get_property(panel_node, "pixel_fmt", NULL);
+		if (panel_prop != NULL) {
+			panel_pixel_fmt = *(u32 *)panel_prop;
+			if (panel_pixel_fmt == OMAP_DSS_DISP_PXL_FMT_RGB888)
+				*pixel_size = 24;
+			else if (panel_pixel_fmt ==
+					OMAP_DSS_DISP_PXL_FMT_RGB565)
+				*pixel_size = 16;
+			else {
+				printk(KERN_ERR " Invalid panel_pxl_fmt=%d",
+						panel_pixel_fmt);
+				return -ENODEV;
+			}
+		}
 
-	mapphone_panel_timings.dsi2_pll_fclk = 136000;
-
-	*pixel_size = 24;
-
-	DBG("DT:width=%d height=%d dsi1_pll_fclk=%d dsi2_pll_fclk=%d\n",
-		mapphone_panel_timings.x_res,
-		mapphone_panel_timings.y_res,
-		mapphone_panel_timings.dsi1_pll_fclk,
-		mapphone_panel_timings.dsi2_pll_fclk);
-
-	DBG(" DT: hfp= %d hsw= %d hbp= %d vfp= %d vsw= %d vbp= %d\n",
-		mapphone_panel_timings.hfp,
-		mapphone_panel_timings.hsw,
-		mapphone_panel_timings.hbp,
-		mapphone_panel_timings.vfp,
-		mapphone_panel_timings.vsw,
-		mapphone_panel_timings.vbp);
+		of_node_put(panel_node);
 
 		mapphone_panel_device_read_dt = true;
+	}
 
-	return 0;
+	return panel_node ? 0 : -ENODEV;
 
 }
 
