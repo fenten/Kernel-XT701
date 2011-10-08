@@ -41,6 +41,11 @@
 #define OMAP1510_LB_MMU_RAM_H	0xfffec234
 #define OMAP1510_LB_MMU_RAM_L	0xfffec238
 
+/* This define controls the clock gating scheme. If defined, then
+ * clocks are controlled in EHCI driver
+ * If not defined, then the sholes code holds
+ */
+#define MOTO_FEAT_TITANIUM_USBCLOCKS
 
 #ifndef CONFIG_ARCH_OMAP
 #error "This file is OMAP bus glue.  CONFIG_OMAP must be defined."
@@ -867,11 +872,15 @@ static int usb_hcd_omap_probe (const struct hc_driver *driver,
 #endif
 	}
 #ifdef CONFIG_MACH_MAPPHONE
+
+#if 0
 	retval = omap_start_ehc(omap, hcd);
 	if (retval) {
 		dev_dbg(&pdev->dev, "failed to start ohci\n");
 		goto err5;
 	}
+#endif
+
 #endif
 	retval = usb_add_hcd(hcd, irq, IRQF_DISABLED);
 	if (retval)
@@ -972,6 +981,15 @@ ohci_omap_start (struct usb_hcd *hcd)
 }
 
 #ifdef CONFIG_PM
+#ifdef MOTO_FEAT_TITANIUM_USBCLOCKS
+#define EHCI_CLOCKS 0
+#define OHCI_CLOCKS 1
+#define OMAP_CLOCK_OFF 0
+#define OMAP_CLOCK_ON 1
+
+extern int usb_clocks_vote(int usb_dev_clk, int omap_clk_vote, int needlock);
+#endif
+
 static int omap_ohci_bus_suspend(struct usb_hcd *hcd)
 {
 	int res = 0;
@@ -980,14 +998,14 @@ static int omap_ohci_bus_suspend(struct usb_hcd *hcd)
 	int chix;
 	struct usb_device *childdev;
 	int count = 0;
+	int i = 0;
+	struct ehci_hcd_omap *omap = dev_get_drvdata(hcd->self.controller);
 #endif
 	struct ohci_hcd *ohci = hcd_to_ohci(hcd);
 #if defined(CONFIG_ARCH_OMAP34XX)
 	struct omap_usb_config *config = hcd->self.controller->platform_data;
 #endif
 #ifdef CONFIG_MACH_MAPPHONE
-	printk(KERN_INFO "%s Enter. \n", __func__);
-
 	for (chix = 0; chix < hcd->self.root_hub->maxchild; chix++) {
 		childdev = hcd->self.root_hub->children[chix];
 		if (childdev)
@@ -1000,11 +1018,16 @@ static int omap_ohci_bus_suspend(struct usb_hcd *hcd)
 	}
 #endif
 
+	printk( "    +hccontrol=0x%x\n", readl(&ohci->regs->control));
+
 	ret = ohci_bus_suspend(hcd);
 	if (ret)
 		return ret;
 	mdelay(8); /* MSTANDBY assertion is delayed by ~8ms */
 
+	printk( "    -hccontrol=0x%x\n", readl(&ohci->regs->control));
+
+#ifndef MOTO_FEAT_TITANIUM_USBCLOCKS
 #if defined(CONFIG_ARCH_OMAP34XX)
 	if (config->usbhost_standby_status)
 		res = config->usbhost_standby_status();
@@ -1029,28 +1052,60 @@ static int omap_ohci_bus_suspend(struct usb_hcd *hcd)
 	 * the suspend/resume time.
 	 */
 	clk_disable(clk_get(NULL, "usbtll_ick"));
+#else
+#ifdef CONFIG_MACH_MAPPHONE
+	if (ohci_irq_num)
+		disable_irq(ohci_irq_num);
+#endif
+	usb_clocks_vote(OHCI_CLOCKS, OMAP_CLOCK_OFF, 1);
+#endif
 
 	clear_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
 	ohci_to_hcd(ohci)->state = HC_STATE_SUSPENDED;
 
+#ifdef CONFIG_MACH_MAPPHONE
+	/* Call the Platform Suspend for Each port */
+	if (omap) {
+		for (i = 0; i < OMAP_TLL_CHANNEL_COUNT; i++) {
+			if (config->port_data[i].suspend)
+				config->port_data[i].suspend(omap->dev, i, 1);
+		}
+	}
+#endif
+
+	printk(KERN_ERR " %s OK. \n", __func__);
 	return ret;
 }
 
 static int omap_ohci_bus_resume(struct usb_hcd *hcd)
 {
 	int ret = 0;
+	struct ohci_hcd *ohci = hcd_to_ohci(hcd);
 
 #ifdef CONFIG_MACH_MAPPHONE
-	printk(KERN_INFO "%s Enter. \n", __func__);
+	int i = 0;
+	struct omap_usb_config *config = hcd->self.controller->platform_data;
+	struct ehci_hcd_omap *omap = dev_get_drvdata(hcd->self.controller);
+	/* Call the Platform Resume for Each port */
+	if (omap) {
+		for (i = 0; i < OMAP_TLL_CHANNEL_COUNT; i++) {
+			if (config->port_data[i].suspend)
+				config->port_data[i].suspend(omap->dev, i, 0);
+		}
+	}
 #endif
 	/* the omap usb host auto-idle is not fully functional,
 	 * manually enable/disable usbtll_ick during
 	 * the suspend/resume time.
 	 */
+#ifndef MOTO_FEAT_TITANIUM_USBCLOCKS
 	clk_enable(clk_get(NULL, "usbtll_ick"));
 	clk_enable(clk_get(NULL, "usbtll_fck"));
 	clk_enable(clk_get(NULL, "usbhost_120m_fck"));
 	clk_enable(clk_get(NULL, "usbhost_48m_fck"));
+#else
+	usb_clocks_vote(OHCI_CLOCKS, OMAP_CLOCK_ON, 1);
+#endif
 	set_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
 
 #ifdef CONFIG_MACH_MAPPHONE
@@ -1058,7 +1113,10 @@ static int omap_ohci_bus_resume(struct usb_hcd *hcd)
 		enable_irq(ohci_irq_num);
 #endif
 	ohci_finish_controller_resume(hcd);
+	printk( "    +hcc=0x%x\n", readl(&ohci->regs->control));
 	ret = ohci_bus_resume(hcd);
+	printk( "    -hcc=0x%x\n", readl(&ohci->regs->control));
+	printk(KERN_ERR " %s ret=%d.\n", __func__, ret);
 	return ret;
 }
 #endif /* CONFIG_PM */

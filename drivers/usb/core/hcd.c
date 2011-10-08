@@ -1903,13 +1903,20 @@ irqreturn_t usb_hcd_irq (int irq, void *__hcd)
 		     !test_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags))) {
 		rc = IRQ_NONE;
 #ifdef CONFIG_MACH_MAPPHONE
-		if (!is_cdma_phone()) {
-			clear_ehci_intr(hcd);
-			rc = IRQ_HANDLED;
-		} else {
-			clear_ohci_intr(hcd);
-			rc = IRQ_HANDLED;
-		}
+	switch (hcd->driver->flags & HCD_MASK) {
+	case HCD_USB11:
+		clear_ohci_intr(hcd);
+		rc = IRQ_HANDLED;
+		break;
+	case HCD_USB2:
+		clear_ehci_intr(hcd);
+		rc = IRQ_HANDLED;
+		break;
+	case HCD_USB3:
+		break;
+	default:
+		break;
+	}
 #endif
 	} else if (hcd->driver->irq(hcd) == IRQ_NONE) {
 		rc = IRQ_NONE;

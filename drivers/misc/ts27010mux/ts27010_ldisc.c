@@ -25,15 +25,27 @@ static void ts27010_ldisc_recv_worker(struct work_struct *work)
 	ts27010_mux_recv(ts->rbuf);
 }
 
-
+/*
+   During phone call stress test, we find that sometimes  the
+  frist byte of UIH frame may get corrupted and cause
+   the failure to end the cdma call. After discrussion with modem team,
+   we add two extra 0x00 bytes before the UIH to make sure
+   the UIH frame is not corrupted. The cdma modem will discard these
+   extra bytes.
+*/
+static char dummybytes[2];
 int ts27010_ldisc_send(struct tty_struct *tty, u8 *data, int len)
 {
 	struct ts27010_ldisc_data *ts = tty->disc_data;
 
 	mutex_lock(&ts->send_lock);
-	if (tty->driver->ops->write_room(tty) < len)
+	if (tty->driver->ops->write_room(tty) < (len + 4))
 		pr_err("\n******** write overflow ********\n\n");
+        if (data[2] == 0xef) /* UIH frame */
+                tty->driver->ops->write(tty, dummybytes, 2);
 	len = tty->driver->ops->write(tty, data, len);
+	if (data[2] == 0xef) /* UIH frame */
+		tty->driver->ops->write(tty, dummybytes, 2);
 	mutex_unlock(&ts->send_lock);
 	return len;
 }

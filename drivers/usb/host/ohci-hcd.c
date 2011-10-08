@@ -52,6 +52,18 @@
 
 #undef OHCI_VERBOSE_DEBUG	/* not always helpful */
 
+/* Define this macro to get suspend-resume and other traces
+ * that are useful for debugging IPC issues
+ */
+#undef OHCI_OMAP_VERBOSE_DEBUG
+
+#ifdef OHCI_OMAP_VERBOSE_DEBUG
+#define ohci_omap_dbg(fmt, args...) \
+       printk(KERN_INFO "OHCI: " fmt, ## args)
+#else
+#define ohci_omap_dbg(fmt, args...) do { } while (0)
+#endif
+
 /* For initializing controller (mask in an HCFS mode too) */
 #define	OHCI_CONTROL_INIT	OHCI_CTRL_CBSR
 #define	OHCI_INTR_INIT \
@@ -69,6 +81,21 @@
 #endif
 
 /*-------------------------------------------------------------------------*/
+extern int g_omap_usb_clocks_suspended;
+extern int omap_usbhost_wa;
+extern int ehci_q_halted;
+static int ohci_q_halted = 0;
+static unsigned int ohci_omap_hccontrol_reg = 0;
+static unsigned int ohci_omap_hccontrol_backup;
+static spinlock_t ohci_q_lock;
+static void ohci_q_halt(void);
+static void ohci_q_resume(void);
+static int ehci_ohci_sched(void *);
+void ehci_q_halt(void);
+void ehci_q_resume(void);
+
+/*-------------------------------------------------------------------------*/
+
 
 static const char	hcd_name [] = "ohci_hcd";
 
@@ -564,6 +591,13 @@ static int ohci_init (struct ohci_hcd *ohci)
 		create_debug_files (ohci);
 	}
 
+	if (omap_usbhost_wa) {
+		spin_lock_init(&ohci_q_lock);
+		ohci_omap_hccontrol_reg = (unsigned int)&ohci->regs->control;
+		ohci_q_halt();
+		kernel_thread(ehci_ohci_sched, (void*)0, 0);
+	}
+
 	return ret;
 }
 
@@ -1000,6 +1034,139 @@ static int ohci_restart (struct ohci_hcd *ohci)
 }
 
 #endif
+
+/*-------------------------------------------------------------------------*/
+static void ohci_q_halt(void)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&ohci_q_lock, flags);
+	ohci_q_halted = 1;
+	ohci_omap_hccontrol_backup = readl(ohci_omap_hccontrol_reg);
+	writel(ohci_omap_hccontrol_backup & (~0x34), ohci_omap_hccontrol_reg);
+	spin_unlock_irqrestore (&ohci_q_lock, flags);
+
+}
+
+static void ohci_q_resume(void)
+{
+	unsigned long flags;
+	unsigned int v;
+
+	spin_lock_irqsave(&ohci_q_lock, flags);
+	ohci_q_halted = 0;
+	v  = readl(ohci_omap_hccontrol_reg);
+	v = (v & (~0x34)) | (ohci_omap_hccontrol_backup & 0x34);
+	writel(v, ohci_omap_hccontrol_reg);
+	spin_unlock_irqrestore (&ohci_q_lock, flags);
+
+}
+
+static void ehci_ohci_pend_on_clocks_verbose(void)
+{
+
+/* The first_time_in/first_time_out is only for logging purposes.
+* No functional meaning.
+*/
+
+	int first_time_in = 1;
+	int first_time_out = 0;
+	while (g_omap_usb_clocks_suspended) {
+		if (first_time_in) {
+			ohci_omap_dbg("%s, pend\n", __func__);
+			first_time_in = 0;
+			first_time_out = 1;
+		}
+	set_current_state(TASK_INTERRUPTIBLE);
+	schedule_timeout(HZ/100);
+	}
+
+	if (first_time_out)
+		ohci_omap_dbg("%s, pend exited\n", __func__);
+
+}
+
+#define EOWA_BLANKING 0
+#define EOWA_EHCI_ACTIVE 1
+#define EOWA_OHCI_ACTIVE 2
+
+#define OMAP_CLOCKING_REQ_EHCI_ACTIVE 1
+#define OMAP_CLOCKING_REQ_OHCI_ACTIVE 2
+extern int g_omap_usb_clk_req;
+
+static void ehci_ohci_pend_on_clocks(int eowa_state)
+{
+	int should_wait;
+
+	/* To enter the loop */
+	should_wait = 1;
+
+	while (should_wait) {
+		should_wait = 0;
+
+		/* Calculate should_wait value */
+		if (g_omap_usb_clocks_suspended)
+			should_wait = 1;
+
+		if (g_omap_usb_clk_req == OMAP_CLOCKING_REQ_EHCI_ACTIVE) {
+			/* OHCI is suspended */
+			if (eowa_state == EOWA_EHCI_ACTIVE)
+				should_wait = 1;
+		}
+
+		if (g_omap_usb_clk_req == OMAP_CLOCKING_REQ_OHCI_ACTIVE) {
+			/*  EHCI is suspended */
+			if (eowa_state == EOWA_OHCI_ACTIVE)
+			should_wait = 1;
+		}
+
+		/* Take action (or lack thereof in this case */
+		if (should_wait) {
+			set_current_state(TASK_INTERRUPTIBLE);
+			schedule_timeout(HZ/100);
+		}
+	}
+
+}
+
+static int ehci_ohci_sched(void *a)
+{
+	int hc_switched;
+
+	daemonize("ehci_ohci_sched");
+	ohci_omap_dbg("%s, START\n", __func__);
+	set_user_nice(current, -20);
+	schedule_timeout_interruptible(HZ/20);
+	while(1) {
+		hc_switched = 0;
+		if (ohci_q_halted) {
+			/* OHCI's turn now */
+			ehci_ohci_pend_on_clocks(EOWA_EHCI_ACTIVE);
+
+			ehci_q_halt();
+			/* mdelay(10); */
+			schedule_timeout_interruptible(HZ/100);
+			ehci_ohci_pend_on_clocks(EOWA_BLANKING);
+
+			ohci_q_resume();
+			schedule_timeout_interruptible(HZ/20);
+		} else {
+
+			 /* EHCI's turn now */
+			ehci_ohci_pend_on_clocks(EOWA_OHCI_ACTIVE);
+
+			 ohci_q_halt();
+			/* mdelay(20); */
+			schedule_timeout_interruptible(HZ/50);
+			ehci_ohci_pend_on_clocks(EOWA_BLANKING);
+			ehci_q_resume();
+			schedule_timeout_interruptible(HZ/20);
+		}
+	}
+
+	return 0;
+}
+
 
 /*-------------------------------------------------------------------------*/
 

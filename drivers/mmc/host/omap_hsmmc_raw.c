@@ -187,6 +187,10 @@ struct raw_mmc_card {
 	unsigned int		rca;		/* relative card address */
 	unsigned int		type;		/* card type */
 	unsigned int		state;		/* (our) card state */
+#define MMC_STATE_PRESENT	(1<<0)		/* present in sysfs */
+#define MMC_STATE_READONLY	(1<<1)		/* card is read-only */
+#define MMC_STATE_HIGHSPEED	(1<<2)		/* card is in high speed mode */
+#define MMC_STATE_BLOCKADDR	(1<<3)		/* card uses block-addressing */
 	u32			raw_cid[4];	/* raw card CID */
 	u32			raw_csd[4];	/* raw card CSD */
 	u32			raw_scr[2];	/* raw card SCR */
@@ -1227,6 +1231,7 @@ static void raw_sd_decode_csd(struct raw_omap_hsmmc_host *host)
 		host->card.csd.read_blkbits = UNSTUFF_BITS(resp, 80, 4);
 		break;
 	case 1:
+		host->card.state |= MMC_STATE_BLOCKADDR;
 		host->card.csd.cmdclass = UNSTUFF_BITS(resp, 84, 12);
 		m = UNSTUFF_BITS(resp, 48, 22);
 		host->card.csd.capacity = (1 + m) << 10;
@@ -1496,6 +1501,29 @@ static int raw_sd_erase(struct raw_omap_hsmmc_host *host, sector_t start,
 	return 0;
 }
 
+static int raw_set_blksize(struct raw_omap_hsmmc_host *host)
+{
+	struct mmc_command cmd;
+	int err;
+
+	/* Block-addressed cards ignore MMC_SET_BLOCKLEN. */
+	if (host->card.state & MMC_STATE_BLOCKADDR)
+		return 0;
+
+	memset(&cmd, 0, sizeof(struct mmc_command));
+	cmd.opcode = MMC_SET_BLOCKLEN;
+	cmd.arg = 512;
+	cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_AC;
+	err = raw_omap_hsmmc_start_command(host, &cmd, NULL);
+	if (err) {
+		printk(KERN_ERR "KPANIC-MMC: sending CMD%d failed\n",
+			ERASE_WR_BLK_START);
+		return err;
+	}
+
+	return 0;
+}
+
 static int raw_mmc_send_status(struct raw_omap_hsmmc_host *host, u32 *status)
 {
 	int err;
@@ -1582,6 +1610,8 @@ static int raw_mmc_write_mmc(char *buf, sector_t start_sect, sector_t nr_sects,
 
 	cmd.opcode = MMC_WRITE_MULTIPLE_BLOCK;
 	cmd.arg = start_sect + offset / 512;
+	if (kpanic_host && !(kpanic_host->card.state & MMC_STATE_BLOCKADDR))
+		cmd.arg <<= 9;
 	cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_ADTC;
 
 	stop.opcode = MMC_STOP_TRANSMISSION;
@@ -1621,6 +1651,7 @@ static int raw_mmc_probe_emmc(struct raw_hd_struct *rhd)
 	struct raw_omap_hsmmc_host *host;
 	int ret = 0;
 	unsigned int status;
+	unsigned int rocr;
 
 	kpanic_host = NULL;	/* detect eMMC, then detect SD case */
 	DPRINTK(KERN_ERR "KPANIC-MMC: probe eMMC chip\n");
@@ -1658,11 +1689,17 @@ static int raw_mmc_probe_emmc(struct raw_hd_struct *rhd)
 	}
 
 	mdelay(20);
-	ret = raw_mmc_send_op_cond(host, host->ocr | (1 << 30), NULL);
+	ret = raw_mmc_send_op_cond(host,
+		host->ocr | MMC_OCR_REG_ACCESS_MODE_SECTOR, &rocr);
 	if (ret) {
 		printk(KERN_ERR "KPANIC-MMC: host(%d) setting OCR failed "
 			"(%d)\n", host->id, ret);
 		goto err;
+	}
+
+	if ((rocr & MMC_OCR_REG_ACCESS_MODE_MASK)
+			== MMC_OCR_REG_ACCESS_MODE_SECTOR) {
+		host->card.state |= MMC_STATE_BLOCKADDR;
 	}
 
 	ret = raw_mmc_all_send_cid(host, host->card.raw_cid);
@@ -1749,6 +1786,13 @@ static int raw_mmc_probe_emmc(struct raw_hd_struct *rhd)
 	if ((status & CURRENT_STATE_MASK) != CURRENT_STATE_TRAN)
 		printk(KERN_WARNING "KPANIC-MMC: host(%d) status=%#x\n",
 			host->id, status);
+
+	ret = raw_set_blksize(host);
+	if (ret) {
+		printk(KERN_WARNING "KPANIC-MMC: host(%d) set blksize failed"
+			" (%d)\n", host->id, ret);
+		goto err;
+	}
 
 	kpanic_host = &emmc_host;
 err:
@@ -1881,6 +1925,8 @@ int raw_mmc_probe_usd(struct raw_hd_struct *rhd)
 
 		host->ios.clock = 48000000;
 		raw_omap_hsmmc_set_ios(host);
+
+		host->card.state |= MMC_STATE_HIGHSPEED;
 	}
 
 	ret = get_mmc_status(host, &status);
@@ -1914,6 +1960,13 @@ int raw_mmc_probe_usd(struct raw_hd_struct *rhd)
 	if ((status & CURRENT_STATE_MASK) != CURRENT_STATE_TRAN)
 		printk(KERN_WARNING "KPANIC-MMC: host(%d) status=%#x\n",
 			host->id, status);
+
+	ret = raw_set_blksize(host);
+	if (ret) {
+		printk(KERN_WARNING "KPANIC-MMC: host(%d) set blksize failed"
+			" (%d)\n", host->id, ret);
+		goto err;
+	}
 
 	kpanic_host = &usd_host;
 err:

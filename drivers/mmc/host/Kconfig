@@ -379,3 +379,11 @@ config MMC_VIA_SDMMC
 	  If you have a controller with this interface, say Y or M here.
 
 	  If unsure, say N.
+
+config MMC_TEST_INSERT_REMOVE
+	bool "MMC insert/removal auto test support"
+	default n
+	help
+           This flag controls Motorola specific changes that allows to
+           simulate MMC card insert/removal in software way instead of
+           doing it manually.

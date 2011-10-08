@@ -558,7 +558,20 @@ static inline unsigned int _ohci_readl (const struct ohci_hcd *ohci,
 		readl_be (regs) :
 		readl (regs);
 #else
-	return readl (regs);
+	if (omap_usbhost_wa && (unsigned int)regs == ohci_omap_hccontrol_reg) {
+		unsigned long flags;
+		unsigned int v;
+
+		spin_lock_irqsave(&ohci_q_lock, flags);
+		v = readl(regs);
+		if(ohci_q_halted) {
+			v = (v & (~0x34)) | (ohci_omap_hccontrol_backup & 0x34);
+		}
+		spin_unlock_irqrestore (&ohci_q_lock, flags);
+		return v;
+	} else
+		return readl(regs);
+
 #endif
 }
 
@@ -570,7 +583,18 @@ static inline void _ohci_writel (const struct ohci_hcd *ohci,
 		writel_be (val, regs) :
 		writel (val, regs);
 #else
-		writel (val, regs);
+	if (omap_usbhost_wa && (unsigned int)regs == ohci_omap_hccontrol_reg) {
+		unsigned long flags;
+		unsigned int v = val;
+		spin_lock_irqsave(&ohci_q_lock, flags);
+		if(ohci_q_halted) {
+			ohci_omap_hccontrol_backup = v;
+			v = v & (~0x34);
+		}
+		writel(v, regs);
+		spin_unlock_irqrestore (&ohci_q_lock, flags);
+	} else
+		writel(val, regs);
 #endif
 }
 

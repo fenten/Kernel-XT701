@@ -61,6 +61,7 @@
 #define SEC_IOCTL_EFUSE_LOWER _IOWR(0x99, 104, int*)
 #define SEC_IOCTL_MODELID_PROV _IOWR(0x99, 105, int)
 #define SEC_IOCTL_BS_DIS   _IOWR(0x99, 106, int)
+#define SEC_IOCTL_PROD_PROV _IOWR(0x99, 107, int)
 
 #define API_HAL_NB_MAX_SVC         39
 #define API_HAL_MOT_EFUSE            (API_HAL_NB_MAX_SVC + 10)

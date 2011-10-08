@@ -113,15 +113,23 @@ static void omap_wdt_ping(struct omap_wdt_dev *wdev)
 static int omap_wdt_panic(struct notifier_block *this, unsigned long event,
 				void *ptr)
 {
-	struct omap_wdt_dev *wdev = platform_get_drvdata(omap_wdt_dev);
+	struct omap_wdt_dev *wdev = NULL;
 	unsigned long flags;
 
-	spin_lock_irqsave(&wdt_lock, flags);
+	if (omap_wdt_dev == NULL) {
+		printk(KERN_INFO "Panic occurs before wdt enable\n");
+		return NOTIFY_DONE;
+	}
 
-	if (wdev && wdev->omap_wdt_users > 0)
-		omap_wdt_ping(wdev);
+	wdev = platform_get_drvdata(omap_wdt_dev);
+	if (wdev) {
+		spin_lock_irqsave(&wdt_lock, flags);
 
-	spin_unlock_irqrestore(&wdt_lock, flags);
+		if (wdev && wdev->omap_wdt_users > 0)
+			omap_wdt_ping(wdev);
+
+		spin_unlock_irqrestore(&wdt_lock, flags);
+	}
 
 	return NOTIFY_DONE;
 }
@@ -424,6 +432,7 @@ static int __devinit omap_wdt_probe(struct platform_device *pdev)
 	wdev->jiffies_exp = (HZ * TIMER_AUTOPET_FREQ);
 	mod_timer(&wdev->autopet_timer, jiffies + wdev->jiffies_exp);
 	omap_wdt_enable(wdev);
+	omap_wdt_ping(wdev);
 	pr_info("Watchdog auto-pet enabled at %d sec intervals\n",
 		TIMER_AUTOPET_FREQ);
 #ifdef CONFIG_OMAP_WATCHDOG_FIQ
@@ -597,8 +606,12 @@ static int wdt_cntrl_set(void *data, u64 val)
 /* export an unsafe disable API for memory dump */
 void memdump_wdt_disable(void)
 {
-	struct omap_wdt_dev *wdev = platform_get_drvdata(omap_wdt_dev);
-	omap_wdt_disable(wdev);
+	struct omap_wdt_dev *wdev;
+
+	if (omap_wdt_dev) {
+		wdev = platform_get_drvdata(omap_wdt_dev);
+		omap_wdt_disable(wdev);
+	}
 }
 
 DEFINE_SIMPLE_ATTRIBUTE(wdt_cntrl_fops, NULL, wdt_cntrl_set, "%llu\n");
@@ -627,9 +640,9 @@ static int __init omap_wdt_init(void)
 {
 	spin_lock_init(&wdt_lock);
 #ifdef CONFIG_OMAP_WATCHDOG_CONTROL
-    debugfs_create_file("diswdt", 0222, NULL,
+	debugfs_create_file("diswdt", 0200, NULL,
 			NULL, &wdt_cntrl_fops);
-	debugfs_create_file("fire_wdt_reset", 0222,
+	debugfs_create_file("fire_wdt_reset", 0200,
 			NULL, NULL, &fire_wdt_reset_fops);
 #endif
 	return platform_driver_register(&omap_wdt_driver);

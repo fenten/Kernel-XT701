@@ -118,6 +118,13 @@ static int mmc_decode_csd(struct mmc_card *card)
 		csd->r2w_factor = UNSTUFF_BITS(resp, 26, 3);
 		csd->write_blkbits = UNSTUFF_BITS(resp, 22, 4);
 		csd->write_partial = UNSTUFF_BITS(resp, 21, 1);
+
+		if (UNSTUFF_BITS(resp, 46, 1))
+			csd->erase_size = 512;
+		else {
+			csd->erase_size = UNSTUFF_BITS(resp, 39, 7) + 1;
+			csd->erase_size <<= csd->write_blkbits;
+		}
 		break;
 	case 1:
 		/*
@@ -146,6 +153,7 @@ static int mmc_decode_csd(struct mmc_card *card)
 		csd->r2w_factor = 4; /* Unused */
 		csd->write_blkbits = 9;
 		csd->write_partial = 0;
+		csd->erase_size = 512;
 		break;
 	default:
 		printk(KERN_ERR "%s: unrecognised CSD structure version %d\n",
@@ -454,7 +462,7 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 			if (!err) {
 				if (retries > 1) {
 					printk(KERN_WARNING
-					       "%s: recovered\n", 
+					       "%s: recovered\n",
 					       mmc_hostname(host));
 				}
 				break;
@@ -564,12 +572,12 @@ static void mmc_sd_detect(struct mmc_host *host)
 {
 	int err = 0;
 #ifdef CONFIG_MMC_PARANOID_SD_INIT
-        int retries = 5;
+	int retries = 5;
 #endif
 
 	BUG_ON(!host);
 	BUG_ON(!host->card);
-       
+
 	mmc_claim_host(host);
 
 	/*

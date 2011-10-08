@@ -644,7 +644,8 @@ b_host:
 				musb_writeb(mbase, MUSB_DEVCTL, 0);
 			}
 		} else if (is_peripheral_capable()) {
-			DBG(1, "BUS RESET as %s\n", otg_state_string(musb));
+			printk(KERN_INFO "MUSB BUS RESET as %s\n",
+				otg_state_string(musb));
 			switch (musb->xceiv->state) {
 #ifdef CONFIG_USB_OTG
 			case OTG_STATE_A_SUSPEND:
@@ -1067,17 +1068,33 @@ static struct fifo_cfg __initdata mode_3_cfg[] = {
 static struct fifo_cfg __initdata mode_4_cfg[] = {
 { .hw_ep_num =  1, .style = FIFO_TX,   .maxpacket = 512, },
 { .hw_ep_num =  1, .style = FIFO_RX,   .maxpacket = 512, },
+#ifdef CONFIG_USB_MOT_ANDROID
+{ .hw_ep_num =  2, .style = FIFO_TX,   .maxpacket = 64, },
+#else
 { .hw_ep_num =  2, .style = FIFO_TX,   .maxpacket = 512, },
+#endif
 { .hw_ep_num =  2, .style = FIFO_RX,   .maxpacket = 512, },
 { .hw_ep_num =  3, .style = FIFO_TX,   .maxpacket = 512, },
+#ifdef CONFIG_USB_MOT_ANDROID
+{ .hw_ep_num =  3, .style = FIFO_RX,   .maxpacket = 64, },
+#else
 { .hw_ep_num =  3, .style = FIFO_RX,   .maxpacket = 512, },
+#endif
 { .hw_ep_num =  4, .style = FIFO_TX,   .maxpacket = 512, },
 { .hw_ep_num =  4, .style = FIFO_RX,   .maxpacket = 512, },
+#ifdef CONFIG_USB_MOT_ANDROID
+{ .hw_ep_num =  5, .style = FIFO_TX,   .maxpacket = 64, },
+#else
 { .hw_ep_num =  5, .style = FIFO_TX,   .maxpacket = 512, },
+#endif
 { .hw_ep_num =  5, .style = FIFO_RX,   .maxpacket = 512, },
 { .hw_ep_num =  6, .style = FIFO_TX,   .maxpacket = 512, },
 { .hw_ep_num =  6, .style = FIFO_RX,   .maxpacket = 512, },
+#ifdef CONFIG_USB_ANDROID_RNDIS
+{ .hw_ep_num =  7, .style = FIFO_TX,   .maxpacket = 8, },
+#else
 { .hw_ep_num =  7, .style = FIFO_TX,   .maxpacket = 512, },
+#endif
 { .hw_ep_num =  7, .style = FIFO_RX,   .maxpacket = 512, },
 { .hw_ep_num =  8, .style = FIFO_TX,   .maxpacket = 512, },
 { .hw_ep_num =  8, .style = FIFO_RX,   .maxpacket = 512, },

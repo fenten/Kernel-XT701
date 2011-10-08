@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005-2009 Motorola, Inc.
+ * Copyright (C) 2005-2010 Motorola, Inc.
  * This program is licensed under a BSD license with the following terms:
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
@@ -23,6 +23,7 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
  * OF SUCH DAMAGE.
  *
+ * Motorola 2010-Jul-22 - Add start stop clock procedure IOCTL
  * Motorola 2009-Nov-06 - Add support for local timers
  * Motorola 2009-Oct-10 - Add support for low current drain wakeups
  * Motorola 2009-Mar-16 - Support the GIT build environment
@@ -66,7 +67,8 @@ enum
 {
     SIM_MODULE_RX_MODE,
     SIM_MODULE_TX_MODE,
-    SIM_MODULE_RESET_DETECT_MODE
+    SIM_MODULE_RESET_DETECT_MODE,
+    SIM_MODULE_MODE_NONE
 };
 typedef UINT8 SIM_MODULE_INTERRUPT_MODE;
 
@@ -116,6 +118,8 @@ typedef UINT8 SIM_MUTEX_ID;
 #define SIM_MODULE_EVENT_NULL_BYTE_OVERFLOW     0x00001000
 #define SIM_MODULE_EVENT_NO_DMA_CN_AVB          0x00002000
 #define SIM_MODULE_EVENT_TIMER_EXP              0x00004000
+#define SIM_MODULE_EVENT_SPURIOUS_DATA          0x00008000
+
 
 #define SIM_NUM 230
 /*******************************************************************************************
@@ -155,7 +159,9 @@ typedef UINT8 SIM_MUTEX_ID;
 #define SIM_IOC_CMD_CORE_CALL_STATUS                   (0x1A)
 #define SIM_IOC_CMD_CORE_START_TIMER                   (0x1B)
 #define SIM_IOC_CMD_CORE_STOP_TIMER                    (0x1C)
-#define SIM_IOC_CMD_CORE_LAST_CMD                      SIM_IOC_CMD_CORE_STOP_TIMER
+#define SIM_IOC_CMD_CORE_START_STOP_CLK_PROCEDURE      (0x1D)
+#define SIM_IOC_CMD_CORE_LAST_CMD                         \
+				SIM_IOC_CMD_CORE_START_STOP_CLK_PROCEDURE
 
 /*******************************************************************************************
  * Ioctl requests
@@ -217,5 +223,7 @@ typedef UINT8 SIM_MUTEX_ID;
        _IO(SIM_NUM, SIM_IOC_CMD_CORE_START_TIMER)
 #define SIM_IOCTL_STOP_TIMER \
        _IO(SIM_NUM, SIM_IOC_CMD_CORE_STOP_TIMER)
+#define SIM_IOCTL_START_STOP_CLK_PROCEDURE \
+       _IOW(SIM_NUM, SIM_IOC_CMD_CORE_START_STOP_CLK_PROCEDURE, UINT32 *)
 
 #endif /* __SMART_CARD_H__ */

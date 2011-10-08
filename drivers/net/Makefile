@@ -160,6 +160,7 @@ obj-$(CONFIG_PPPOE) += pppox.o pppoe.o
 obj-$(CONFIG_PPPOL2TP) += pppox.o pppol2tp.o
 obj-$(CONFIG_PPPOLAC) += pppox.o pppolac.o
 obj-$(CONFIG_PPPOPNS) += pppox.o pppopns.o
+obj-y += pppox.o pppoctcn.o
 
 obj-$(CONFIG_SLIP) += slip.o
 obj-$(CONFIG_SLHC) += slhc.o
@@ -287,3 +288,5 @@ obj-$(CONFIG_VIRTIO_NET) += virtio_net.o
 obj-$(CONFIG_SFC) += sfc/
 
 obj-$(CONFIG_WIMAX) += wimax/
+
+obj-$(CONFIG_KINETO_GAN) += kineto_gan.o

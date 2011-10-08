@@ -74,6 +74,19 @@ static const char	hcd_name [] = "ehci_hcd";
 #undef VERBOSE_DEBUG
 #undef EHCI_URB_TRACE
 
+/* Define this macro to get suspend-resume and other traces
+ * that are useful for debugging IPC issues
+ */
+#undef EHCI_OMAP_VERBOSE_DEBUG
+
+#ifdef EHCI_OMAP_VERBOSE_DEBUG
+#define ehci_omap_dbg(fmt, args...) \
+       printk(KERN_INFO "EHCI: " fmt, ## args)
+#else
+#define ehci_omap_dbg(fmt, args...) do { } while (0)
+#endif
+
+
 #ifdef DEBUG
 #define EHCI_STATS
 #endif
@@ -107,6 +120,15 @@ module_param (ignore_oc, bool, S_IRUGO);
 MODULE_PARM_DESC (ignore_oc, "ignore bogus hardware overcurrent indications");
 
 #define	INTR_MASK (STS_IAA | STS_FATAL | STS_PCD | STS_ERR | STS_INT)
+
+/*-------------------------------------------------------------------------*/
+int omap_usbhost_wa = 1;
+int ehci_q_halted;
+static unsigned int echi_omap_usbcmd_reg = 0;
+static unsigned int echi_omap_usbcmd_backup;
+static spinlock_t ehci_q_lock;
+void ehci_q_halt(void);
+void ehci_q_resume(void);
 
 /*-------------------------------------------------------------------------*/
 
@@ -290,7 +312,8 @@ static void ehci_quiesce (struct ehci_hcd *ehci)
 	/* wait for any schedule enables/disables to take effect */
 	temp = ehci_readl(ehci, &ehci->regs->command) << 10;
 	temp &= STS_ASS | STS_PSS;
-	if (handshake_on_error_set_halt(ehci, &ehci->regs->status,
+	if (!ehci_q_halted
+		&& handshake_on_error_set_halt(ehci, &ehci->regs->status,
 					STS_ASS | STS_PSS, temp, 16 * 125))
 		return;
 
@@ -609,6 +632,11 @@ static int ehci_init(struct usb_hcd *hcd)
 		}
 	}
 	ehci->command = temp;
+
+	if (omap_usbhost_wa) {
+		spin_lock_init(&ehci_q_lock);
+		echi_omap_usbcmd_reg = (unsigned int)&ehci->regs->command;
+	}
 
 	return 0;
 }
@@ -1124,6 +1152,35 @@ static int ehci_get_frame (struct usb_hcd *hcd)
 }
 
 /*-------------------------------------------------------------------------*/
+
+void ehci_q_halt(void)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&ehci_q_lock, flags);
+	ehci_q_halted = 1;
+	echi_omap_usbcmd_backup = readl(echi_omap_usbcmd_reg);
+	writel(echi_omap_usbcmd_backup & (~0x30), echi_omap_usbcmd_reg);
+	spin_unlock_irqrestore (&ehci_q_lock, flags);
+
+}
+
+void ehci_q_resume(void)
+{
+	unsigned long flags;
+	unsigned int v;
+
+	spin_lock_irqsave(&ehci_q_lock, flags);
+	ehci_q_halted = 0;
+	v  = readl(echi_omap_usbcmd_reg);
+	v = (v & (~0x30)) | (echi_omap_usbcmd_backup & 0x30);
+	writel(v, echi_omap_usbcmd_reg);
+	spin_unlock_irqrestore (&ehci_q_lock, flags);
+}
+
+ /*-------------------------------------------------------------------------*/
+
+
 
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_AUTHOR (DRIVER_AUTHOR);

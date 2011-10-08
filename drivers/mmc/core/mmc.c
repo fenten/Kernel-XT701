@@ -39,6 +39,8 @@ static const unsigned int tacc_mant[] = {
 	35,	40,	45,	50,	55,	60,	70,	80,
 };
 
+unsigned int mmc_access_mode = MMC_DATA_SECTOR_MODE;
+
 #define UNSTUFF_BITS(resp,start,size)					\
 	({								\
 		const int __size = size;				\
@@ -113,7 +115,7 @@ static int mmc_decode_cid(struct mmc_card *card)
 static int mmc_decode_csd(struct mmc_card *card)
 {
 	struct mmc_csd *csd = &card->csd;
-	unsigned int e, m, csd_struct;
+	unsigned int e, m, a, b, csd_struct;
 	u32 *resp = card->raw_csd;
 
 	csd_struct = UNSTUFF_BITS(resp, 126, 2);
@@ -144,6 +146,11 @@ static int mmc_decode_csd(struct mmc_card *card)
 	csd->r2w_factor = UNSTUFF_BITS(resp, 26, 3);
 	csd->write_blkbits = UNSTUFF_BITS(resp, 22, 4);
 	csd->write_partial = UNSTUFF_BITS(resp, 21, 1);
+
+	a = UNSTUFF_BITS(resp, 42, 5);
+	b = UNSTUFF_BITS(resp, 37, 5);
+	csd->erase_size = (a + 1) * (b + 1);
+	csd->erase_size <<= csd->write_blkbits;
 
 	return 0;
 }
@@ -223,8 +230,10 @@ static int mmc_read_ext_csd(struct mmc_card *card)
 			ext_csd[EXT_CSD_SEC_CNT + 1] << 8 |
 			ext_csd[EXT_CSD_SEC_CNT + 2] << 16 |
 			ext_csd[EXT_CSD_SEC_CNT + 3] << 24;
-		if (card->ext_csd.sectors)
+
+		if (mmc_access_mode == MMC_DATA_SECTOR_MODE) {
 			mmc_card_set_blockaddr(card);
+		}
 	}
 
 	switch (ext_csd[EXT_CSD_CARD_TYPE] &
@@ -309,6 +318,7 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 	int err;
 	u32 cid[4];
 	unsigned int max_dtr;
+	u32 rocr;
 
 	BUG_ON(!host);
 	WARN_ON(!host->claimed);
@@ -321,10 +331,21 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 	 */
 	mmc_go_idle(host);
 
-	/* The extra bit indicates that we support high capacity */
-	err = mmc_send_op_cond(host, ocr | (1 << 30), NULL);
+	err = mmc_send_op_cond(host, ocr | MMC_OCR_REG_ACCESS_MODE_SECTOR,
+		&rocr);
 	if (err)
 		goto err;
+
+	if ((rocr & MMC_OCR_REG_ACCESS_MODE_MASK)
+			== MMC_OCR_REG_ACCESS_MODE_SECTOR) {
+		mmc_access_mode = MMC_DATA_SECTOR_MODE;
+		printk(KERN_INFO "%s set to SECTOR mode\n",
+			mmc_hostname(host));
+	} else {
+		mmc_access_mode = MMC_DATA_BYTE_MODE;
+		printk(KERN_INFO "%s set to BYTE mode\n",
+			mmc_hostname(host));
+	}
 
 	/*
 	 * For SPI, enable CRC as appropriate.

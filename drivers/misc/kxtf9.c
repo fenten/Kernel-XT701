@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2009 Kionix, Inc.
+ * Copyright (C) 2010 Motorola, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -16,20 +17,24 @@
  * 02111-1307, USA
  */
 
+#include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/errno.h>
-#include <linux/delay.h>
 #include <linux/fs.h>
+#include <linux/gpio.h>
 #include <linux/i2c.h>
 #include <linux/input.h>
 #include <linux/input-polldev.h>
+#include <linux/interrupt.h>
+#include <linux/irq.h>
 #include <linux/miscdevice.h>
 #include <linux/uaccess.h>
 
 #include <linux/workqueue.h>
-#include <linux/irq.h>
-#include <linux/gpio.h>
-#include <linux/interrupt.h>
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+#include <linux/earlysuspend.h>
+#endif
 
 #include <linux/kxtf9.h>
 
@@ -54,8 +59,7 @@
 #define WUF_THRESH		0x5A
 #define TDT_TIMER		0x2B
 #define SELF_TEST_REG		0x3A
-/* CONTROL REGISTER 1 BITS */
-#define PC1_OFF			0x00
+/* CONTROL REGISTER 1 POWER BIT */
 #define PC1_ON			0x80
 /* INTERRUPT SOURCE 2 BITS */
 #define TPS			0x01
@@ -83,12 +87,15 @@
 #define RES_WIN_TIMER		13
 #define RESUME_ENTRIES		14
 
-#define SENSITIVITY_LEVELS              3
-#define SENSITIVITY_LOW_OFFSET          0
-#define SENSITIVITY_MEDIUM_OFFSET      1
-#define SENSITIVITY_HIGH_OFFSET      2
+#define SENSITIVITY_LEVELS        3
+#define SENSITIVITY_LOW_OFFSET    0
+#define SENSITIVITY_MEDIUM_OFFSET 1
+#define SENSITIVITY_HIGH_OFFSET   2
+
+#define TILT_REPORT_DELAY	500
 
 struct {
+	/* cutoff serves dual purpose as valid output delay */
 	unsigned int cutoff;
 	u8 mask;
 } kxtf9_odr_table[] = {
@@ -98,8 +105,7 @@ struct {
 	10,	ODR200}, {
 	20,	ODR100}, {
 	40,	ODR50}, {
-	80,	ODR25}, {
-	0,	ODR12_5},};
+	80,	ODR25},};
 
 struct tap_sensitivity {
 	u8 reg_timer_init;
@@ -114,19 +120,30 @@ struct tap_sensitivity {
 struct kxtf9_data {
 	struct i2c_client *client;
 	struct kxtf9_platform_data *pdata;
-	struct mutex lock;
 	struct delayed_work input_work;
 	struct input_dev *input_dev;
 	struct work_struct irq_work;
 	struct workqueue_struct *irq_work_queue;
+	struct delayed_work force_tilt;
 
 	int hw_initialized;
+	unsigned int odr_delay;
 	atomic_t enabled;
+	atomic_t is_polling;
+	int was_polling_at_suspend;
 	u8 shift_adj;
 	u8 resume_state[RESUME_ENTRIES];
 	int irq;
 	struct tap_sensitivity ts_regs[SENSITIVITY_LEVELS];
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	struct early_suspend early_suspend;
+#endif
 };
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static void kxtf9_early_suspend(struct early_suspend *handler);
+static void kxtf9_late_resume(struct early_suspend *handler);
+#endif
 
 struct kxtf9_data *kxtf9_misc_data;
 
@@ -152,7 +169,7 @@ static int kxtf9_i2c_read(struct kxtf9_data *tf9, u8 *buf, int len)
 	do {
 		err = i2c_transfer(tf9->client->adapter, msgs, 2);
 		if (err != 2)
-			msleep_interruptible(I2C_RETRY_DELAY);
+			msleep(I2C_RETRY_DELAY);
 	} while ((err != 2) && (++tries < I2C_RETRIES));
 
 	if (err != 2) {
@@ -181,7 +198,7 @@ static int kxtf9_i2c_write(struct kxtf9_data *tf9, u8 * buf, int len)
 	do {
 		err = i2c_transfer(tf9->client->adapter, msgs, 1);
 		if (err != 1)
-			msleep_interruptible(I2C_RETRY_DELAY);
+			msleep(I2C_RETRY_DELAY);
 	} while ((err != 1) && (++tries < I2C_RETRIES));
 
 	if (err != 1) {
@@ -200,7 +217,7 @@ static int kxtf9_hw_init(struct kxtf9_data *tf9)
 	u8 buf[8];
 
 	buf[0] = CTRL_REG1;
-	buf[1] = PC1_OFF;
+	buf[1] = tf9->resume_state[RES_CTRL_REG1] & (~PC1_ON);
 	err = kxtf9_i2c_write(tf9, buf, 1);
 	if (err < 0)
 		goto error;
@@ -253,6 +270,8 @@ static int kxtf9_hw_init(struct kxtf9_data *tf9)
 	tf9->resume_state[RES_CTRL_REG1] = buf[1];
 	tf9->hw_initialized = 1;
 
+	msleep(tf9->odr_delay);
+
 	return 0;
 error:
 	dev_err(&tf9->client->dev, "hw init error 0x%x,0x%x: %d\n",
@@ -264,13 +283,13 @@ error:
 static void kxtf9_device_power_off(struct kxtf9_data *tf9)
 {
 	int err;
-	u8 buf[2] = { CTRL_REG1, PC1_OFF };
+	u8 buf[2] = { CTRL_REG1, tf9->resume_state[RES_CTRL_REG1] & (~PC1_ON) };
 
 	err = kxtf9_i2c_write(tf9, buf, 1);
 	if (err < 0)
 		dev_err(&tf9->client->dev, "soft power off failed: %d\n", err);
+	disable_irq_nosync(tf9->irq);
 	if (tf9->pdata->power_off) {
-		disable_irq_nosync(tf9->irq);
 		tf9->pdata->power_off();
 		tf9->hw_initialized = 0;
 	}
@@ -279,6 +298,7 @@ static void kxtf9_device_power_off(struct kxtf9_data *tf9)
 static int kxtf9_device_power_on(struct kxtf9_data *tf9)
 {
 	int err;
+	u8 intrel = INT_REL;
 
 	if (tf9->pdata->power_on) {
 		err = tf9->pdata->power_on();
@@ -287,16 +307,22 @@ static int kxtf9_device_power_on(struct kxtf9_data *tf9)
 				"power_on failed: %d\n", err);
 			return err;
 		}
-		enable_irq(tf9->irq);
+		msleep(25);
 	}
 	if (!tf9->hw_initialized) {
-		mdelay(100);
 		err = kxtf9_hw_init(tf9);
 		if (err < 0) {
 			kxtf9_device_power_off(tf9);
 			return err;
 		}
 	}
+	err = kxtf9_i2c_read(tf9, &intrel, 1);
+	if (err < 0) {
+		dev_err(&tf9->client->dev,
+			"error clearing interrupt status: %d\n", err);
+		return err;
+	}
+	enable_irq(tf9->irq);
 
 	return 0;
 }
@@ -311,70 +337,10 @@ static irqreturn_t kxtf9_isr(int irq, void *dev)
 	return IRQ_HANDLED;
 }
 
-static u8 kxtf9_resolve_dir(struct kxtf9_data *tf9, u8 dir)
-{
-	switch (dir) {
-	case 0x20:	/* -X */
-		if (tf9->pdata->negate_x)
-			dir = 0x10;
-		if (tf9->pdata->axis_map_y == 0)
-			dir >>= 2;
-		if (tf9->pdata->axis_map_z == 0)
-			dir >>= 4;
-		break;
-	case 0x10:	/* +X */
-		if (tf9->pdata->negate_x)
-			dir = 0x20;
-		if (tf9->pdata->axis_map_y == 0)
-			dir >>= 2;
-		if (tf9->pdata->axis_map_z == 0)
-			dir >>= 4;
-		break;
-	case 0x08:	/* -Y */
-		if (tf9->pdata->negate_y)
-			dir = 0x04;
-		if (tf9->pdata->axis_map_x == 1)
-			dir <<= 2;
-		if (tf9->pdata->axis_map_z == 1)
-			dir >>= 2;
-		break;
-	case 0x04:	/* +Y */
-		if (tf9->pdata->negate_y)
-			dir = 0x08;
-		if (tf9->pdata->axis_map_x == 1)
-			dir <<= 2;
-		if (tf9->pdata->axis_map_z == 1)
-			dir >>= 2;
-		break;
-	case 0x02:	/* -Z */
-		if (tf9->pdata->negate_z)
-			dir = 0x01;
-		if (tf9->pdata->axis_map_x == 2)
-			dir <<= 4;
-		if (tf9->pdata->axis_map_y == 2)
-			dir <<= 2;
-		break;
-	case 0x01:	/* +Z */
-		if (tf9->pdata->negate_z)
-			dir = 0x02;
-		if (tf9->pdata->axis_map_x == 2)
-			dir <<= 4;
-		if (tf9->pdata->axis_map_y == 2)
-			dir <<= 2;
-		break;
-	default:
-		dev_err(&tf9->client->dev,
-			"invalid resolve dir: %u\n", dir);
-		return 0;
-		break;
-	}
-
-	return dir;
-}
-
 static void kxtf9_irq_work_func(struct work_struct *work)
 {
 	int err;
+	/* [status][tapdir][tilt_prev][tilt_curr], high bit gesture toggle */
 	unsigned int int_status = 0;
 	u8 status;
 	u8 buf[2];
@@ -387,7 +353,7 @@ static void kxtf9_irq_work_func(struct work_struct *work)
 		if (err < 0) {
 			dev_err(&tf9->client->dev,
 				"int source read error: %d\n", err);
-			goto exit;
+			goto release;
 		}
 		int_status = status << 24;
 		if ((status & TPS) > 0) {
@@ -397,9 +363,8 @@ static void kxtf9_irq_work_func(struct work_struct *work)
 				dev_err(&tf9->client->dev,
 					"tilt read error: %d\n", err);
 			} else {
-				int_status |= kxtf9_resolve_dir(tf9, buf[0]);
-				int_status |=
-					kxtf9_resolve_dir(tf9, buf[1]) << 8;
+				int_status |= buf[0];
+				int_status |= buf[1] << 8;
 			}
 		}
 		if (((status & TDTS0) | (status & TDTS1)) > 0) {
@@ -409,21 +374,20 @@ static void kxtf9_irq_work_func(struct work_struct *work)
 				dev_err(&tf9->client->dev,
 					"tap read error: %d\n", err);
 			else
-				int_status |=
-					(kxtf9_resolve_dir(tf9, buf[0])) << 16;
+				int_status |= buf[0] << 16;
 		}
 		if (int_status & 0x1FFFFFFF) {
 			int_status |= (tf9->pdata->gesture++ & 1) << 31;
 			input_report_abs(tf9->input_dev, ABS_MISC, int_status);
 			input_sync(tf9->input_dev);
 		}
+release:
 		buf[0] = INT_REL;
 		err = kxtf9_i2c_read(tf9, buf, 1);
 		if (err < 0)
 			dev_err(&tf9->client->dev,
 				"error clearing interrupt status: %d\n", err);
 	}
-exit:
 	enable_irq(tf9->irq);
 }
 
@@ -456,10 +420,9 @@ int kxtf9_update_g_range(struct kxtf9_data *tf9, u8 new_g_range)
 		if (tf9->shift_adj < shift)
 			tf9->resume_state[RES_WUF_THRESH] <<=
 						(shift - tf9->shift_adj);
-
 		if (atomic_read(&tf9->enabled)) {
 			buf[0] = CTRL_REG1;
-			buf[1] = PC1_OFF;
+			buf[1] = tf9->resume_state[RES_CTRL_REG1] & (~PC1_ON);
 			err = kxtf9_i2c_write(tf9, buf, 1);
 			if (err < 0)
 				goto error;
@@ -469,14 +432,14 @@ int kxtf9_update_g_range(struct kxtf9_data *tf9, u8 new_g_range)
 			if (err < 0)
 				goto error;
 			buf[0] = CTRL_REG1;
-			buf[1] = (tf9->resume_state[RES_CTRL_REG1] & 0xE7) |
-					new_g_range;
+			buf[1] = (tf9->resume_state[RES_CTRL_REG1] & 0x67) |
+					new_g_range | PC1_ON;
 			err = kxtf9_i2c_write(tf9, buf, 1);
 			if (err < 0)
 				goto error;
+			msleep(tf9->odr_delay);
 		}
 	}
-
 	tf9->resume_state[RES_CTRL_REG1] = buf[1];
 	tf9->shift_adj = shift;
 
@@ -492,8 +455,9 @@ int kxtf9_update_odr(struct kxtf9_data *tf9, int poll_interval)
 {
 	int err = -1;
 	int i;
+	unsigned int valid_t;
 	u8 config[2] = { DATA_CTRL, 0 };
-	u8 buf[2] = { CTRL_REG1, PC1_OFF };
+	u8 buf[2] = { CTRL_REG1, tf9->resume_state[RES_CTRL_REG1] & (~PC1_ON) };
 
 	/* Convert the poll interval into an output data rate configuration
 	 *  that is as low as possible.  The ordering of these checks must be
@@ -502,11 +466,17 @@ int kxtf9_update_odr(struct kxtf9_data *tf9, int poll_interval)
 	 *  ODR cannot support the current poll interval, we stop searching */
 	for (i = 0; i < ARRAY_SIZE(kxtf9_odr_table); i++) {
 		config[1] = kxtf9_odr_table[i].mask;
+		valid_t = kxtf9_odr_table[i].cutoff;
 		if (poll_interval < kxtf9_odr_table[i].cutoff)
 			break;
 	}
-
+	tf9->odr_delay = valid_t;
+	tf9->resume_state[RES_DATA_CTRL] = config[1];
 	if (atomic_read(&tf9->enabled)) {
+		if (tf9->input_dev) {
+			cancel_delayed_work_sync(&tf9->input_work);
+			atomic_set(&tf9->is_polling, 0);
+		}
 		err = kxtf9_i2c_write(tf9, buf, 1);
 		if (err < 0)
 			goto error;
@@ -520,103 +490,100 @@ int kxtf9_update_odr(struct kxtf9_data *tf9, int poll_interval)
 		err = kxtf9_i2c_write(tf9, buf, 1);
 		if (err < 0)
 			goto error;
-		/* Latch on input_dev - indicates that kxtf9_input_init passed
-		 *  and this workqueue is available */
-		if (tf9->input_dev) {
-			cancel_delayed_work_sync(&tf9->input_work);
+		msleep(tf9->odr_delay);
+		if (tf9->input_dev && !atomic_read(&tf9->is_polling)) {
 			schedule_delayed_work(&tf9->input_work,
-				      msecs_to_jiffies(poll_interval));
+			      msecs_to_jiffies(poll_interval));
+			atomic_set(&tf9->is_polling, 1);
 		}
 	}
-	tf9->resume_state[RES_DATA_CTRL] = config[1];
 
 	return 0;
 error:
-	dev_err(&tf9->client->dev, "update odr failed 0x%x,0x%x: %d\n",
+	dev_err(&tf9->client->dev, "update odr write failed 0x%x,0x%x: %d\n",
 		buf[0], buf[1], err);
 
 	return err;
 }
+
 int kxtf9_update_gesture_sensitivity(struct kxtf9_data *tf9, int index)
 {
-	int err = -1;
-	u8 buf[8], tmp;
-	tmp = CTRL_REG1;
+	int err = -EINVAL;
+	u8 buf[8];
 
 	if (index >= SENSITIVITY_LEVELS || index < 0)
 		return err;
 
-	err = kxtf9_i2c_read(tf9, &tmp, 1);
-	if (err < 0) {
-		dev_err(&tf9->client->dev, "CNTRL_REG1 reg read failed: %d\n",
-				err);
-	return err;
+	tf9->resume_state[RES_TDT_TIMER] =
+		tf9->ts_regs[index].reg_timer_init;
+	tf9->resume_state[RES_TDT_H_THRESH] =
+		tf9->ts_regs[index].reg_h_thresh_init;
+	tf9->resume_state[RES_TDT_L_THRESH] =
+		tf9->ts_regs[index].reg_l_thresh_init;
+	tf9->resume_state[RES_TAP_TIMER] =
+		tf9->ts_regs[index].reg_tap_timer_init;
+	tf9->resume_state[RES_TOTAL_TIMER] =
+		tf9->ts_regs[index].reg_total_timer_init;
+	tf9->resume_state[RES_LAT_TIMER] =
+		tf9->ts_regs[index].reg_latency_timer_init;
+	tf9->resume_state[RES_WIN_TIMER] =
+		tf9->ts_regs[index].reg_window_timer_init;
+	if (atomic_read(&tf9->enabled)) {
+		buf[0] = CTRL_REG1;
+		buf[1] = tf9->resume_state[RES_CTRL_REG1] & (~PC1_ON);
+		err = kxtf9_i2c_write(tf9, buf, 1);
+		if (err < 0)
+			goto error;
+		buf[0] = TDT_TIMER;
+		buf[1] = tf9->resume_state[RES_TDT_TIMER];
+		buf[2] = tf9->resume_state[RES_TDT_H_THRESH];
+		buf[3] = tf9->resume_state[RES_TDT_L_THRESH];
+		buf[4] = tf9->resume_state[RES_TAP_TIMER];
+		buf[5] = tf9->resume_state[RES_TOTAL_TIMER];
+		buf[6] = tf9->resume_state[RES_LAT_TIMER];
+		buf[7] = tf9->resume_state[RES_WIN_TIMER];
+		err = kxtf9_i2c_write(tf9, buf, 7);
+		if (err < 0)
+			goto error;
+		buf[0] = CTRL_REG1;
+		buf[1] = tf9->resume_state[RES_CTRL_REG1] | PC1_ON;
+		err = kxtf9_i2c_write(tf9, buf, 1);
+		if (err < 0)
+			goto error;
+		msleep(tf9->odr_delay);
 	}
-
-	buf[0] = CTRL_REG1;
-	buf[1] = PC1_OFF;
-	err = kxtf9_i2c_write(tf9, buf, 1);
-	if (err < 0)
-		goto error;
-
-	buf[0] = TDT_TIMER;
-	buf[1] = tf9->ts_regs[index].reg_timer_init;
-	buf[2] = tf9->ts_regs[index].reg_h_thresh_init;
-	buf[3] = tf9->ts_regs[index].reg_l_thresh_init;
-	buf[4] = tf9->ts_regs[index].reg_tap_timer_init;
-	buf[5] = tf9->ts_regs[index].reg_total_timer_init;
-	buf[6] = tf9->ts_regs[index].reg_latency_timer_init;
-	buf[7] = tf9->ts_regs[index].reg_window_timer_init;
-	err = kxtf9_i2c_write(tf9, buf, 7);
-	if (err < 0)
-		goto error;
-
-	buf[0] = CTRL_REG1;
-	buf[1] = tmp;
-	err = kxtf9_i2c_write(tf9, buf, 1);
-	if (err < 0)
-		goto error;
 
 	return 0;
 error:
-	dev_err(&tf9->client->dev, "update_gesture_sensitivity 0x%x,0x%x: %d\n",
-			buf[0], buf[1], err);
+	dev_err(&tf9->client->dev,
+		"gesture sensitivity write failure 0x%x,0x%x: %d\n",
+		buf[0], buf[1], err);
 
 	return err;
 }
-
 
 static int kxtf9_get_acceleration_data(struct kxtf9_data *tf9, int *xyz)
 {
 	int err = -1;
 	/* Data bytes from hardware xL, xH, yL, yH, zL, zH */
 	u8 acc_data[6] = { XOUT_L };
-	/* x,y,z hardware values */
-	int hw_d[3] = { 0 };
 
 	err = kxtf9_i2c_read(tf9, acc_data, 6);
 	if (err < 0) {
 		dev_err(&tf9->client->dev, "accel data read failed: %d\n", err);
 		return err;
 	}
-	hw_d[0] = (int) (((acc_data[1]) << 8) | acc_data[0]);
-	hw_d[1] = (int) (((acc_data[3]) << 8) | acc_data[2]);
-	hw_d[2] = (int) (((acc_data[5]) << 8) | acc_data[4]);
+	xyz[0] = (int) (((acc_data[1]) << 8) | acc_data[0]);
+	xyz[1] = (int) (((acc_data[3]) << 8) | acc_data[2]);
+	xyz[2] = (int) (((acc_data[5]) << 8) | acc_data[4]);
 
-	hw_d[0] = (hw_d[0] & 0x8000) ? (hw_d[0] | 0xFFFF0000) : (hw_d[0]);
-	hw_d[1] = (hw_d[1] & 0x8000) ? (hw_d[1] | 0xFFFF0000) : (hw_d[1]);
-	hw_d[2] = (hw_d[2] & 0x8000) ? (hw_d[2] | 0xFFFF0000) : (hw_d[2]);
+	xyz[0] = (xyz[0] & 0x8000) ? (xyz[0] | 0xFFFF0000) : (xyz[0]);
+	xyz[1] = (xyz[1] & 0x8000) ? (xyz[1] | 0xFFFF0000) : (xyz[1]);
+	xyz[2] = (xyz[2] & 0x8000) ? (xyz[2] | 0xFFFF0000) : (xyz[2]);
 
-	hw_d[0] >>= tf9->shift_adj;
-	hw_d[1] >>= tf9->shift_adj;
-	hw_d[2] >>= tf9->shift_adj;
-
-	xyz[0] = ((tf9->pdata->negate_x) ? (-hw_d[tf9->pdata->axis_map_x])
-		  : (hw_d[tf9->pdata->axis_map_x]));
-	xyz[1] = ((tf9->pdata->negate_y) ? (-hw_d[tf9->pdata->axis_map_y])
-		  : (hw_d[tf9->pdata->axis_map_y]));
-	xyz[2] = ((tf9->pdata->negate_z) ? (-hw_d[tf9->pdata->axis_map_z])
-		  : (hw_d[tf9->pdata->axis_map_z]));
+	xyz[0] >>= tf9->shift_adj;
+	xyz[1] >>= tf9->shift_adj;
+	xyz[2] >>= tf9->shift_adj;
 
 	return err;
 }
@@ -632,8 +599,6 @@ static void kxtf9_report_values(struct kxtf9_data *tf9, int *xyz)
 static int kxtf9_enable(struct kxtf9_data *tf9)
 {
 	int err;
-	int int_status = 0;
-	u8 buf;
 
 	if (!atomic_cmpxchg(&tf9->enabled, 0, 1)) {
 		err = kxtf9_device_power_on(tf9);
@@ -641,22 +606,9 @@ static int kxtf9_enable(struct kxtf9_data *tf9)
 			atomic_set(&tf9->enabled, 0);
 			return err;
 		}
-		if ((tf9->resume_state[RES_CTRL_REG1] & TPE) > 0) {
-			buf = TILT_POS_CUR;
-			err = kxtf9_i2c_read(tf9, &buf, 1);
-			if (err < 0) {
-				dev_err(&tf9->client->dev,
-					"tilt read error: %d\n", err);
-			} else {
-				int_status |= kxtf9_resolve_dir(tf9, buf);
-				int_status |= (tf9->pdata->gesture++ & 1) << 31;
-				input_report_abs(tf9->input_dev,
-					ABS_MISC, int_status);
-				input_sync(tf9->input_dev);
-			}
-		}
-		schedule_delayed_work(&tf9->input_work,
-				msecs_to_jiffies(tf9->pdata->poll_interval));
+		if ((tf9->resume_state[RES_CTRL_REG1] & TPE) > 0)
+			schedule_delayed_work(&tf9->force_tilt,
+				msecs_to_jiffies(TILT_REPORT_DELAY));
 	}
 
 	return 0;
@@ -665,7 +617,9 @@ static int kxtf9_enable(struct kxtf9_data *tf9)
 static int kxtf9_disable(struct kxtf9_data *tf9)
 {
 	if (atomic_cmpxchg(&tf9->enabled, 1, 0)) {
+		cancel_delayed_work_sync(&tf9->force_tilt);
 		cancel_delayed_work_sync(&tf9->input_work);
+		atomic_set(&tf9->is_polling, 0);
 		kxtf9_device_power_off(tf9);
 	}
 
@@ -688,166 +642,100 @@ static int kxtf9_misc_ioctl(struct inode *inode, struct file *file,
 				unsigned int cmd, unsigned long arg)
 {
 	void __user *argp = (void __user *)arg;
-	u8 buf[4];
-	u8 ctrl[2] = { CTRL_REG1, PC1_OFF };
-	int err;
-	int interval;
-	int int_state;
 	struct kxtf9_data *tf9 = file->private_data;
-	int sensitivity;
+	int io_int;
+	u8  io_u8;
+	/* Initial value used to move IC to stand-by */
+	u8 ctrl[2] = { CTRL_REG1,
+			tf9->resume_state[RES_CTRL_REG1] & (~PC1_ON) };
+	int err;
 
 	switch (cmd) {
-	case KXTF9_IOCTL_GET_DELAY:
-		interval = tf9->pdata->poll_interval;
-		if (copy_to_user(argp, &interval, sizeof(interval)))
-			return -EFAULT;
-		break;
 	case KXTF9_IOCTL_SET_DELAY:
-		if (copy_from_user(&interval, argp, sizeof(interval)))
+		if (copy_from_user(&io_int, argp, sizeof(io_int)))
 			return -EFAULT;
-		if (interval < 0)
-			return -EINVAL;
-		if (interval > tf9->pdata->min_interval)
-			tf9->pdata->poll_interval = interval;
+		if (io_int > tf9->pdata->min_interval)
+			tf9->pdata->poll_interval = io_int;
 		else
 			tf9->pdata->poll_interval = tf9->pdata->min_interval;
 		err = kxtf9_update_odr(tf9, tf9->pdata->poll_interval);
 		if (err < 0)
 			return err;
 		break;
-	case KXTF9_IOCTL_SET_ENABLE:
-		if (copy_from_user(&interval, argp, sizeof(interval)))
+	case KXTF9_IOCTL_GET_DELAY:
+		io_int = tf9->pdata->poll_interval;
+		if (copy_to_user(argp, &io_int, sizeof(io_int)))
 			return -EFAULT;
-		if (interval < 0 || interval > 1)
+		break;
+	case KXTF9_IOCTL_SET_ENABLE:
+		if (copy_from_user(&io_int, argp, sizeof(io_int)))
+			return -EFAULT;
+		if (io_int < 0 || io_int > 1)
 			return -EINVAL;
-		if (interval)
+		if (io_int)
 			kxtf9_enable(tf9);
 		else
 			kxtf9_disable(tf9);
 		break;
 	case KXTF9_IOCTL_GET_ENABLE:
-		interval = atomic_read(&tf9->enabled);
-		if (copy_to_user(argp, &interval, sizeof(interval)))
+		io_int = atomic_read(&tf9->enabled);
+		if (copy_to_user(argp, &io_int, sizeof(io_int)))
 			return -EFAULT;
 		break;
 	case KXTF9_IOCTL_SET_G_RANGE:
-		if (copy_from_user(&buf, argp, 1))
+		if (copy_from_user(&io_u8, argp, sizeof(io_u8)))
 			return -EFAULT;
-		err = kxtf9_update_g_range(tf9, buf[0]);
+		err = kxtf9_update_g_range(tf9, io_u8);
 		if (err < 0)
 			return err;
 		break;
-	case KXTF9_IOCTL_SET_TILT_ENABLE:
-		if (copy_from_user(&interval, argp, sizeof(interval)))
+	case KXTF9_IOCTL_SET_TILT_ENABLE: /* Overlapped set functionality */
+		io_u8 = TPE;
+		goto process_set_x;
+	case KXTF9_IOCTL_SET_TAP_ENABLE:  /* Overlapped set functionality */
+		io_u8 = TDTE;
+		goto process_set_x;
+	case KXTF9_IOCTL_SET_WAKE_ENABLE: /* Overlapped set functionality */
+		io_u8 = WUFE;
+process_set_x:
+		if (copy_from_user(&io_int, argp, sizeof(io_int)))
 			return -EFAULT;
-		if (interval < 0 || interval > 1)
-			return -EINVAL;
-		if (interval)
-			tf9->resume_state[RES_CTRL_REG1] |= TPE;
+		if (io_int == 1)
+			tf9->resume_state[RES_CTRL_REG1] |= io_u8;
+		else if (io_int == 0)
+			tf9->resume_state[RES_CTRL_REG1] &= ~io_u8;
 		else
-			tf9->resume_state[RES_CTRL_REG1] &= (~TPE);
-		ctrl[1] = tf9->resume_state[RES_CTRL_REG1];
-		err = kxtf9_i2c_write(tf9, ctrl, 1);
-		if (err < 0) {
-			dev_err(&tf9->client->dev,
-				"set tilt enable error: %d\n", err);
-			return err;
-		}
-		break;
-	case KXTF9_IOCTL_SET_TAP_ENABLE:
-		if (copy_from_user(&interval, argp, sizeof(interval)))
-			return -EFAULT;
-		if (interval < 0 || interval > 1)
 			return -EINVAL;
-		if (interval)
-			tf9->resume_state[RES_CTRL_REG1] |= TDTE;
-		else
-			tf9->resume_state[RES_CTRL_REG1] &= (~TDTE);
-		ctrl[1] = tf9->resume_state[RES_CTRL_REG1];
-		err = kxtf9_i2c_write(tf9, ctrl, 1);
-		if (err < 0) {
-			dev_err(&tf9->client->dev,
-				"set tap enable error: %d\n", err);
-			return err;
+		err = 0;
+		if (atomic_read(&tf9->enabled)) {
+			err = kxtf9_i2c_write(tf9, ctrl, 1);
+			if (err < 0)
+				goto set_x_error;
+			ctrl[1] = tf9->resume_state[RES_CTRL_REG1] | PC1_ON;
+			err = kxtf9_i2c_write(tf9, ctrl, 1);
+			if (err < 0)
+				goto set_x_error;
+			msleep(tf9->odr_delay);
+			if ((io_u8 == TPE) && (io_int == 1))
+				schedule_delayed_work(&tf9->force_tilt,
+					msecs_to_jiffies(TILT_REPORT_DELAY));
+			ctrl[0] = INT_REL;
+			err = kxtf9_i2c_read(tf9, ctrl, 1);
 		}
-		break;
-	case KXTF9_IOCTL_SET_WAKE_ENABLE:
-		if (copy_from_user(&interval, argp, sizeof(interval)))
-			return -EFAULT;
-		if (interval < 0 || interval > 1)
-			return -EINVAL;
-		if (interval)
-			tf9->resume_state[RES_CTRL_REG1] |= WUFE;
-		else
-			tf9->resume_state[RES_CTRL_REG1] &= (~WUFE);
-		ctrl[1] = tf9->resume_state[RES_CTRL_REG1];
-		err = kxtf9_i2c_write(tf9, ctrl, 1);
 		if (err < 0) {
+set_x_error:
 			dev_err(&tf9->client->dev,
-				"set wake enable error: %d\n", err);
+				"set 0x%x enable error: 0x%x,0x%x: %d\n",
+				io_u8, ctrl[0], ctrl[1], err);
 			return err;
-		}
-		break;
-	case KXTF9_IOCTL_SELF_TEST:
-		if (copy_from_user(&interval, argp, sizeof(interval)))
-			return -EFAULT;
-		if (interval < 0 || interval > 1)
-			return -EINVAL;
-		if (interval) {
-			/*disable interrupts in self_test*/
-			disable_irq_nosync(tf9->irq);
-			/* disable engines and set part to +/-8g with
-				12-bit outputs */
-			ctrl[0] = CTRL_REG1;
-			ctrl[1] = 0xD0;
-			kxtf9_i2c_write(tf9, ctrl, 1);
-			/* activate self-test function */
-			ctrl[0] = SELF_TEST_REG;
-			ctrl[1] = 0xCA;
-			kxtf9_i2c_write(tf9, ctrl, 1);
-			/* toggle physical interrupt pin polarity */
-			ctrl[0] = INT_CTRL1;
-			if ((tf9->resume_state[RES_INT_CTRL1] & 0x10) > 0)
-				ctrl[1] = tf9->resume_state[RES_INT_CTRL1] &
-						0xEF;
-			else
-				ctrl[1] = tf9->resume_state[RES_INT_CTRL1] |
-						0x10;
-			kxtf9_i2c_write(tf9, ctrl, 1);
-			/* read state of gpio pin */
-			int_state = gpio_get_value(tf9->pdata->gpio);
-			if (int_state != 1)
-				return -ENOENT;
-			/* set physical interrupt polarity back to normal */
-			ctrl[0] = INT_CTRL1;
-			ctrl[1] = tf9->resume_state[RES_INT_CTRL1];
-			kxtf9_i2c_write(tf9, ctrl, 1);
-			/* read state of gpio pin */
-			int_state = gpio_get_value(tf9->pdata->gpio);
-			if (int_state != 0)
-				return -ESRCH;
-		} else {
-			/* set physical interrupt polarity back to normal */
-			ctrl[0] = INT_CTRL1;
-			ctrl[1] = tf9->resume_state[RES_INT_CTRL1];
-			kxtf9_i2c_write(tf9, ctrl, 1);
-			/* deactivate self-test function */
-			ctrl[0] = SELF_TEST_REG;
-			ctrl[1] = 0x00;
-			kxtf9_i2c_write(tf9, ctrl, 1);
-			/* set part configuration based on last-known state */
-			ctrl[0] = CTRL_REG1;
-			ctrl[1] = tf9->resume_state[RES_CTRL_REG1];
-			kxtf9_i2c_write(tf9, ctrl, 1);
 		}
 		break;
 	case KXTF9_IOCTL_SET_SENSITIVITY:
-		if (copy_from_user(&sensitivity, argp, sizeof(sensitivity)))
+		if (copy_from_user(&io_int, argp, sizeof(io_int)))
 			return -EFAULT;
-		if (sensitivity < 0)
-			return -EINVAL;
-		if (kxtf9_update_gesture_sensitivity(tf9, sensitivity - 1) < 0)
-			return -EINVAL;
+		err = kxtf9_update_gesture_sensitivity(tf9, io_int - 1);
+		if (err < 0)
+			return err;
 		break;
 	default:
 		return -EINVAL;
@@ -874,12 +762,29 @@ static void kxtf9_input_work_func(struct work_struct *work)
 						struct kxtf9_data, input_work);
 	int xyz[3] = { 0 };
 
-	mutex_lock(&tf9->lock);
 	if (kxtf9_get_acceleration_data(tf9, xyz) == 0)
 		kxtf9_report_values(tf9, xyz);
 	schedule_delayed_work(&tf9->input_work,
 			      msecs_to_jiffies(tf9->pdata->poll_interval));
-	mutex_unlock(&tf9->lock);
+}
+
+static void kxtf9_force_tilt_func(struct work_struct *work)
+{
+	struct kxtf9_data *tf9 = container_of((struct delayed_work *)work,
+						struct kxtf9_data, force_tilt);
+	int err = -1;
+	unsigned int tilt = KXTF9_INT_TILT;
+	u8 reg = TILT_POS_CUR;
+
+	err = kxtf9_i2c_read(tf9, &reg, 1);
+	if (err < 0) {
+		dev_err(&tf9->client->dev, "tilt read error: %d\n", err);
+	} else {
+		tilt |= reg | (0xFF << 8);
+		tilt |= (tf9->pdata->gesture++ & 1) << 31;
+		input_report_abs(tf9->input_dev, ABS_MISC, tilt);
+		input_sync(tf9->input_dev);
+	}
 }
 
 #ifdef KXTF9_OPEN_ENABLE
@@ -900,26 +805,10 @@ void kxtf9_input_close(struct input_dev *dev)
 
 static int kxtf9_validate_pdata(struct kxtf9_data *tf9)
 {
-	if (tf9->pdata->min_interval > tf9->pdata->poll_interval)
+	if (tf9->pdata->min_interval > tf9->pdata->poll_interval) {
 		tf9->pdata->poll_interval = tf9->pdata->min_interval;
-	if (tf9->pdata->axis_map_x > 2 || tf9->pdata->axis_map_y > 2 ||
-	    tf9->pdata->axis_map_z > 2 ||
-	    tf9->pdata->axis_map_x == tf9->pdata->axis_map_y ||
-	    tf9->pdata->axis_map_x == tf9->pdata->axis_map_z ||
-	    tf9->pdata->axis_map_y == tf9->pdata->axis_map_z) {
-		dev_err(&tf9->client->dev,
-			"invalid axis_map value x:%u y:%u z:%u\n",
-			tf9->pdata->axis_map_x, tf9->pdata->axis_map_y,
-			tf9->pdata->axis_map_z);
-		return -EINVAL;
-	}
-	if (tf9->pdata->negate_x > 1 || tf9->pdata->negate_y > 1 ||
-	    tf9->pdata->negate_z > 1) {
-		dev_err(&tf9->client->dev,
-			"invalid negate value x:%u y:%u z:%u\n",
-			tf9->pdata->negate_x, tf9->pdata->negate_y,
-			tf9->pdata->negate_z);
-		return -EINVAL;
+		dev_info(&tf9->client->dev,
+			"enforcing minimum interval\n");
 	}
 
 	return 0;
@@ -928,8 +817,6 @@ static int kxtf9_validate_pdata(struct kxtf9_data *tf9)
 static int kxtf9_input_init(struct kxtf9_data *tf9)
 {
 	int err;
-	int int_status = 0;
-	u8 buf;
 
 	INIT_DELAYED_WORK(&tf9->input_work, kxtf9_input_work_func);
 	tf9->input_dev = input_allocate_device();
@@ -947,14 +834,12 @@ static int kxtf9_input_init(struct kxtf9_data *tf9)
 
 	set_bit(EV_ABS, tf9->input_dev->evbit);
 	set_bit(ABS_MISC, tf9->input_dev->absbit);
-
 	input_set_abs_params(tf9->input_dev, ABS_X, -G_MAX, G_MAX, FUZZ, FLAT);
 	input_set_abs_params(tf9->input_dev, ABS_Y, -G_MAX, G_MAX, FUZZ, FLAT);
 	input_set_abs_params(tf9->input_dev, ABS_Z, -G_MAX, G_MAX, FUZZ, FLAT);
 	input_set_abs_params(tf9->input_dev, ABS_MISC, INT_MIN, INT_MAX, 0, 0);
 
 	tf9->input_dev->name = "accelerometer";
-
 	err = input_register_device(tf9->input_dev);
 	if (err) {
 		dev_err(&tf9->client->dev,
@@ -962,25 +847,14 @@ static int kxtf9_input_init(struct kxtf9_data *tf9)
 			tf9->input_dev->name, err);
 		goto err1;
 	}
-	if ((tf9->resume_state[RES_CTRL_REG1] & TPE) > 0) {
-		buf = TILT_POS_CUR;
-		err = kxtf9_i2c_read(tf9, &buf, 1);
-		if (err < 0) {
-			dev_err(&tf9->client->dev,
-				"tilt read error: %d\n", err);
-		} else {
-			int_status |= kxtf9_resolve_dir(tf9, buf);
-			int_status |= (tf9->pdata->gesture++ & 1) << 31;
-			input_report_abs(tf9->input_dev, ABS_MISC, int_status);
-			input_sync(tf9->input_dev);
-		}
-	}
+	if ((tf9->resume_state[RES_CTRL_REG1] & TPE) > 0)
+		schedule_delayed_work(&tf9->force_tilt,
+			msecs_to_jiffies(TILT_REPORT_DELAY));
 
 	return 0;
 err1:
 	input_free_device(tf9->input_dev);
 err0:
-
 	return err;
 }
 
@@ -989,7 +863,7 @@ static void kxtf9_sensitivity_init(struct kxtf9_data *tf9)
 	int buf_size = 0;
 
 	buf_size = sizeof(tf9->pdata->sensitivity_low);
-	 memcpy(tf9->ts_regs + SENSITIVITY_LOW_OFFSET,
+	memcpy(tf9->ts_regs + SENSITIVITY_LOW_OFFSET,
 			tf9->pdata->sensitivity_low, buf_size);
 	buf_size = sizeof(tf9->pdata->sensitivity_medium);
 	memcpy(tf9->ts_regs + SENSITIVITY_MEDIUM_OFFSET,
@@ -997,7 +871,6 @@ static void kxtf9_sensitivity_init(struct kxtf9_data *tf9)
 	buf_size = sizeof(tf9->pdata->sensitivity_high);
 	memcpy(tf9->ts_regs + SENSITIVITY_HIGH_OFFSET,
 			tf9->pdata->sensitivity_high, buf_size);
-
 }
 
 static void kxtf9_input_cleanup(struct kxtf9_data *tf9)
@@ -1030,8 +903,6 @@ static int kxtf9_probe(struct i2c_client *client,
 		goto err0;
 	}
 
-	mutex_init(&tf9->lock);
-	mutex_lock(&tf9->lock);
 	tf9->client = client;
 
 	INIT_WORK(&tf9->irq_work, kxtf9_irq_work_func);
@@ -1041,7 +912,7 @@ static int kxtf9_probe(struct i2c_client *client,
 		dev_err(&client->dev, "cannot create work queue: %d\n", err);
 		goto err1;
 	}
-	tf9->pdata = kmalloc(sizeof(*tf9->pdata), GFP_KERNEL);
+	tf9->pdata = kzalloc(sizeof(*tf9->pdata), GFP_KERNEL);
 	if (tf9->pdata == NULL) {
 		err = -ENOMEM;
 		dev_err(&client->dev,
@@ -1063,6 +934,7 @@ static int kxtf9_probe(struct i2c_client *client,
 			goto err3;
 		}
 	}
+
 	kxtf9_sensitivity_init(tf9);
 	tf9->irq = gpio_to_irq(tf9->pdata->gpio);
 	tf9->resume_state[RES_DATA_CTRL]    = tf9->pdata->data_odr_init;
@@ -1077,9 +949,10 @@ static int kxtf9_probe(struct i2c_client *client,
 	tf9->resume_state[RES_TDT_L_THRESH] = tf9->pdata->tdt_l_thresh_init;
 	tf9->resume_state[RES_TAP_TIMER]    = tf9->pdata->tdt_tap_timer_init;
 	tf9->resume_state[RES_TOTAL_TIMER]  = tf9->pdata->tdt_total_timer_init;
-	tf9->resume_state[RES_LAT_TIMER]    = tf9->pdata->
-							tdt_latency_timer_init;
+	tf9->resume_state[RES_LAT_TIMER]   = tf9->pdata->tdt_latency_timer_init;
 	tf9->resume_state[RES_WIN_TIMER]    = tf9->pdata->tdt_window_timer_init;
+
+	INIT_DELAYED_WORK(&tf9->force_tilt, kxtf9_force_tilt_func);
 
 	err = kxtf9_device_power_on(tf9);
 	if (err < 0) {
@@ -1116,7 +989,12 @@ static int kxtf9_probe(struct i2c_client *client,
 	}
 	disable_irq_nosync(tf9->irq);
 
-	mutex_unlock(&tf9->lock);
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	tf9->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
+	tf9->early_suspend.suspend = kxtf9_early_suspend;
+	tf9->early_suspend.resume = kxtf9_late_resume;
+	register_early_suspend(&tf9->early_suspend);
+#endif
 
 	dev_info(&client->dev, "kxtf9 probed\n");
 
@@ -1136,7 +1014,6 @@ err3:
 err2:
 	destroy_workqueue(tf9->irq_work_queue);
 err1:
-	mutex_unlock(&tf9->lock);
 	kfree(tf9);
 err0:
 	return err;
@@ -1146,6 +1023,7 @@ static int __devexit kxtf9_remove(struct i2c_client *client)
 {
 	struct kxtf9_data *tf9 = i2c_get_clientdata(client);
 
+	unregister_early_suspend(&tf9->early_suspend);
 	free_irq(tf9->irq, tf9);
 	gpio_free(tf9->pdata->gpio);
 	misc_deregister(&kxtf9_misc_device);
@@ -1174,6 +1052,32 @@ static int kxtf9_suspend(struct i2c_client *client, pm_message_t mesg)
 	return kxtf9_disable(tf9);
 }
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static void kxtf9_early_suspend(struct early_suspend *handler)
+{
+	struct kxtf9_data *tf9;
+	tf9 = container_of(handler, struct kxtf9_data, early_suspend);
+
+	tf9->was_polling_at_suspend = atomic_read(&tf9->is_polling);
+	kxtf9_suspend(tf9->client, PMSG_SUSPEND);
+}
+
+static void kxtf9_late_resume(struct early_suspend *handler)
+{
+	struct kxtf9_data *tf9;
+	int err = -1;
+	tf9 = container_of(handler, struct kxtf9_data, early_suspend);
+
+	kxtf9_resume(tf9->client);
+	if (atomic_read(&tf9->enabled) && tf9->was_polling_at_suspend) {
+		err = kxtf9_update_odr(tf9, tf9->pdata->poll_interval);
+		if (err < 0)
+			dev_err(&tf9->client->dev,
+				"odr kickoff failed: %d\n", err);
+	}
+}
+#endif
+
 static const struct i2c_device_id kxtf9_id[] = {
 	{NAME, 0},
 	{},
@@ -1187,14 +1091,16 @@ static struct i2c_driver kxtf9_driver = {
 		   },
 	.probe = kxtf9_probe,
 	.remove = __devexit_p(kxtf9_remove),
+#ifndef CONFIG_HAS_EARLYSUSPEND
 	.resume = kxtf9_resume,
 	.suspend = kxtf9_suspend,
+#endif
 	.id_table = kxtf9_id,
 };
 
 static int __init kxtf9_init(void)
 {
-	pr_info(KERN_INFO "kxtf9 accelerometer driver\n");
+	pr_info("kxtf9 accelerometer driver\n");
 	return i2c_add_driver(&kxtf9_driver);
 }
 
@@ -1210,4 +1116,3 @@ module_exit(kxtf9_exit);
 MODULE_DESCRIPTION("KXTF9 accelerometer driver");
 MODULE_AUTHOR("Kionix");
 MODULE_LICENSE("GPL");
-

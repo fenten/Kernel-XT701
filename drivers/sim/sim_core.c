@@ -272,6 +272,8 @@ static void sim_module_dma_callback(INT32 lch, UINT16 ch_status,
 				    void *data);
 static int sim_qw_callback(void);
 static int sim_qw_check(void);
+static int start_clk_stop_procedure(UINT8 reader_id, UINT32 clock_count);
+
 static int regulator_enabled_flag;
 
 /******************************************************************************
@@ -498,7 +500,6 @@ static int sim_ioctl(struct inode *inode, struct file *file,
 				   CMD_PARAMETER_SIZE_3);
 
 		if ((UINT8) args_kernel[0] == SIM_MODULE_1) {
-			free_irq(INT_SIM_GENERAL, NULL);
 			status =
 			    request_irq(INT_SIM_GENERAL,
 					sim_module_int_irq_1,
@@ -602,6 +603,10 @@ static int sim_ioctl(struct inode *inode, struct file *file,
 
 				sim_module_interrupt_mode =
 				    SIM_MODULE_RESET_DETECT_MODE;
+				break;
+                        case SIM_MODULE_MODE_NONE:
+				sim_module_interrupt_mode =
+					SIM_MODULE_MODE_NONE;
 				break;
 			default:
 				tracemsg
@@ -1221,6 +1226,27 @@ static int sim_ioctl(struct inode *inode, struct file *file,
 	        wakeup_stop_status_timer(sim_timer);
 	        break;
 #endif
+
+	case SIM_IOCTL_START_STOP_CLK_PROCEDURE:
+		if (copy_from_user(args_kernel, (UINT32 *) arg,
+			CMD_PARAMETER_SIZE_2)) {
+			tracemsg("%s%s",
+				"Warning: failed to copy data from ",
+				"user-space for start clock stop procedure\n");
+			status = -EFAULT;
+		} else {
+			if (args_kernel[0] < NUM_SIM_MODULES) {
+				status = start_clk_stop_procedure(
+						args_kernel[0], args_kernel[1]);
+			} else {
+				tracemsg("%s%s",
+					"Warning: Invalid reader ID ",
+					"in SIM driver request.\n");
+				status = -EFAULT;
+			}
+		}
+		break;
+
 	default:
 		tracemsg
 		    ("Warning: Invalid request sent to the SIM driver.\n");
@@ -1508,7 +1534,16 @@ static void sim_module_int_tx(UINT8 reader_id)
 		sim_module_init_rx_mode(reader_id);
 
 	}
-    }
+        } else {
+		/* enable the receiver right away */
+		write_reg_bits(&(sim_registers[0]->usimconf2), TXNRX_MASK, 0);
+
+		/* indicate this is the last block */
+		sim_module_all_tx_data_sent = TRUE;
+
+		/* initialize rx mode */
+		sim_module_init_rx_mode(0);
+	}
     return;
 }
 
@@ -1684,6 +1719,8 @@ static irqreturn_t sim_module_int_irq_1(int irq, void *dev_id)
 			   SIM_MODULE_RESET_DETECT_MODE)
 		{
 			sim_module_int_reset_detect(SIM_MODULE_1);
+                } else if (sim_module_interrupt_mode == SIM_MODULE_MODE_NONE) {
+			sim_module_rx_event |= SIM_MODULE_EVENT_SPURIOUS_DATA;
 		}
 	}
 
@@ -1790,6 +1827,10 @@ IMPORTANT NOTES:
 */
 static void sim_module_set_voltage_level(SIM_MODULE_VOLTAGE_LEVEL level)
 {
+	/* Clear the USIM_IO_PWRDNZ bit to protect
+	   the USIM IO cell while changing voltage */
+	write_reg_bits((volatile UINT32 *) CONTROL_WKUP_CTRL,
+			CONTROL_WKUP_CTRL_MASK, 0);
 
 	/* power down the voltage regulator */
 	if (regulator_enabled_flag) {
@@ -1858,6 +1899,9 @@ static void sim_module_set_voltage_level(SIM_MODULE_VOLTAGE_LEVEL level)
 		/* let voltages stabalize */
 		msleep(1);
 	}
+	/* Set the USIM_IO_PWRDNZ bit after voltage is stable */
+	write_reg_bits((volatile UINT32 *) CONTROL_WKUP_CTRL,
+			CONTROL_WKUP_CTRL_MASK, CONTROL_WKUP_CTRL_MASK);
 
 	return;
 
@@ -1963,8 +2007,6 @@ int sim_slim_status_handler()
 	UINT8 tx_index = 0;
 	unsigned long flags = 0;
 	UINT8 sleep_counter = 0;
-	UINT32 save_irq_state = 0;
-	UINT32 save_irq = 0;
 	UINT8 sw1 = 0;
 	UINT8 sw2 = 0;
 
@@ -1989,12 +2031,6 @@ int sim_slim_status_handler()
 		sim_module_card_data[0].tx_length = 5;
 		sim_module_card_data[0].error_flag = ISR_NO_ERROR;
 
-		/* save the current interrupts */
-		save_irq_state = read_reg(&(sim_registers[0]->irqenable));    
-		save_irq = save_irq_state;
-    
-		save_irq_state &= ~(USIM_TX_EN_MASK);
-		save_irq_state |= (USIM_RX_EN_MASK);
 
 		/* clear interrupt sources */
 		write_reg_bits (&(sim_registers[0]->irqenable), USIM_IRQEN_MASK_ALL, 0);
@@ -2008,16 +2044,9 @@ int sim_slim_status_handler()
 		/* disable the transmitter */
 		write_reg_bits (&(sim_registers[0]->usimconf2), TXNRX_MASK, 0);
 
-		/* set the interrupt mask */
-		write_reg_bits(&(sim_registers[0]->irqenable), USIM_IRQEN_MASK_ALL, save_irq_state);
-
 		/* enable the module clock */
 		write_reg_bits (&(sim_registers[0]->usimcmd), CMD_CLOCK_STOP_MASK, 0);  
 
-		save_irq_state &= ~(USIM_RX_EN_MASK);
-  
-		/* set the interrupt mask */
-		write_reg_bits(&(sim_registers[0]->irqenable), USIM_IRQEN_MASK_ALL, save_irq_state);
     
 		bytes_recieved = 0;
     
@@ -2084,27 +2113,20 @@ int sim_slim_status_handler()
 
 		sim_module_card_data[0].buffer_index = 0;
 
-		/* enable the receiver right away */
-		write_reg_bits(&(sim_registers[0]->usimconf2), TXNRX_MASK, 0);
-
-		/* indicate this is the last block */
-		sim_module_all_tx_data_sent = TRUE;
-
-		/* initialize rx mode */
-		sim_module_init_rx_mode(0);
 
 		local_irq_restore(flags);
      
 		while ((!all_data_received) && (sleep_counter <= 19)) {
 			sleep_counter++;
 			msleep(5);
-		}  
+		}
+		if (all_data_received ==TRUE) {
+			sim_module_interrupt_mode =  SIM_MODULE_MODE_NONE;
+		}
 
 		preforming_status_command = FALSE;
 
 		if(all_data_received == TRUE){
-			/* restore interrupt sources */
-			write_reg(&(sim_registers[0]->irqenable), save_irq);
 
 			status_slow_card = FALSE;
 			all_data_received = FALSE;
@@ -2112,17 +2134,23 @@ int sim_slim_status_handler()
 			sw1 = sim_module_card_data[0].buffer[bytes_recieved - 2];
 			sw2 = sim_module_card_data[0].buffer[bytes_recieved - 1];
 
-			if(((sw1 == 0x90) || (card_type == GSM_SIM && sw1==0x67)) && (sw2 == 0x00)){
+			if(((sw1 == 0x90) || ((card_type == GSM_SIM) &&
+				(sw1==0x67))) && (sw2 == 0x00)){
 				sim_low_power_enabled = TRUE;
-      
+
 				/* Allow DMA to ACK idle requests */
 				write_reg_bits((volatile UINT32 *)DMA_SYSCONFIG,DMA_MIDLE,DMA_SYSCONFIG_MIDLEMODE(2));
 
 				/* Disable DMA mode for low power mode */
 				write_reg_bits(&(sim_registers[0]->usim_fifos), SIM_DMA_MODE_MASK, 0);
 
+				/*Start the clock stop procedure &
+				 wait maximum for 20 milli sec*/
+				start_clk_stop_procedure(SIM_MODULE_1, 20000);
+
 				/* disable the module clock */
-				write_reg_bits (&(sim_registers[0]->usimcmd), MODULE_CLK_EN_MASK, 0);
+				write_reg_bits(&(sim_registers[0]->usimcmd),
+					MODULE_CLK_EN_MASK, 0);
 
 				/* disable the SIM FCLK */
 				clk_disable(usim_fck);
@@ -2144,6 +2172,12 @@ int sim_slim_status_handler()
 			sim_module_rx_event |= SIM_MODULE_EVENT_RX_A;
 			sim_module_rx_event |= SIM_MODULE_EVENT_INCOMPLETE_SLIM_STATUS;
 			sim_module_rx_event |= SIM_MODULE_EVENT_NULL_BYTE_OVERFLOW;
+			status = 1;
+		}
+                /* send incomplete slim status with RX_A event */
+		else {
+			sim_module_rx_event |= SIM_MODULE_EVENT_RX_A |
+				SIM_MODULE_EVENT_INCOMPLETE_SLIM_STATUS;
 			status = 1;
 		}
 	}
@@ -2190,7 +2224,7 @@ static BOOL sim_mutex_update(UINT8 mutex_request)
 	if(mutex_action == MUTEX_UNLOCK_MASK) {
 		/* If the HW is currently not locked */
 		if(sim_mutex_locked_by_id == 0) {
-       			success = TRUE;
+			success = TRUE;
 		}
 		/* If the holder of the mutex is requesting to unlock */
 		else if(mutex_requester == sim_mutex_locked_by_id) {
@@ -2218,6 +2252,9 @@ static BOOL sim_mutex_update(UINT8 mutex_request)
 		else if((sim_mutex_locked_by_id == KERNEL_MUTEX_ID) &&
 			(mutex_requester == SCPC_MUTEX_ID)) {
 			sim_mutex_locked_by_id = SCPC_MUTEX_ID;
+			success = TRUE;
+		}
+		else if (sim_mutex_locked_by_id == mutex_requester) {
 			success = TRUE;
 		}
 		/* If it's locked, and requested by anyone but the KERNEL, then queue the request */
@@ -2581,6 +2618,64 @@ static int sim_qw_check(void)
 	return success;
 }
 #endif
+
+/* DESCRIPTION:
+		The function starts the clock stop procedure and waits untill
+		the procedure completes. The maximum wait is provided by the
+		caller. This is called during slim sim and from User Space
+		through IOCTL.
+	INPUTS:
+		reader_id sim reader ID
+		clock_count wait time in micro seconds
+
+	OUTPUTS:
+		Returns 0 if successful.
+
+	IMPORTANT NOTES:
+		None.
+*/
+static int start_clk_stop_procedure(UINT8 reader_id, UINT32 clock_count)
+{
+	int status = 0;
+
+	if (reader_id < NUM_SIM_MODULES) {
+
+		/* clear the clock stop interrupt */
+		write_reg_bits(&(sim_registers[reader_id]->irqstatus),
+			USIM_STOP_CLK_MASK, 0);
+
+		/* start the clock stop procedure */
+		write_reg_bits(&(sim_registers[reader_id]->usimcmd),
+			CMD_CLOCK_STOP_MASK, CMD_CLOCK_STOP_MASK);
+
+		while (clock_count--) {
+			if (((read_reg(&(sim_registers[reader_id]->irqstatus)) &
+				USIM_STOP_CLK_MASK) == USIM_STOP_CLK_MASK)) {
+				break;
+			}
+			udelay(1);
+		}
+
+		if (((read_reg(&(sim_registers[reader_id]->irqstatus)) &
+				USIM_STOP_CLK_MASK) != USIM_STOP_CLK_MASK)) {
+			tracemsg("Warning: start_clk_stop_procedure Failed\n");
+			status = -EFAULT;
+		}
+
+		/* clear the Clock Stop Interrupt */
+		write_reg_bits(&(sim_registers[reader_id]->irqstatus),
+			USIM_STOP_CLK_MASK, 0);
+
+		msleep(1);
+	} else{
+		tracemsg("%s%s",
+			"Warning: Invalid reader ID passed ",
+			"to start_clk_stop_procedure\n");
+		status = -EFAULT;
+	}
+	return status;
+}
+
 /* DESCRIPTION:
        The SIM intialization function.
  

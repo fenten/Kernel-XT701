@@ -166,6 +166,8 @@ struct ehci_hcd {			/* one per controller */
 	struct wake_lock        wake_lock_ehci_rwu;
 	/* wakelock for suspend/resume */
 	struct wake_lock        wake_lock_ehci_pm;
+	struct wake_lock        wake_lock_usbclocks;
+	/* wakelock for usb clocks */
 #endif
 };
 
@@ -626,7 +628,20 @@ static inline unsigned int ehci_readl(const struct ehci_hcd *ehci,
 		readl_be(regs) :
 		readl(regs);
 #else
-	return readl(regs);
+	if (omap_usbhost_wa && (unsigned int)regs == echi_omap_usbcmd_reg) {
+		unsigned long flags;
+		unsigned int v;
+
+		spin_lock_irqsave(&ehci_q_lock, flags);
+		v = readl(regs);
+		if(ehci_q_halted) {
+			v = (v & (~0x30)) | (echi_omap_usbcmd_backup & 0x30);
+		}
+		spin_unlock_irqrestore (&ehci_q_lock, flags);
+		return v;
+	} else
+		return readl(regs);
+
 #endif
 }
 
@@ -638,7 +653,18 @@ static inline void ehci_writel(const struct ehci_hcd *ehci,
 		writel_be(val, regs) :
 		writel(val, regs);
 #else
-	writel(val, regs);
+	if (omap_usbhost_wa && (unsigned int)regs == echi_omap_usbcmd_reg) {
+		unsigned long flags;
+		unsigned int v = val;
+		spin_lock_irqsave(&ehci_q_lock, flags);
+		if(ehci_q_halted) {
+			echi_omap_usbcmd_backup = v;
+			v = v & (~0x30);
+		}
+		writel(v, regs);
+		spin_unlock_irqrestore (&ehci_q_lock, flags);
+	} else
+		writel(val, regs);
 #endif
 }
 

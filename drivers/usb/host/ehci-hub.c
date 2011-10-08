@@ -113,6 +113,15 @@ static int ehci_bus_suspend (struct usb_hcd *hcd)
 	int			mask;
 	u32 __iomem		*hostpc_reg = NULL;
 
+	port = HCS_N_PORTS(ehci->hcs_params);
+	while (port--) {
+		u32 __iomem	*reg = &ehci->regs->port_status[port];
+		u32		t1 = ehci_readl(ehci, reg);
+		if (t1 & PORT_RESUME) {
+			LOG_USBHOST_ACTIVITY(aUsbHostDbg, iUsbHostDbg, 0x4D);
+			return -EBUSY;
+		}
+	}
 	ehci_dbg(ehci, "suspend root hub\n");
 
 	if (time_before (jiffies, ehci->next_statechange))
@@ -509,7 +518,7 @@ static int check_reset_complete (
 		 * don't give up ownership of the port, simply waiting for the
 		 * of the port, simply waiting for the peripheral to connect
 		 * again. */
-		if ((index != 2) || is_cdma_phone()) {
+		if (index != 2) {
 			/* what happens if HCS_N_CC(params) == 0 ?*/
 			port_status |= PORT_OWNER;
 			port_status &= ~PORT_RWC_BITS;

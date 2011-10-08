@@ -20,6 +20,8 @@
 #include "sec_ks_external.h"
 #include <linux/kernel.h>
 #include <linux/regulator/consumer.h>
+#include <linux/delay.h>
+#include <linux/cpu.h>
 
 
 static void SecGetModelId(void *data);
@@ -34,6 +36,8 @@ static void SecRaiseVfuse(void);
 static void SecLowerVfuse(void);
 
 static int SecProvisionModelID(unsigned int model_id);
+
+static int SecProvisionProd(unsigned int prod);
 
 static u32
 SEC_ENTRY_pub2sec_dispatcher(u32 appl_id, u32 proc_ID, u32 flag, ...);
@@ -141,6 +145,11 @@ int sec_ioctl(struct inode *inode, struct file *file,
 
 	case SEC_IOCTL_MODELID_PROV:
 		ret_val = SecProvisionModelID(ioctl_param);
+
+		break;
+
+	case SEC_IOCTL_PROD_PROV:
+		ret_val = SecProvisionProd(ioctl_param);
 
 		break;
 
@@ -259,8 +268,9 @@ static void SecRaiseVfuse(void)
 	if (ret_value == 0 || ret_value == 99)
 		ret_value = SecVfuseOn();
 
-	return;
+	mdelay(10);
 
+	return;
 }
 
 static void SecLowerVfuse(void)
@@ -290,7 +300,30 @@ static int SecProvisionModelID(unsigned int model_id)
 					      FLAG_START_HAL_CRITICAL, 1,
 					      (void *)
 					      __pa(&ns_efuse_params));
-	if ((result == 0))
+	if (result == 0)
+		ret_val = 0;
+
+	return ret_val;
+}
+
+static int SecProvisionProd(unsigned int prod)
+{
+	unsigned int result = 99;
+	int ret_val = 99;
+	SEC_PA_PARAMS ns_efuse_params;
+
+	ns_efuse_params.component = SEC_PROD;
+	ns_efuse_params.efuse_value = prod;
+
+	ns_efuse_params.bch_value = 99;
+
+	result = SEC_ENTRY_pub2sec_dispatcher(API_HAL_MOT_EFUSE,
+					      0,
+					      FLAG_IRQFIQ_MASK |
+					      FLAG_START_HAL_CRITICAL, 1,
+					      (void *)
+					      __pa(&ns_efuse_params));
+	if (result == 0)
 		ret_val = 0;
 
 	return ret_val;
@@ -384,7 +417,12 @@ static int SecVfuseOn(void)
 
 	if (sec_efuse_regulator == NULL)
 		return 99;
-	regulator_set_voltage(sec_efuse_regulator, 1900000, 1900000);
+
+	if (cpu_is_omap3630())
+		regulator_set_voltage(sec_efuse_regulator, 1700000, 1700000);
+	else
+		regulator_set_voltage(sec_efuse_regulator, 1900000, 1900000);
+
 	ret_value = regulator_enable(sec_efuse_regulator);
 	return ret_value;
 

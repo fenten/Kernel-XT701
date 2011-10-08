@@ -26,6 +26,7 @@
 #include <linux/workqueue.h>
 #include <linux/timer.h>
 #include <linux/clk.h>
+#include <linux/mmc/mmc.h>
 #include <linux/mmc/host.h>
 #include <linux/mmc/core.h>
 #include <linux/io.h>
@@ -41,7 +42,10 @@
 /* OMAP HSMMC Host Controller Registers */
 #define OMAP_HSMMC_SYSCONFIG	0x0010
 #define OMAP_HSMMC_SYSSTATUS	0x0014
+#define OMAP_HSMMC_CSRE		0x0024
+#define OMAP_HSMMC_SYSTEST	0x0028
 #define OMAP_HSMMC_CON		0x002C
+#define OMAP_HSMMC_PWCNT	0x0030
 #define OMAP_HSMMC_BLK		0x0104
 #define OMAP_HSMMC_ARG		0x0108
 #define OMAP_HSMMC_CMD		0x010C
@@ -50,12 +54,15 @@
 #define OMAP_HSMMC_RSP54	0x0118
 #define OMAP_HSMMC_RSP76	0x011C
 #define OMAP_HSMMC_DATA		0x0120
+#define OMAP_HSMMC_PSTATE	0x0124
 #define OMAP_HSMMC_HCTL		0x0128
 #define OMAP_HSMMC_SYSCTL	0x012C
 #define OMAP_HSMMC_STAT		0x0130
 #define OMAP_HSMMC_IE		0x0134
 #define OMAP_HSMMC_ISE		0x0138
+#define OMAP_HSMMC_AC12		0x013C
 #define OMAP_HSMMC_CAPA		0x0140
+#define OMAP_HSMMC_CUR_CAPA	0x0148
 
 #define VS18			(1 << 26)
 #define VS30			(1 << 25)
@@ -1045,11 +1052,15 @@ omap_hsmmc_prepare_data(struct omap_hsmmc_host *host, struct mmc_request *req)
 	if (req->data == NULL) {
 		OMAP_HSMMC_WRITE(host->base, BLK, 0);
 		/*
-		 * Set an arbitrary 100ms data timeout for commands with
+		 * Set an arbitrary data timeout for commands with
 		 * busy signal.
 		 */
-		if (req->cmd->flags & MMC_RSP_BUSY)
-			set_data_timeout(host, 100000000U, 0);
+		if (req->cmd->flags & MMC_RSP_BUSY) {
+			if (req->cmd->opcode == MMC_ERASE)
+				set_data_timeout(host, 2000000000U, 0);
+			else
+				set_data_timeout(host, 100000000U, 0);
+		}
 		return 0;
 	}
 
@@ -1243,25 +1254,24 @@ static int omap_hsmmc_get_cd(struct mmc_host *mmc)
 	return mmc_slot(host).card_detect(mmc_slot(host).card_detect_irq);
 }
 
-
 #ifdef CONFIG_MMC_EMBEDDED_SDIO
 static void omap_hsmmc_status_notify_cb(int card_present, void *dev_id)
 {
-       struct mmc_omap_host *host = dev_id;
-       struct omap_mmc_slot_data *slot = &mmc_slot(host);
+	struct mmc_omap_host *host = dev_id;
+	struct omap_mmc_slot_data *slot = &mmc_slot(host);
 
-        printk(KERN_DEBUG "%s: card_present %d\n", mmc_hostname(host->mmc),
-                              card_present);
+	printk(KERN_DEBUG "%s: card_present %d\n", mmc_hostname(host->mmc),
+				card_present);
 
-       host->carddetect = slot->card_detect(slot->card_detect_irq);
+	host->carddetect = slot->card_detect(slot->card_detect_irq);
 
-       sysfs_notify(&host->mmc->class_dev.kobj, NULL, "cover_switch");
-       if (host->carddetect) {
-               mmc_detect_change(host->mmc, (HZ * 200) / 1000);
-       } else {
-               mmc_omap_reset_controller_fsm(host, SRD);
-               mmc_detect_change(host->mmc, (HZ * 50) / 1000);
-       }
+	sysfs_notify(&host->mmc->class_dev.kobj, NULL, "cover_switch");
+	if (host->carddetect) {
+		mmc_detect_change(host->mmc, (HZ * 200) / 1000);
+	} else {
+		omap_hsmmc_reset_controller_fsm(host, SRD);
+		mmc_detect_change(host->mmc, (HZ * 50) / 1000);
+	}
 }
 #endif
 
@@ -1564,6 +1574,16 @@ static const struct mmc_host_ops omap_hsmmc_ps_ops = {
 	.panic_erase = raw_mmc_panic_erase,
 };
 
+#ifdef CONFIG_MMC_TEST_INSERT_REMOVE
+static struct omap_hsmmc_host *hsmmc_host;
+
+void hsmmc_schedule_4test(int carddetect)
+{
+      schedule_work(&hsmmc_host->mmc_carddetect_work);
+}
+EXPORT_SYMBOL(hsmmc_schedule_4test);
+#endif
+
 #ifdef CONFIG_DEBUG_FS
 
 static int omap_hsmmc_regs_show(struct seq_file *s, void *data)
@@ -1597,18 +1617,48 @@ static int omap_hsmmc_regs_show(struct seq_file *s, void *data)
 
 	seq_printf(s, "SYSCONFIG:\t0x%08x\n",
 			OMAP_HSMMC_READ(host->base, SYSCONFIG));
+	seq_printf(s, "SYSSTATUS:\t0x%08x\n",
+			OMAP_HSMMC_READ(host->base, SYSSTATUS));
+	seq_printf(s, "CSRE:\t\t0x%08x\n",
+			OMAP_HSMMC_READ(host->base, CSRE));
+	seq_printf(s, "SYSTEST:\t0x%08x\n",
+			OMAP_HSMMC_READ(host->base, SYSTEST));
 	seq_printf(s, "CON:\t\t0x%08x\n",
 			OMAP_HSMMC_READ(host->base, CON));
+	seq_printf(s, "PWCNT:\t\t0x%08x\n",
+			OMAP_HSMMC_READ(host->base, PWCNT));
+	seq_printf(s, "BLK:\t\t0x%08x\n",
+			OMAP_HSMMC_READ(host->base, BLK));
+	seq_printf(s, "ARG:\t\t0x%08x\n",
+			OMAP_HSMMC_READ(host->base, ARG));
+	seq_printf(s, "CMD:\t\t0x%08x\n",
+			OMAP_HSMMC_READ(host->base, CMD));
+	seq_printf(s, "RSP10:\t\t0x%08x\n",
+			OMAP_HSMMC_READ(host->base, RSP10));
+	seq_printf(s, "RSP32:\t\t0x%08x\n",
+			OMAP_HSMMC_READ(host->base, RSP32));
+	seq_printf(s, "RSP54:\t\t0x%08x\n",
+			OMAP_HSMMC_READ(host->base, RSP54));
+	seq_printf(s, "RSP76:\t\t0x%08x\n",
+			OMAP_HSMMC_READ(host->base, RSP76));
+	seq_printf(s, "PSTATE:\t\t0x%08x\n",
+			OMAP_HSMMC_READ(host->base, PSTATE));
 	seq_printf(s, "HCTL:\t\t0x%08x\n",
 			OMAP_HSMMC_READ(host->base, HCTL));
 	seq_printf(s, "SYSCTL:\t\t0x%08x\n",
 			OMAP_HSMMC_READ(host->base, SYSCTL));
+	seq_printf(s, "STAT:\t\t0x%08x\n",
+			OMAP_HSMMC_READ(host->base, STAT));
 	seq_printf(s, "IE:\t\t0x%08x\n",
 			OMAP_HSMMC_READ(host->base, IE));
 	seq_printf(s, "ISE:\t\t0x%08x\n",
 			OMAP_HSMMC_READ(host->base, ISE));
+	seq_printf(s, "AC12:\t\t0x%08x\n",
+			OMAP_HSMMC_READ(host->base, AC12));
 	seq_printf(s, "CAPA:\t\t0x%08x\n",
 			OMAP_HSMMC_READ(host->base, CAPA));
+	seq_printf(s, "CUR_CAPA:\t0x%08x\n",
+			OMAP_HSMMC_READ(host->base, CUR_CAPA));
 
 	clk_disable(host->fclk);
 
@@ -1685,6 +1735,7 @@ static int __init omap_hsmmc_probe(struct platform_device *pdev)
 	host->dma_ch	= -1;
 	host->irq	= irq;
 	host->id	= pdev->id;
+	host->mmc->init_delay = pdata->init_delay;
 	host->slot_id	= 0;
 	host->mapbase	= res->start;
 	host->base	= ioremap(host->mapbase, SZ_4K);
@@ -1872,6 +1923,10 @@ static int __init omap_hsmmc_probe(struct platform_device *pdev)
 		if (ret < 0)
 			goto err_cover_switch;
 	}
+#ifdef CONFIG_MMC_TEST_INSERT_REMOVE
+	if (host->id == OMAP_MMC1_DEVID)
+		hsmmc_host = host;
+#endif
 
 	omap_hsmmc_debugfs(mmc);
 
@@ -1964,8 +2019,8 @@ static int omap_hsmmc_suspend(struct platform_device *pdev, pm_message_t state)
 			}
 		}
 		cancel_work_sync(&host->mmc_carddetect_work);
-		mmc_host_enable(host->mmc);
 		ret = mmc_suspend_host(host->mmc, state);
+		mmc_host_enable(host->mmc);
 		if (ret == 0) {
 			OMAP_HSMMC_WRITE(host->base, ISE, 0);
 			OMAP_HSMMC_WRITE(host->base, IE, 0);
