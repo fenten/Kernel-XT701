@@ -971,11 +971,6 @@ config COMPAT_BRK
 
 	  On non-ancient distros (post-2000 ones) N is usually a safe choice.
 
-config SLQB_DEBUG
-	default y
-	bool "Enable SLQB debugging support"
-	depends on SLQB
-
 choice
 	prompt "Choose SLAB allocator"
 	default SLUB
@@ -998,9 +993,6 @@ config SLUB
 	   of queues of objects. SLUB can use memory efficiently
 	   and has enhanced diagnostics. SLUB is the default choice for
 	   a slab allocator.
-
-config SLQB
-	bool "SLQB (Qeued allocator)"
 
 config SLOB
 	depends on EMBEDDED
@@ -1043,7 +1035,7 @@ config HAVE_GENERIC_DMA_COHERENT
 config SLABINFO
 	bool
 	depends on PROC_FS
-	depends on SLAB || SLUB_DEBUG || SLQB
+	depends on SLAB || SLUB_DEBUG
 	default y
 
 config RT_MUTEXES
