@@ -28,6 +28,9 @@
 #include <asm/unistd.h>
 #include <asm/traps.h>
 #include <asm/unwind.h>
+#ifdef CONFIG_OMAP_SECURE_FIQ_HACK
+#include <plat/sram.h>
+#endif /* CONFIG_OMAP_SECURE_FIQ_HACK */
 
 #include "ptrace.h"
 #include "signal.h"
@@ -760,3 +763,55 @@ void __init early_trap_init(void)
 	flush_icache_range(vectors, vectors + PAGE_SIZE);
 	modify_domain(DOMAIN_USER, DOMAIN_CLIENT);
 }
+
+#ifdef CONFIG_OMAP_SECURE_FIQ_HACK
+struct ppa_regs{
+    unsigned long uregs[15];
+};
+
+/* the same definition is used by PPA */
+#define ppa_cpsr	uregs[0]
+#define ppa_pc		uregs[1]
+#define ppa_r0		uregs[2]
+#define ppa_r1		uregs[3]
+#define ppa_r2		uregs[4]
+#define ppa_r3		uregs[5]
+#define ppa_r4		uregs[6]
+#define ppa_r5		uregs[7]
+#define ppa_r6		uregs[8]
+#define ppa_r7		uregs[9]
+#define ppa_r8		uregs[10]
+#define ppa_r9		uregs[11]
+#define ppa_r10		uregs[12]
+#define ppa_r11		uregs[13]
+#define ppa_r12		uregs[14]
+
+void c_fiq_handler(struct pt_regs *regs, int reason)
+{
+	struct ppa_regs * x = (struct ppa_regs *)(omap_get_sram_va()
+						+ 0x10000 - 0x80);
+	struct thread_info *thread = current_thread_info();
+
+	console_verbose();
+
+	regs->ARM_ip = x->uregs[14];
+	regs->ARM_fp = x->uregs[13];
+	regs->ARM_pc = x->uregs[1];
+	regs->ARM_cpsr = x->uregs[0];
+	regs->ARM_r0 = x->uregs[2];
+	regs->ARM_r1 = x->uregs[3];
+	regs->ARM_r2 = x->uregs[4];
+	regs->ARM_r3 = x->uregs[5];
+	regs->ARM_r4 = x->uregs[6];
+	regs->ARM_r5 = x->uregs[7];
+	regs->ARM_r6 = x->uregs[8];
+	regs->ARM_r7 = x->uregs[9];
+	regs->ARM_r8 = x->uregs[10];
+	regs->ARM_r9 = x->uregs[11];
+	regs->ARM_r10 = x->uregs[12];
+
+	__die("Ooops - Returned from Secure FIQ", 0, thread, regs);
+	panic("Returned from Secure FIQ");
+
+}
+#endif /* CONFIG_OMAP_SECURE_FIQ_HACK */

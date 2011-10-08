@@ -490,7 +490,7 @@ static void adp5588_work_func(struct work_struct *work)
 			if (kp->last_key == AD5588_RINGERSILENT_SW) {
 				/* got RINGER/SILENT switch event */
 				adp5588_pdata->ringer_switch =
-					kp->last_key_state;
+					!kp->last_key_state;
 
 				dev_dbg(&client->dev,
 					"RINGER/SILENT switch=%d\n",
@@ -752,7 +752,8 @@ static int adp5588_probe(struct i2c_client *client,
 			"switch state. Defaulted it to OFF\n",
 			__func__);
 	} else {
-		adp5588_pdata->ringer_switch = !(ADP5588_RINGER_KEY_BIT & reg);
+		adp5588_pdata->ringer_switch = ((ADP5588_RINGER_KEY_BIT & reg)
+			== ADP5588_RINGER_KEY_BIT);
 	}
 
 	printk(KERN_INFO "%s: RINGER/SILENT switch is %s\n",

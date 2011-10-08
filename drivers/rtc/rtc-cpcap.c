@@ -456,12 +456,22 @@ static int __devexit cpcap_rtc_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static void cpcap_rtc_shutdown(struct platform_device *pdev)
+{
+	struct cpcap_rtc *rtc;
+
+	rtc = platform_get_drvdata(pdev);
+
+	cpcap_irq_mask(rtc->cpcap, CPCAP_IRQ_TODA);
+}
+
 static struct platform_driver cpcap_rtc_driver = {
 	.driver = {
 		.name = "cpcap_rtc",
 	},
 	.probe = cpcap_rtc_probe,
 	.remove = __devexit_p(cpcap_rtc_remove),
+	.shutdown = cpcap_rtc_shutdown,
 };
 
 static int __init cpcap_rtc_init(void)

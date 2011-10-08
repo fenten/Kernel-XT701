@@ -304,7 +304,10 @@ static struct task_struct *select_bad_process(unsigned long *ppoints,
  *
  * Call with tasklist_lock read-locked.
  */
-static void dump_tasks(const struct mem_cgroup *mem)
+#ifndef CONFIG_DUMP_TASKS_ON_NOPAGE
+static
+#endif
+void dump_tasks(const struct mem_cgroup *mem)
 {
 	struct task_struct *g, *p;
 

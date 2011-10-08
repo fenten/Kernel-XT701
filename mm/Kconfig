@@ -140,6 +140,14 @@ config MEMORY_HOTREMOVE
 	depends on MEMORY_HOTPLUG && ARCH_ENABLE_MEMORY_HOTREMOVE
 	depends on MIGRATION
 
+config DUMP_TASKS_ON_NOPAGE
+    bool "Dump tasks on nopage occurs"
+	default n
+	help
+	  This is only used to dump tasks info including memory usage
+	  on no page occurs. Its precondition is sysctl oom_dump_tasks
+	  equals to 1.
+
 #
 # If we have space for more page flags then we can enable additional
 # optimizations and functionality.

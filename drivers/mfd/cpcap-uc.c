@@ -39,6 +39,8 @@
 #define RAM_START_ST         0x0000
 #define RAM_END_ST           0x0FFF
 
+int debug_flag = 0;
+
 enum {
 	READ_STATE_1,	/* Send size and location of RAM read. */
 	READ_STATE_2,   /*!< Read MT registers. */
@@ -217,6 +219,10 @@ static void ram_write_state_machine(enum cpcap_irqs irq, void *data)
 	if (irq != CPCAP_IRQ_UC_PRIRAMW)
 		return;
 
+	if (debug_flag) {
+		printk("-------------ram_write_state_machine(), uc_data->state=%d\n", uc_data->state);
+	}
+
 	switch (uc_data->state) {
 	case WRITE_STATE_1:
 		cpcap_regacc_write(uc_data->cpcap, CPCAP_REG_MT1,
@@ -231,6 +237,9 @@ static void ram_write_state_machine(enum cpcap_irqs irq, void *data)
 
 	case WRITE_STATE_2:
 		cpcap_regacc_read(uc_data->cpcap, CPCAP_REG_MT1, &error_check);
+		if (debug_flag) {
+			printk("-------------WRITE_STATE_2, error_check=0x%x\n", error_check);
+		}
 
 		if (error_check == ERROR_MACRO_WRITE) {
 			uc_data->state = WRITE_STATE_1;
@@ -283,6 +292,9 @@ static void ram_write_state_machine(enum cpcap_irqs irq, void *data)
 
 	case WRITE_STATE_4:
 		cpcap_regacc_read(uc_data->cpcap, CPCAP_REG_MT1, &error_check);
+		if (debug_flag) {
+			printk("-------------WRITE_STATE_4, error_check=0x%x\n", error_check);
+		}
 
 		if (error_check != ERROR_MACRO_WRITE)
 			uc_data->cb_status = 0;
@@ -348,6 +360,8 @@ static int ram_write(struct cpcap_uc_data *uc_data, unsigned short address,
 {
 	int retval = -EFAULT;
 
+	printk("-------------ram_write(), enter\n");
+
 	mutex_lock(&uc_data->lock);
 
 	if ((uc_data->cpcap->vendor == CPCAP_VENDOR_ST) &&
@@ -360,16 +374,25 @@ static int ram_write(struct cpcap_uc_data *uc_data, unsigned short address,
 		(data != NULL) &&
 		is_valid_address(uc_data->cpcap, address, num_words) &&
 	    !uc_data->uc_reset) {
+		printk("-------------ram_write(), prepare loading data\n");
 		uc_data->req.address = address;
 		uc_data->req.data = data;
 		uc_data->req.num_words = num_words;
 		uc_data->state = WRITE_STATE_1;
 		uc_data->state_cntr = 0;
-		INIT_COMPLETION(uc_data->completion);
+		printk("-------------ram_write(), address=0x%x, num_workds=%d\n", uc_data->req.address, uc_data->req.num_words);
+		if (uc_data->req.address == 0x90EC)
+		{
+			printk("-------------ram_write, set debug flag to 1\n");
+			debug_flag = 1;
+		}
 
+		INIT_COMPLETION(uc_data->completion);
+		printk("-------------ram_write(), after INIT_COMPLETETION\n");
 		retval = cpcap_regacc_write(uc_data->cpcap, CPCAP_REG_MI2,
 					CPCAP_BIT_PRIRAMW,
 					CPCAP_BIT_PRIRAMW);
+		printk("-------------ram_write(), after set CPCAP_BIT_PRIRAMW, retval=%d\n", retval);
 		if (retval)
 			goto err;
 
@@ -377,11 +400,14 @@ static int ram_write(struct cpcap_uc_data *uc_data, unsigned short address,
 		 * cannot be called from the state machine. Doing so causes
 		 * a deadlock. */
 		retval = cpcap_irq_unmask(uc_data->cpcap, CPCAP_IRQ_UC_PRIRAMW);
+		printk("-------------ram_write(), after unmask CPCAP_IRQ_UC_PRIRAMW, retval=%d\n", retval);
 		if (retval)
 			goto err;
 
 		wait_for_completion(&uc_data->completion);
 		retval = uc_data->cb_status;
+		debug_flag = 0;
+		printk("-------------ram_write(), after wait_for_completion, retval=%d\n", retval);
 	}
 
 err:
@@ -392,7 +418,7 @@ err:
 	}
 
 	mutex_unlock(&uc_data->lock);
-
+	printk("-------------ram_write(), leaving, retval=%d\n", retval);
 	return retval;
 }
 
@@ -469,6 +495,7 @@ static ssize_t fops_write(struct file *file, const char *buf,
 	unsigned short *data;
 	struct cpcap_uc_data *uc_data = file->private_data;
 
+	printk("-------------fops_write(), enter\n");
 	if ((buf != NULL) && (ppos != NULL) && (count >= 2)) {
 		data = kzalloc(count, GFP_KERNEL);
 
@@ -673,6 +700,20 @@ unsigned char cpcap_uc_status(struct cpcap_device *cpcap,
 	return retval;
 }
 EXPORT_SYMBOL_GPL(cpcap_uc_status);
+
+#ifdef CONFIG_PM_DBG_DRV
+int cpcap_uc_ram_write(struct cpcap_device *cpcap, unsigned short address,
+		     unsigned short num_words, unsigned short *data)
+{
+	return ram_write(cpcap->ucdata, address, num_words, data);
+}
+
+int cpcap_uc_ram_read(struct cpcap_device *cpcap, unsigned short address,
+		    unsigned short num_words, unsigned short *data)
+{
+	return ram_read(cpcap->ucdata, address, num_words, data);
+}
+#endif /* CONFIG_PM_DBG_DRV */
 
 static int fw_load(struct cpcap_uc_data *uc_data, struct device *dev)
 {

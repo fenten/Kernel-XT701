@@ -231,6 +231,15 @@ static int cpcap_reboot(struct notifier_block *this, unsigned long code,
 		result = NOTIFY_BAD;
 	}
 
+	/* Always clear the CPCAP_BIT_UCRESET_I bit */
+	ret = cpcap_regacc_write(misc_cpcap, CPCAP_REG_INT3,
+		1, CPCAP_BIT_UCRESET_I);
+	if (ret) {
+		dev_err(&(misc_cpcap->spi->dev),
+			"Clear UC RESET bit failure.\n");
+		result = NOTIFY_BAD;
+	}
+
 	cpcap_regacc_write(misc_cpcap, CPCAP_REG_CRM, 0x0300, 0x3FFF);
 
 	(void)cpcap_regacc_read(misc_cpcap, CPCAP_REG_INTS2, &value);

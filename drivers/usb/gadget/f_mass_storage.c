@@ -251,6 +251,7 @@ struct lun {
 	unsigned int	prevent_medium_removal : 1;
 	unsigned int	registered : 1;
 	unsigned int	info_valid : 1;
+	unsigned int	cdrom:1;
 
 	u32		sense_data;
 	u32		sense_data_info;
@@ -387,6 +388,9 @@ struct fsg_dev {
 	struct switch_dev sdev;
 
 	struct wake_lock wake_lock;
+
+	/* workqueue: to handle cdrom eject */
+	struct delayed_work eject_delay_work;
 };
 
 static inline struct fsg_dev *func_to_dev(struct usb_function *f)
@@ -1296,7 +1300,7 @@ static int do_inquiry(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 
 	memset(buf, 0, 8);	/* Non-removable, direct-access device */
 #ifdef CONFIG_USB_MOT_ANDROID
-	buf[0] = (cdrom_enable ? TYPE_CDROM : TYPE_DISK);
+	buf[0] = (fsg->curlun->cdrom ? TYPE_CDROM : TYPE_DISK);
 #endif
 
 	buf[1] = 0x80;	/* set removable bit */
@@ -1423,12 +1427,104 @@ static int do_read_header(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 	return 8;
 }
 
+struct toc_header {
+	u8 data_len_msb;
+	u8 data_len_lsb;
+	u8 first_track_number;
+	u8 last_track_number;
+};
+
+struct toc_descriptor {
+	u8 ctrl;
+	u8 adr;
+	u8 tno;
+	u8 point;
+	u8 min;
+	u8 sec;
+	u8 frame;
+	u8 zero;
+	u8 pmin;
+	u8 psec;
+	u8 pframe;
+};
+
+static int build_toc_response_buf(u8 *dest)
+{
+	struct toc_header *pheader = (struct toc_header *)dest;
+	struct toc_descriptor *pdesc;
+
+	/* build header */
+	pheader->data_len_msb = 0x00;
+	pheader->data_len_lsb = 0x2E; /* TOC data length */
+	pheader->first_track_number = 0x01;
+	pheader->last_track_number = 0x01;
+
+	/* toc descriptor 1 */
+	pdesc = (struct toc_descriptor *)&dest[4];
+	pdesc->ctrl = 0x01;
+	pdesc->adr = 0x16;
+	pdesc->tno = 0x00;
+	pdesc->point = 0xA0;
+	pdesc->min = 0x00;
+	pdesc->sec = 0x00;
+	pdesc->frame = 0x00;
+	pdesc->zero = 0x00;
+	pdesc->pmin = 0x01;	/* first track number */
+	pdesc->psec = 0x00;
+	pdesc->pframe = 0x00;
+
+	/* toc descriptor 2 */
+	pdesc = pdesc + 1;
+	pdesc->ctrl = 0x01;
+	pdesc->adr = 0x16;
+	pdesc->tno = 0x00;
+	pdesc->point = 0xA1;
+	pdesc->min = 0x00;
+	pdesc->sec = 0x00;
+	pdesc->frame = 0x00;
+	pdesc->zero = 0x00;
+	pdesc->pmin = 0x01;	/* last track number */
+	pdesc->psec = 0x00;
+	pdesc->pframe = 0x00;
+
+	/* toc descriptor 3 */
+	pdesc = pdesc + 1;
+	pdesc->ctrl = 0x01;
+	pdesc->adr = 0x16;
+	pdesc->tno = 0x00;
+	pdesc->point = 0xA2;
+	pdesc->min = 0x00;
+	pdesc->sec = 0x00;
+	pdesc->frame = 0x00;
+	pdesc->zero = 0x00;
+	pdesc->pmin = 0x4F;	/* pmin, psec, pframe represents */
+	pdesc->psec = 0x21;	/* start position of lead-out */
+	pdesc->pframe = 0x029;
+
+	/* toc descriptor 4 */
+	pdesc = pdesc + 1;
+	pdesc->ctrl = 0x01;
+	pdesc->adr = 0x14;
+	pdesc->tno = 0x00;
+	pdesc->point = 0x01;
+	pdesc->min = 0x00;
+	pdesc->sec = 0x00;
+	pdesc->frame = 0x00;
+	pdesc->zero = 0x00;
+	pdesc->pmin = 0x00;	/* pmin, psec, pframe represents */
+	pdesc->psec = 0x02;	/* start position of track */
+	pdesc->pframe = 0x00;
+
+	/* return total packet length */
+	return (sizeof(struct toc_descriptor)*4) + sizeof(struct toc_header);
+}
+
 static int do_read_toc(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 {
 	struct lun *curlun = fsg->curlun;
-	int msf = fsg->cmnd[1] & 0x02;
 	int start_track = fsg->cmnd[6];
 	u8 *buf = (u8 *) bh->buf;
+	int toc_buf_len = 0;
 
 	if ((fsg->cmnd[1] & ~0x02) != 0 ||      /* Mask away MSF */
 		start_track > 1) {
@@ -1436,18 +1532,8 @@ static int do_read_toc(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 		return -EINVAL;
 	}
 
-	memset(buf, 0, 20);
-	buf[1] = (20 - 2);      /* TOC data length */
-	buf[2] = 1;             /* First track number */
-	buf[3] = 1;             /* Last track number */
-	buf[5] = 0x16;          /* Data track, copying allowed */
-	buf[6] = 0x01;          /* Only track is number 1 */
-	store_cdrom_address(&buf[8], msf, 0);
-
-	buf[13] = 0x16;         /* Lead-out track is data */
-	buf[14] = 0xAA;         /* Lead-out track number */
-	store_cdrom_address(&buf[16], msf, curlun->num_sectors);
-	return 20;
+	toc_buf_len = build_toc_response_buf(buf);
+	return toc_buf_len;
 }
 #endif
 
@@ -1552,7 +1638,24 @@ static int do_start_stop(struct fsg_dev *fsg)
 		}
 	}
 
+	/* for phones CDROM value is 0, loej=1, start=0
+	then schedule an event for mode change */
+	if (curlun->ro && !fsg->lun && loej && !start) {
+		printk(KERN_INFO "schedule fsg eject\n");
+		schedule_delayed_work(&(fsg->eject_delay_work), HZ);
+	}
+
 	return 0;
+}
+
+static void fsg_on_cdrom_eject(struct work_struct *work)
+{
+	u8 mode;
+	/* modes are standard values defined that map the
+	mot_android_pid_vid table and values sent from host
+	0x1E corresponds to "acm_eth_mtp" mode */
+	mode = 0x1E;
+	mode_switch_cb((int)mode);
 }
 
 static int do_prevent_allow(struct fsg_dev *fsg)
@@ -2029,10 +2132,10 @@ static int do_scsi_command(struct fsg_dev *fsg)
 
 #ifdef CONFIG_USB_MOT_ANDROID
 	case SC_READ_HEADER:
-		if (!cdrom_enable)
+		if (!fsg->curlun->cdrom)
 			goto unknown_cmnd;
-			fsg->data_size_from_cmnd = get_be16(&fsg->cmnd[7]);
-			reply = check_command(fsg, 10, DATA_DIR_TO_HOST,
+		fsg->data_size_from_cmnd = get_be16(&fsg->cmnd[7]);
+		reply = check_command(fsg, 10, DATA_DIR_TO_HOST,
 			(3 << 7) | (0x1f << 1), 1,
 		"READ HEADER");
 		if (reply == 0)
@@ -2040,12 +2143,16 @@ static int do_scsi_command(struct fsg_dev *fsg)
 		break;
 
 	case SC_READ_TOC:
-		if (!cdrom_enable)
+		if (!fsg->curlun->cdrom)
 			goto unknown_cmnd;
 		fsg->data_size_from_cmnd = get_be16(&fsg->cmnd[7]);
+		/* Set bit 9 to 1 in the mask because Mac Sends a value in byte
+		* 9  of the READ_TOC . Windows does not set it, but changing
+		* the mask covers both host envs.
+		*/
 		reply = check_command(fsg, 10, DATA_DIR_TO_HOST,
-		(7 << 6) | (1 << 1), 1,
-		"READ TOC");
+				(0xf << 6) | (1 << 1), 1,
+				"READ TOC");
 		if (reply == 0)
 			reply = do_read_toc(fsg, bh);
 		break;
@@ -2647,7 +2754,7 @@ static int open_backing_file(struct fsg_dev *fsg, struct lun *curlun,
 	num_sectors = size >> 9;	/* File size in 512-byte sectors */
 #ifdef CONFIG_USB_MOT_ANDROID
 	min_sectors = 1;
-	if (cdrom_enable) {
+	if (curlun->cdrom) {
 		num_sectors &= ~3;      /* Reduce to a multiple of 2048 */
 		min_sectors = 300 * 4;  /* Smallest track is 300 frames */
 		if (num_sectors >= 256 * 60 * 75 * 4) {
@@ -2813,6 +2920,8 @@ static int __init fsg_alloc(void)
 	init_rwsem(&fsg->filesem);
 	kref_init(&fsg->ref);
 	init_completion(&fsg->thread_notifier);
+	INIT_DELAYED_WORK((struct delayed_work *)&(fsg->eject_delay_work),\
+	 fsg_on_cdrom_eject);
 
 	the_fsg = fsg;
 	return 0;
@@ -2915,13 +3024,14 @@ fsg_function_bind(struct usb_configuration *c, struct usb_function *f)
 
 	for (i = 0; i < fsg->nluns; ++i) {
 		curlun = &fsg->luns[i];
-#ifdef CONFIG_USB_MOT_ANDROID
-		if (cdrom_enable)
-			curlun->ro = 1;
-		else
-			curlun->ro = 0;
-#else
 		curlun->ro = 0;
+		curlun->cdrom = 0;
+#ifdef CONFIG_USB_MOT_ANDROID
+		/* LUN1 when available is always CD-ROM */
+		if (i == 1) {
+			curlun->ro = 1;
+			curlun->cdrom = 1;
+		}
 #endif
 		curlun->dev.release = lun_release;
 		/* use "usb_mass_storage" platform device as parent if available */
@@ -3062,7 +3172,16 @@ static int fsg_function_set_alt(struct usb_function *f,
 	do_set_interface(fsg, 0);
 	raise_exception(fsg, FSG_STATE_CONFIG_CHANGE);
 #ifdef CONFIG_USB_MOT_ANDROID
-	usb_interface_enum_cb(cdrom_enable ? CDROM_TYPE_FLAG : MSC_TYPE_FLAG);
+	if (fsg->nluns == 1) {
+		if (cdrom_enable) {
+			fsg->luns[0].cdrom = 1;
+			fsg->luns[0].ro = 1;
+		} else {
+			fsg->luns[0].cdrom = 0;
+			fsg->luns[0].ro = 0;
+		}
+	}
+	usb_interface_enum_cb(CDROM_TYPE_FLAG|MSC_TYPE_FLAG);
 #endif
 	return 0;
 }

@@ -122,7 +122,7 @@ void __attribute__ ((weak)) arch_suspend_enable_irqs(void)
 }
 
 /**
- *	suspend_enter - enter the desired system sleep state.
+ *	_suspend_enter - enter the desired system sleep state.
  *	@state:		state to enter
  *
  *	This function should be called after devices have been suspended.
@@ -192,6 +192,7 @@ static int _suspend_enter(suspend_state_t state)
 static int suspend_enter(suspend_state_t state)
 {
 	int error = 0;
+
 	error = _suspend_enter(state);
 
 #ifdef CONFIG_QUICK_WAKEUP

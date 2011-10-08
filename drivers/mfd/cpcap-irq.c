@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009, Motorola, All Rights Reserved.
+ * Copyright (C) 2009 - 2010, Motorola, All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -28,6 +28,12 @@
 #include <linux/spi/spi.h>
 #include <linux/debugfs.h>
 
+#ifdef CONFIG_PM_DEEPSLEEP
+#include <linux/suspend.h>
+#endif
+
+#include <linux/seq_file.h>
+
 #define NUM_INT_REGS      5
 #define NUM_INTS_PER_REG  16
 
@@ -42,14 +48,19 @@ struct cpcap_event_handler {
 	void *data;
 };
 
+struct cpcap_irq_info {
+	uint8_t registered;
+	uint8_t enabled;
+	uint32_t count;
+};
+
 struct cpcap_irqdata {
 	struct mutex lock;
 	struct work_struct work;
 	struct workqueue_struct *workqueue;
 	struct cpcap_device *cpcap;
 	struct cpcap_event_handler event_handler[CPCAP_IRQ__NUM];
-	uint64_t registered;
-	uint64_t enabled;
+	struct cpcap_irq_info irq_info[CPCAP_IRQ__NUM];
 	struct wake_lock wake_lock;
 };
 
@@ -151,7 +162,42 @@ struct pwrkey_data {
 	struct cpcap_device *cpcap;
 	enum pwrkey_states state;
 	struct wake_lock wake_lock;
+#ifdef CONFIG_PM_DEEPSLEEP
+	struct hrtimer longPress_timer;
+	int expired;
+#endif
+
 };
+
+#ifdef CONFIG_PM_DBG_DRV
+static struct cpcap_irq_pm_dbg {
+	unsigned short en_ints[NUM_INT_REGS];
+	unsigned char suspend;
+	unsigned char wakeup;
+} pm_dbg_info;
+#endif /* CONFIG_PM_DBG_DRV */
+
+#ifdef CONFIG_PM_DEEPSLEEP
+
+static enum hrtimer_restart longPress_timer_callback(struct hrtimer *timer)
+{
+	struct pwrkey_data *pwrkey_data  =
+		container_of(timer, struct pwrkey_data, longPress_timer);
+	struct cpcap_device *cpcap = pwrkey_data->cpcap;
+	enum pwrkey_states new_state = PWRKEY_PRESS;
+
+	wake_lock_timeout(&pwrkey_data->wake_lock, 20);
+
+
+	pwrkey_data->expired = 1;
+	cpcap_broadcast_key_event(cpcap, KEY_END, new_state);
+	pwrkey_data->state = new_state;
+
+	return HRTIMER_NORESTART;
+
+}
+#endif
+
 
 static void pwrkey_handler(enum cpcap_irqs irq, void *data)
 {
@@ -161,8 +207,32 @@ static void pwrkey_handler(enum cpcap_irqs irq, void *data)
 
 	new_state = (enum pwrkey_states) cpcap_irq_sense(cpcap, irq, 0);
 
+#ifdef CONFIG_PM_DEEPSLEEP
+
+	if (get_deepsleep_mode()) {
+		if (new_state == PWRKEY_RELEASE) {
+			hrtimer_cancel(&pwrkey_data->longPress_timer);
+			wake_lock_timeout(&pwrkey_data->wake_lock, 20);
+			if (pwrkey_data->expired == 1) {
+				pwrkey_data->expired = 0;
+				cpcap_broadcast_key_event(cpcap,
+						KEY_END, new_state);
+				pwrkey_data->state = new_state;
+			}
+		} else if (new_state == PWRKEY_PRESS) {
+			pwrkey_data->expired = 0;
+			hrtimer_start(&pwrkey_data->longPress_timer,
+					ktime_set(2, 0), HRTIMER_MODE_REL);
+			wake_lock_timeout(&pwrkey_data->wake_lock, 2*HZ+5);
+		}
+	}
+
+
+	else if ((new_state < PWRKEY_UNKNOWN) && (new_state != last_state)) {
+#else
 
 	if ((new_state < PWRKEY_UNKNOWN) && (new_state != last_state)) {
+#endif
 		wake_lock_timeout(&pwrkey_data->wake_lock, 20);
 		cpcap_broadcast_key_event(cpcap, KEY_END, new_state);
 		pwrkey_data->state = new_state;
@@ -184,6 +254,15 @@ static int pwrkey_init(struct cpcap_device *cpcap)
 	if (retval)
 		kfree(data);
 	wake_lock_init(&data->wake_lock, WAKE_LOCK_SUSPEND, "pwrkey");
+#ifdef CONFIG_PM_DEEPSLEEP
+
+	hrtimer_init(&(data->longPress_timer),
+			CLOCK_MONOTONIC,
+			HRTIMER_MODE_REL);
+
+	(data->longPress_timer).function = longPress_timer_callback;
+#endif
+
 	return retval;
 }
 
@@ -269,6 +348,14 @@ static void irq_work_func(struct work_struct *work)
 	}
 	enable_irq(spi->irq);
 
+#ifdef CONFIG_PM_DBG_DRV
+	if ((pm_dbg_info.suspend != 0) && (pm_dbg_info.wakeup == 0)) {
+		for (i = 0; i < NUM_INT_REGS; ++i)
+			pm_dbg_info.en_ints[i] = en_ints[i];
+		pm_dbg_info.wakeup = 1;
+	}
+#endif /* CONFIG_PM_DBG_DRV */
+
 	/* lock protects event handlers and data */
 	mutex_lock(&data->lock);
 	for (i = 0; i < NUM_INT_REGS; ++i) {
@@ -285,10 +372,15 @@ static void irq_work_func(struct work_struct *work)
 			en_ints[i] &= ~(1 << index);
 			/* find the event that occurred */
 			index += CPCAP_IRQ__START + (i * NUM_INTS_PER_REG);
+			if (index >= CPCAP_IRQ__NUM)
+				goto error;
 			event_handler = &data->event_handler[index];
 
 			if (event_handler->func)
 				event_handler->func(index, event_handler->data);
+
+			data->irq_info[index].count++;
+
 		}
 	}
 error:
@@ -296,12 +388,125 @@ error:
 	wake_unlock(&data->wake_lock);
 }
 
+#ifdef CONFIG_DEBUG_FS
+static int cpcap_dbg_irq_show(struct seq_file *s, void *data)
+{
+	static const char *irq_name[] = {
+		[CPCAP_IRQ_HSCLK]                 = "HSCLK",
+		[CPCAP_IRQ_PRIMAC]                = "PRIMAC",
+		[CPCAP_IRQ_SECMAC]                = "SECMAC",
+		[CPCAP_IRQ_LOWBPL]                = "LOWBPL",
+		[CPCAP_IRQ_SEC2PRI]               = "SEC2PRI",
+		[CPCAP_IRQ_LOWBPH]                = "LOWBPH",
+		[CPCAP_IRQ_EOL]                   = "EOL",
+		[CPCAP_IRQ_TS]                    = "TS",
+		[CPCAP_IRQ_ADCDONE]               = "ADCDONE",
+		[CPCAP_IRQ_HS]                    = "HS",
+		[CPCAP_IRQ_MB2]                   = "MB2",
+		[CPCAP_IRQ_VBUSOV]                = "VBUSOV",
+		[CPCAP_IRQ_RVRS_CHRG]             = "RVRS_CHRG",
+		[CPCAP_IRQ_CHRG_DET]              = "CHRG_DET",
+		[CPCAP_IRQ_IDFLOAT]               = "IDFLOAT",
+		[CPCAP_IRQ_IDGND]                 = "IDGND",
+
+		[CPCAP_IRQ_SE1]                   = "SE1",
+		[CPCAP_IRQ_SESSEND]               = "SESSEND",
+		[CPCAP_IRQ_SESSVLD]               = "SESSVLD",
+		[CPCAP_IRQ_VBUSVLD]               = "VBUSVLD",
+		[CPCAP_IRQ_CHRG_CURR1]            = "CHRG_CURR1",
+		[CPCAP_IRQ_CHRG_CURR2]            = "CHRG_CURR2",
+		[CPCAP_IRQ_RVRS_MODE]             = "RVRS_MODE",
+		[CPCAP_IRQ_ON]                    = "ON",
+		[CPCAP_IRQ_ON2]                   = "ON2",
+		[CPCAP_IRQ_CLK]                   = "CLK",
+		[CPCAP_IRQ_1HZ]                   = "1HZ",
+		[CPCAP_IRQ_PTT]                   = "PTT",
+		[CPCAP_IRQ_SE0CONN]               = "SE0CONN",
+		[CPCAP_IRQ_CHRG_SE1B]             = "CHRG_SE1B",
+		[CPCAP_IRQ_UART_ECHO_OVERRUN]     = "UART_ECHO_OVERRUN",
+		[CPCAP_IRQ_EXTMEMHD]              = "EXTMEMHD",
+
+		[CPCAP_IRQ_WARM]                  = "WARM",
+		[CPCAP_IRQ_SYSRSTR]               = "SYSRSTR",
+		[CPCAP_IRQ_SOFTRST]               = "SOFTRST",
+		[CPCAP_IRQ_DIEPWRDWN]             = "DIEPWRDWN",
+		[CPCAP_IRQ_DIETEMPH]              = "DIETEMPH",
+		[CPCAP_IRQ_PC]                    = "PC",
+		[CPCAP_IRQ_OFLOWSW]               = "OFLOWSW",
+		[CPCAP_IRQ_TODA]                  = "TODA",
+		[CPCAP_IRQ_OPT_SEL_DTCH]          = "OPT_SEL_DTCH",
+		[CPCAP_IRQ_OPT_SEL_STATE]         = "OPT_SEL_STATE",
+		[CPCAP_IRQ_ONEWIRE1]              = "ONEWIRE1",
+		[CPCAP_IRQ_ONEWIRE2]              = "ONEWIRE2",
+		[CPCAP_IRQ_ONEWIRE3]              = "ONEWIRE3",
+		[CPCAP_IRQ_UCRESET]               = "UCRESET",
+		[CPCAP_IRQ_PWRGOOD]               = "PWRGOOD",
+		[CPCAP_IRQ_USBDPLLCLK]            = "USBDPLLCLK",
+
+		[CPCAP_IRQ_DPI]                   = "DPI",
+		[CPCAP_IRQ_DMI]                   = "DMI",
+		[CPCAP_IRQ_UCBUSY]                = "UCBUSY",
+		[CPCAP_IRQ_GCAI_CURR1]            = "GCAI_CURR1",
+		[CPCAP_IRQ_GCAI_CURR2]            = "GCAI_CURR2",
+		[CPCAP_IRQ_SB_MAX_RETRANSMIT_ERR] = "SB_MAX_RETRANSMIT_ERR",
+		[CPCAP_IRQ_BATTDETB]              = "BATTDETB",
+		[CPCAP_IRQ_PRIHALT]               = "PRIHALT",
+		[CPCAP_IRQ_SECHALT]               = "SECHALT",
+		[CPCAP_IRQ_CC_CAL]                = "CC_CAL",
+
+		[CPCAP_IRQ_UC_PRIROMR]            = "UC_PRIROMR",
+		[CPCAP_IRQ_UC_PRIRAMW]            = "UC_PRIRAMW",
+		[CPCAP_IRQ_UC_PRIRAMR]            = "UC_PRIRAMR",
+		[CPCAP_IRQ_UC_USEROFF]            = "UC_USEROFF",
+		[CPCAP_IRQ_UC_PRIMACRO_4]         = "UC_PRIMACRO_4",
+		[CPCAP_IRQ_UC_PRIMACRO_5] 	  = "UC_PRIMACRO_5",
+		[CPCAP_IRQ_UC_PRIMACRO_6]         = "UC_PRIMACRO_6",
+		[CPCAP_IRQ_UC_PRIMACRO_7]         = "UC_PRIMACRO_7",
+		[CPCAP_IRQ_UC_PRIMACRO_8]         = "UC_PRIMACRO_8",
+		[CPCAP_IRQ_UC_PRIMACRO_9]         = "UC_PRIMACRO_9",
+		[CPCAP_IRQ_UC_PRIMACRO_10]        = "UC_PRIMACRO_10",
+		[CPCAP_IRQ_UC_PRIMACRO_11]        = "UC_PRIMACRO_11",
+		[CPCAP_IRQ_UC_PRIMACRO_12]        = "UC_PRIMACRO_12",
+		[CPCAP_IRQ_UC_PRIMACRO_13]        = "UC_PRIMACRO_13",
+		[CPCAP_IRQ_UC_PRIMACRO_14]        = "UC_PRIMACRO_14",
+		[CPCAP_IRQ_UC_PRIMACRO_15]        = "UC_PRIMACRO_15",
+	};
+	unsigned int i;
+	struct cpcap_irqdata *irqdata = s->private;
+
+	seq_printf(s, "%21s%9s%12s%10s\n",
+		   "CPCAP IRQ", "Enabled", "Registered", "Count");
+
+	for (i = 0; i < CPCAP_IRQ__NUM; i++) {
+		if ((i <= CPCAP_IRQ_CC_CAL) || (i >= CPCAP_IRQ_UC_PRIROMR)) {
+			seq_printf(s, "%21s%9d%12d%10d\n",
+				   irq_name[i],
+				   irqdata->irq_info[i].enabled,
+				   irqdata->irq_info[i].registered,
+				   irqdata->irq_info[i].count);
+		}
+	}
+	return 0;
+}
+
+static int cpcap_dbg_irq_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, cpcap_dbg_irq_show, inode->i_private);
+}
+
+static const struct file_operations debug_fops = {
+	.open    = cpcap_dbg_irq_open,
+	.read    = seq_read,
+	.llseek  = seq_lseek,
+	.release = single_release,
+};
+#endif
+
 int cpcap_irq_init(struct cpcap_device *cpcap)
 {
 	int retval;
 	struct spi_device *spi = cpcap->spi;
 	struct cpcap_irqdata *data;
-	struct dentry *debug_dir;
 
 	data = kzalloc(sizeof(struct cpcap_irqdata), GFP_KERNEL);
 	if (!data)
@@ -330,13 +535,10 @@ int cpcap_irq_init(struct cpcap_device *cpcap)
 		printk(KERN_ERR "cpcap_irq: Failed initializing pwrkey.\n");
 		goto error;
 	}
-
-	debug_dir = debugfs_create_dir("cpcap-irq", NULL);
-	debugfs_create_u64("registered", S_IRUGO, debug_dir,
-			   &data->registered);
-	debugfs_create_u64("enabled", S_IRUGO, debug_dir,
-			   &data->enabled);
-
+#ifdef CONFIG_DEBUG_FS
+	(void)debugfs_create_file("cpcap-irq", S_IRUGO, NULL, data,
+				  &debug_fops);
+#endif
 	return 0;
 
 error:
@@ -372,7 +574,7 @@ int cpcap_irq_register(struct cpcap_device *cpcap,
 	mutex_lock(&irqdata->lock);
 
 	if (irqdata->event_handler[irq].func == NULL) {
-		irqdata->registered |= 1 << irq;
+		irqdata->irq_info[irq].registered = 1;
 		cpcap_irq_unmask(cpcap, irq);
 		irqdata->event_handler[irq].func = cb_func;
 		irqdata->event_handler[irq].data = data;
@@ -397,7 +599,7 @@ int cpcap_irq_free(struct cpcap_device *cpcap, enum cpcap_irqs irq)
 	retval = cpcap_irq_mask(cpcap, irq);
 	data->event_handler[irq].func = NULL;
 	data->event_handler[irq].data = NULL;
-	data->registered &= ~(1 << irq);
+	data->irq_info[irq].registered = 0;
 	mutex_unlock(&data->lock);
 
 	return retval;
@@ -444,7 +646,7 @@ int cpcap_irq_mask(struct cpcap_device *cpcap,
 	int retval = -EINVAL;
 
 	if ((irq < CPCAP_IRQ__NUM) && (irq != CPCAP_IRQ_SECMAC)) {
-		data->enabled &= ~(1 << irq);
+		data->irq_info[irq].enabled = 0;
 		retval = cpcap_regacc_write(cpcap,
 					    get_mask_reg(irq),
 					    EVENT_MASK(irq),
@@ -462,7 +664,7 @@ int cpcap_irq_unmask(struct cpcap_device *cpcap,
 	int retval = -EINVAL;
 
 	if ((irq < CPCAP_IRQ__NUM) && (irq != CPCAP_IRQ_SECMAC)) {
-		data->enabled |= 1 << irq;
+		data->irq_info[irq].enabled = 1;
 		retval = cpcap_regacc_write(cpcap,
 					    get_mask_reg(irq),
 					    0,
@@ -480,7 +682,7 @@ int cpcap_irq_mask_get(struct cpcap_device *cpcap,
 	int retval = -EINVAL;
 
 	if ((irq < CPCAP_IRQ__NUM) && (irq != CPCAP_IRQ_SECMAC))
-		return (data->enabled & (1 << irq)) ? 0 : 1;
+		return data->irq_info[irq].enabled;
 
 	return retval;
 }
@@ -508,3 +710,24 @@ int cpcap_irq_sense(struct cpcap_device *cpcap,
 	return ((val & EVENT_MASK(irq)) != 0) ? 1 : 0;
 }
 EXPORT_SYMBOL_GPL(cpcap_irq_sense);
+
+#ifdef CONFIG_PM_DBG_DRV
+void cpcap_irq_pm_dbg_suspend(void)
+{
+	pm_dbg_info.suspend = 1;
+	pm_dbg_info.wakeup = 0;
+}
+
+void cpcap_irq_pm_dbg_resume(void)
+{
+	pm_dbg_info.suspend = 0;
+	if (pm_dbg_info.wakeup != 0) {
+		printk(KERN_INFO "PM_DBG WAKEUP CPCAP IRQ = 0x%x.0x%x.0%x.0x%x.0x%x\n",
+			pm_dbg_info.en_ints[0],
+			pm_dbg_info.en_ints[1],
+			pm_dbg_info.en_ints[2],
+			pm_dbg_info.en_ints[3],
+			pm_dbg_info.en_ints[4]);
+	}
+}
+#endif /* CONFIG_PM_DBG_DRV */

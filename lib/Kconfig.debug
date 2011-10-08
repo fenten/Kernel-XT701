@@ -552,7 +552,7 @@ config DEBUG_LOCKING_API_SELFTESTS
 	  mutexes and rwsems.
 
 config STACKTRACE
-	bool
+	bool "Show stack traces in /proc/pid/stack"
 	depends on STACKTRACE_SUPPORT
 
 config DEBUG_KOBJECT

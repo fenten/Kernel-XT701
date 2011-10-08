@@ -78,6 +78,28 @@
 	mov	r1, #\reason
 	.endm
 
+#ifdef CONFIG_OMAP_SECURE_FIQ_HACK
+__pabt_fiq:
+    sub sp, sp, #S_FRAME_SIZE
+    stmib sp, {r1 - lr}
+    mov r1, #BAD_PREFETCH
+
+    get_thread_info tsk
+	ldr	r8, [tsk, #TI_PREEMPT]		@ get preempt count
+	add	r7, r8, #1			@ increment it
+	str	r7, [tsk, #TI_PREEMPT]
+
+	ldmia	r0, {r4 - r6}
+	add	r0, sp, #S_PC		@ here for interlock avoidance
+	mov	r7, #-1			@  ""   ""    ""        ""
+	str	r4, [sp]		@ save preserved r0
+	stmia	r0, {r5 - r7}		@ lr_<exception>,
+					@ cpsr_<exception>, "old_r0"
+	mov	r0, sp
+	b c_fiq_handler
+ENDPROC(__pabt_fiq)
+#endif //CONFIG_OMAP_SECURE_FIQ_HACK
+
 __pabt_invalid:
 	inv_entry BAD_PREFETCH
 	b	common_invalid
@@ -523,16 +545,16 @@ ENDPROC(__und_usr)
 /*
  * The out of line fixup for the ldrt above.
  */
-	.section .fixup, "ax"
+	.pushsection .fixup, "ax"
 4:	mov	pc, r9
-	.previous
-	.section __ex_table,"a"
+	.popsection
+	.pushsection __ex_table,"a"
 	.long	1b, 4b
 #if __LINUX_ARM_ARCH__ >= 7
 	.long	2b, 4b
 	.long	3b, 4b
 #endif
-	.previous
+	.popsection
 
 /*
  * Check whether the instruction is a co-processor instruction.
@@ -679,7 +701,7 @@ do_fpe:
 	.data
 ENTRY(fp_enter)
 	.word	no_fp
-	.previous
+	.text
 
 ENTRY(no_fp)
 	mov	pc, lr
@@ -1151,7 +1173,11 @@ __stubs_start:
 	vector_stub	pabt, ABT_MODE, 4
 
 	.long	__pabt_usr			@  0 (USR_26 / USR_32)
+#ifndef CONFIG_OMAP_SECURE_FIQ_HACK
 	.long	__pabt_invalid			@  1 (FIQ_26 / FIQ_32)
+#else
+    .long   __pabt_fiq
+#endif //CONFIG_OMAP_SECURE_FIQ_HACK
 	.long	__pabt_invalid			@  2 (IRQ_26 / IRQ_32)
 	.long	__pabt_svc			@  3 (SVC_26 / SVC_32)
 	.long	__pabt_invalid			@  4

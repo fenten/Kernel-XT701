@@ -819,8 +819,21 @@ void __init setup_arch(char **cmdline_p)
 		const void *cpu_tier_prop;
 
 		cpu_tier = NULL;
-		machine_name = (char *)"mapphone_";
-}
+		machine_node = of_find_node_by_path(DT_PATH_MACHINE);
+		if (machine_node) {
+			machine_prop = of_get_property(machine_node, \
+				DT_PROP_MACHINE_TYPE, NULL);
+			if (machine_prop)
+				machine_name = (char *)machine_prop;
+
+			cpu_tier_prop = of_get_property(machine_node, \
+				DT_PROP_CPU_TIER, NULL);
+			if (cpu_tier_prop)
+				cpu_tier = (char *)cpu_tier_prop;
+
+			of_node_put(machine_node);
+		}
+	}
 #endif
 	request_standard_resources(&meminfo, mdesc);
 

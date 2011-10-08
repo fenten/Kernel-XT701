@@ -149,7 +149,7 @@ void __sg_free_table(struct sg_table *table, unsigned int max_ents,
 		return;
 
 	sgl = table->sgl;
-	while (table->orig_nents) {
+	while (table->orig_nents && sgl) {
 		unsigned int alloc_size = table->orig_nents;
 		unsigned int sg_size;
 
@@ -213,6 +213,7 @@ int __sg_alloc_table(struct sg_table *table, unsigned int nents,
 {
 	struct scatterlist *sg, *prv;
 	unsigned int left;
+	unsigned int total_alloc = 0;
 
 #ifndef ARCH_HAS_SG_CHAIN
 	BUG_ON(nents > max_ents);
@@ -234,8 +235,14 @@ int __sg_alloc_table(struct sg_table *table, unsigned int nents,
 		left -= sg_size;
 
 		sg = alloc_fn(alloc_size, gfp_mask);
-		if (unlikely(!sg))
+		if (unlikely(!sg)) {
+			table->orig_nents = total_alloc;
+			/* mark the end of previous entry */
+			sg_mark_end(&prv[alloc_size - 1]);
 			return -ENOMEM;
+		}
+
+		total_alloc += alloc_size;
 
 		sg_init_table(sg, alloc_size);
 		table->nents = table->orig_nents += sg_size;

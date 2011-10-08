@@ -87,7 +87,7 @@ static irqreturn_t gpiodev_isr(int irq, void *param)
 
 	dev->flags |= GPIODEV_FLAG_INTERRUPTED;
 
-	disable_irq(gpio_to_irq(dev->pin_nr));
+	disable_irq_nosync(gpio_to_irq(dev->pin_nr));
 	wake_up_interruptible(&dev->event_queue);
 
 	trace_msg("gpio%d interrupt occurs", dev->pin_nr);

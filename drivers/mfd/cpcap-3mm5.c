@@ -30,6 +30,8 @@
 #include <linux/spi/cpcap-regbits.h>
 #include <linux/spi/spi.h>
 
+static unsigned long headset_in_stamp;
+
 enum {
 	NO_DEVICE,
 	HEADSET_WITH_MIC,
@@ -80,12 +82,19 @@ static void audio_low_power_clear(struct cpcap_3mm5_data *data,
 
 static void send_key_event(struct cpcap_3mm5_data *data, unsigned int state)
 {
+	unsigned long now, discard;
+
 	dev_info(&data->cpcap->spi->dev, "Headset key event: old=%d, new=%d\n",
 		 data->key_state, state);
 
-	if (data->key_state != state) {
+	now = jiffies;
+	discard = headset_in_stamp + 2*HZ;
+	if (data->key_state != state && time_after(now, discard)) {
 		data->key_state = state;
 		cpcap_broadcast_key_event(data->cpcap, KEY_MEDIA, state);
+	} else {
+		dev_info(&data->cpcap->spi->dev, "Headset key event ignored: "
+				"now=%ld, discard=%ld\n", now, discard);
 	}
 }
 
@@ -115,14 +124,19 @@ static void hs_handler(enum cpcap_irqs irq, void *data)
 
 		send_key_event(data_3mm5, 0);
 
+		/* Config mux switch to accy detection. */
+		cpcap_regacc_write(data_3mm5->cpcap, CPCAP_REG_GPIO2, 0,
+				CPCAP_BIT_GPIO2DRV);
+		cpcap_regacc_write(data_3mm5->cpcap, CPCAP_REG_GPIO4, 0,
+				CPCAP_BIT_GPIO4DRV);
 		cpcap_uc_stop(data_3mm5->cpcap, CPCAP_MACRO_5);
 	} else {
 		cpcap_regacc_write(data_3mm5->cpcap, CPCAP_REG_TXI,
-				   (CPCAP_BIT_MB_ON2 | CPCAP_BIT_PTT_CMP_EN),
-				   (CPCAP_BIT_MB_ON2 | CPCAP_BIT_PTT_CMP_EN));
+				(CPCAP_BIT_MB_ON2 | CPCAP_BIT_PTT_CMP_EN),
+				(CPCAP_BIT_MB_ON2 | CPCAP_BIT_PTT_CMP_EN));
 		cpcap_regacc_write(data_3mm5->cpcap, CPCAP_REG_RXOA,
-				   CPCAP_BIT_ST_HS_CP_EN,
-				   CPCAP_BIT_ST_HS_CP_EN);
+				CPCAP_BIT_ST_HS_CP_EN,
+				CPCAP_BIT_ST_HS_CP_EN);
 		audio_low_power_clear(data_3mm5, &data_3mm5->audio_low_pwr_det);
 
 		/* Give PTTS time to settle 10ms */
@@ -132,8 +146,14 @@ static void hs_handler(enum cpcap_irqs irq, void *data)
 			/* Headset without mic and MFB is detected. (May also
 			 * be a headset with the MFB pressed.) */
 			new_state = HEADSET_WITHOUT_MIC;
-		} else
+		} else {
 			new_state = HEADSET_WITH_MIC;
+			/* Config mux switch to pass headset mic. */
+			cpcap_regacc_write(data_3mm5->cpcap, CPCAP_REG_GPIO2, 0,
+					CPCAP_BIT_GPIO2DRV);
+			cpcap_regacc_write(data_3mm5->cpcap, CPCAP_REG_GPIO4,
+					CPCAP_BIT_GPIO4DRV, CPCAP_BIT_GPIO4DRV);
+		}
 
 		cpcap_irq_clear(data_3mm5->cpcap, CPCAP_IRQ_MB2);
 		cpcap_irq_clear(data_3mm5->cpcap, CPCAP_IRQ_UC_PRIMACRO_5);
@@ -143,6 +163,7 @@ static void hs_handler(enum cpcap_irqs irq, void *data)
 		cpcap_irq_unmask(data_3mm5->cpcap, CPCAP_IRQ_UC_PRIMACRO_5);
 
 		cpcap_uc_start(data_3mm5->cpcap, CPCAP_MACRO_5);
+		headset_in_stamp = jiffies;
 	}
 
 	switch_set_state(&data_3mm5->sdev, new_state);
@@ -253,6 +274,10 @@ static int __init cpcap_3mm5_probe(struct platform_device *pdev)
 	}
 
 	regulator_set_voltage(data->regulator, 2775000, 2775000);
+
+	/* configure GPIO2=high and GPIO4=low. */
+	cpcap_regacc_write(data->cpcap, CPCAP_REG_GPIO2, 0, CPCAP_BIT_GPIO2DRV);
+	cpcap_regacc_write(data->cpcap, CPCAP_REG_GPIO4, 0, CPCAP_BIT_GPIO4DRV);
 
 	retval  = cpcap_irq_clear(data->cpcap, CPCAP_IRQ_HS);
 	retval |= cpcap_irq_clear(data->cpcap, CPCAP_IRQ_MB2);

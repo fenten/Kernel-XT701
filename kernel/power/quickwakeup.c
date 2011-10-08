@@ -16,6 +16,7 @@
 #include <linux/slab.h>
 #include <linux/quickwakeup.h>
 #include <linux/module.h>
+
 static LIST_HEAD(qw_head);
 
 int quickwakeup_register(struct quickwakeup_ops *ops)

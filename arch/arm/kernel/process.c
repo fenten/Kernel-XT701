@@ -344,7 +344,11 @@ void show_regs(struct pt_regs * regs)
 	printk("\n");
 	printk("Pid: %d, comm: %20s\n", task_pid_nr(current), current->comm);
 	__show_regs(regs);
+#ifdef CONFIG_ARM_UNWIND
+	dump_stack();
+#else
 	__backtrace();
+#endif
 }
 
 /*
@@ -430,7 +434,7 @@ EXPORT_SYMBOL(dump_fpu);
  * the thread function, and r3 points to the exit function.
  */
 extern void kernel_thread_helper(void);
-asm(	".section .text\n"
+asm(	".pushsection .text\n"
 "	.align\n"
 "	.type	kernel_thread_helper, #function\n"
 "kernel_thread_helper:\n"
@@ -438,11 +442,11 @@ asm(	".section .text\n"
 "	mov	lr, r3\n"
 "	mov	pc, r2\n"
 "	.size	kernel_thread_helper, . - kernel_thread_helper\n"
-"	.previous");
+"	.popsection");
 
 #ifdef CONFIG_ARM_UNWIND
 extern void kernel_thread_exit(long code);
-asm(	".section .text\n"
+asm(	".pushsection .text\n"
 "	.align\n"
 "	.type	kernel_thread_exit, #function\n"
 "kernel_thread_exit:\n"
@@ -452,7 +456,7 @@ asm(	".section .text\n"
 "	nop\n"
 "	.fnend\n"
 "	.size	kernel_thread_exit, . - kernel_thread_exit\n"
-"	.previous");
+"	.popsection");
 #else
 #define kernel_thread_exit	do_exit
 #endif

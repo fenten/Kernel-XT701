@@ -684,7 +684,7 @@ void isp_power_settings(int idle)
 {
 	if (idle) {
 		isp_reg_writel(ISP_SYSCONFIG_AUTOIDLE |
-			       (ISP_SYSCONFIG_MIDLEMODE_SMARTSTANDBY <<
+			       (ISP_SYSCONFIG_MIDLEMODE_NOSTANBY <<
 				ISP_SYSCONFIG_MIDLEMODE_SHIFT),
 			       OMAP3_ISP_IOMEM_MAIN,
 			       ISP_SYSCONFIG);
@@ -1002,15 +1002,15 @@ static irqreturn_t omap34xx_isp_isr(int irq, void *_isp)
 		if (isp_obj.isp_lsc_workaround == 0 &&
 			CCDC_PREV_RESZ_CAPTURE(&isp_obj) &&
 			!ispresizer_busy() && !isppreview_busy()) {
-				if (isp_obj.module.applyCrop == 0 &&
-					isp_obj.running == ISP_RUNNING)
-					ispresizer_enable(1);
-				else {
-					ispresizer_applycrop();
-					if (!ispresizer_busy())
-						isp_obj.module.applyCrop = 0;
-				}
+			if (isp_obj.module.applyCrop == 0 &&
+				isp_obj.running == ISP_RUNNING)
+				ispresizer_enable(1);
+			else {
+				ispresizer_applycrop();
+				if (!ispresizer_busy())
+					isp_obj.module.applyCrop = 0;
 			}
+		}
 #if defined(CONFIG_VIDEO_OMAP3_HP3A)
 		hp3a_ccdc_start();
 #endif
@@ -1018,10 +1018,13 @@ static irqreturn_t omap34xx_isp_isr(int irq, void *_isp)
 
 	if (irqstatus & CCDC_VD0) {
 #if defined(CONFIG_VIDEO_OMAP3_HP3A)
+		struct isp_buf *buf = ISP_BUF_DONE(bufs);
 		if (isp_obj.running == ISP_RUNNING)
 			hp3a_ccdc_done();
 		else if (isp_obj.running == ISP_STOPPING)
 			ispccdc_enable(0);
+		if (buf && buf->vb)
+			ktime_get_ts((struct timespec *)&(buf->vb->ts));
 #endif
 		if (CCDC_CAPTURE(&isp_obj))
 			isp_buf_process(bufs);
@@ -1153,7 +1156,7 @@ static irqreturn_t omap34xx_isp_isr(int irq, void *_isp)
 
 	isp_flush();
 
-/******************************************************************************
+#if 0
 	{
 		static const struct {
 			int num;
@@ -1199,7 +1202,7 @@ static irqreturn_t omap34xx_isp_isr(int irq, void *_isp)
 		}
 		DPRINTK_ISPCTRL("\n");
 	}
-******************************************************************************/
+#endif
 
 	return IRQ_HANDLED;
 }
@@ -1349,7 +1352,7 @@ static int __isp_disable_modules(int suspend)
 	}
 
 	/* Trigger isp reset if lsc is still busy */
-	if (ispccdc_lsc_busy())
+	if (ispccdc_lsc_busy() || !cpu_is_omap3630())
 		reset = 1;
 
 	/* disable lsc now */
@@ -2634,7 +2637,7 @@ int isp_get(void)
 
 	DPRINTK_ISPCTRL("isp_get: old %d\n", isp_obj.ref_count);
 	mutex_lock(&(isp_obj.isp_mutex));
-	if (isp_obj.ref_count == 0) {
+	if ((isp_obj.ref_count++) == 0) {
 		ret_err = isp_enable_clocks();
 		if (ret_err)
 			goto out_err;
@@ -2643,18 +2646,20 @@ int isp_get(void)
 			isp_restore_ctx();
 		else
 			has_context = 1;
+		/* No standy */
+		isp_power_settings(1);
 		enable_irq(omap3isp->irq);
 #if defined(CONFIG_VIDEO_OMAP3_HP3A)
 			hp3a_hw_enabled(1);
 #endif
 	}
-	isp_obj.ref_count++;
 	mutex_unlock(&(isp_obj.isp_mutex));
 
 	DPRINTK_ISPCTRL("isp_get: new %d\n", isp_obj.ref_count);
 	return isp_obj.ref_count;
 
 out_err:
+	--isp_obj.ref_count;
 	mutex_unlock(&(isp_obj.isp_mutex));
 	return ret_err;
 }
@@ -2672,19 +2677,20 @@ int isp_put(void)
 
 	DPRINTK_ISPCTRL("isp_put: old %d\n", isp_obj.ref_count);
 	mutex_lock(&(isp_obj.isp_mutex));
-	if (isp_obj.ref_count) {
-		if (--isp_obj.ref_count == 0) {
+	if (isp_obj.ref_count > 0 &&
+		(--isp_obj.ref_count == 0)) {
 #if defined(CONFIG_VIDEO_OMAP3_HP3A)
-			hp3a_hw_enabled(0);
+		hp3a_hw_enabled(0);
 #endif
-			disable_irq_nosync(omap3isp->irq);
-			isp_save_ctx();
-			isp_release_resources();
-			isp_obj.module.isp_pipeline = 0;
-			isp_disable_clocks();
-			memset(&ispcroprect, 0, sizeof(ispcroprect));
-			memset(&cur_rect, 0, sizeof(cur_rect));
-		}
+		disable_irq_nosync(omap3isp->irq);
+		isp_save_ctx();
+		isp_release_resources();
+		isp_obj.module.isp_pipeline = 0;
+		/*force ISP standby, smart standby disabled*/
+		isp_power_settings(0);
+		isp_disable_clocks();
+		memset(&ispcroprect, 0, sizeof(ispcroprect));
+		memset(&cur_rect, 0, sizeof(cur_rect));
 	}
 	mutex_unlock(&(isp_obj.isp_mutex));
 	DPRINTK_ISPCTRL("isp_put: new %d\n", isp_obj.ref_count);
@@ -2884,7 +2890,7 @@ static int isp_probe(struct platform_device *pdev)
 	}
 
 	isp_obj.mclk_hz = CM_CAM_MCLK_HZ;
-	isp_obj.mclk_src_div = 2;
+	isp_obj.mclk_src_div = 4;
 
 	isp_obj.cam_ick = clk_get(&camera_dev, "cam_ick");
 	if (IS_ERR(isp_obj.cam_ick)) {

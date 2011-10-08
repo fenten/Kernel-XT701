@@ -91,6 +91,14 @@ config DEBUG_ICEDCC
 	  It does include a timeout to ensure that the system does not
 	  totally freeze when there is nothing connected to read.
 
+config OC_ETM
+	bool "On-chip ETM and ETB"
+	select ARM_AMBA
+	help
+	  Enables the on-chip embedded trace macrocell and embedded trace
+	  buffer driver that will allow you to collect traces of the
+	  kernel code.
+
 config DEBUG_DC21285_PORT
 	bool "Kernel low-level debugging messages via footbridge serial port"
 	depends on DEBUG_LL && FOOTBRIDGE
@@ -119,5 +127,14 @@ config DEBUG_S3C_UART
 
 	  The uncompressor code port configuration is now handled
 	  by CONFIG_S3C_LOWLEVEL_UART_PORT.
+
+config OMAP_SECURE_FIQ_HACK
+	depends on ARCH_OMAP3430
+	bool "fiq hack"
+	default n
+	help
+	  This is only used for debugging the issues which cause
+	  watchdog reset on OMAP3. It doesn't bring harm to anything,
+	  but don't enable it unless you really know what it is.
 
 endmenu

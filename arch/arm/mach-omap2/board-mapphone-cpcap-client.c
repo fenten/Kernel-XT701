@@ -228,10 +228,10 @@ static int __init ld_cpcap_disp_button_init(void)
 	ret = -ENODEV;
 
         device_available = 1;
-        pbtn_data->duty_cycle = 0x2A0;
+        pbtn_data->duty_cycle = 0xB8;
 	pbtn_data->cpcap_mask = 0x3FF;
-	pbtn_data->led_current =  0xA;
-	pbtn_data->reg = CPCAP_REG_KLC;
+	pbtn_data->led_current =  0x0;
+	pbtn_data->reg = CPCAP_REG_BLEDC;
 
 	ret = 1;
 	return ret;

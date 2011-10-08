@@ -432,7 +432,8 @@ static int cpcap_regulator_is_enabled(struct regulator_dev *rdev)
 	if (cpcap_regacc_read(cpcap, regnr, &value))
 		return -1;
 
-	return (value & cpcap_regltr_data[regltr_id].mode_mask) ? 1 : 0;
+	return ((value & cpcap_regltr_data[regltr_id].mode_mask)
+		== cpcap_regltr_data[regltr_id].mode_val) ? 1 : 0;
 }
 
 static int cpcap_regulator_set_mode(struct regulator_dev *rdev,

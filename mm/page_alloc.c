@@ -1784,6 +1784,11 @@ gfp_to_alloc_flags(gfp_t gfp_mask)
 	return alloc_flags;
 }
 
+#ifdef CONFIG_DUMP_TASKS_ON_NOPAGE
+extern int sysctl_oom_dump_tasks;
+extern void dump_tasks(const struct mem_cgroup *mem);
+#endif
+
 static inline struct page *
 __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
 	struct zonelist *zonelist, enum zone_type high_zoneidx,
@@ -1911,7 +1916,11 @@ nopage:
 			p->comm, order, gfp_mask);
 		dump_stack();
 		show_mem();
-	}
+#ifdef CONFIG_DUMP_TASKS_ON_NOPAGE
+		if (sysctl_oom_dump_tasks)
+			dump_tasks(NULL);
+#endif
+    }
 	return page;
 got_pg:
 	if (kmemcheck_enabled)

@@ -44,6 +44,8 @@
 #include <linux/string.h>
 #include <asm/setup.h>
 #include <asm/bootinfo.h>
+#include <linux/notifier.h>
+#include <plat/cpu.h>
 
 /*
  * EMIT_BOOTINFO and EMIT_BOOTINFO_STR are used to emit the bootinfo
@@ -226,6 +228,13 @@ EXPORT_SYMBOL(bi_set_cid_recover_boot);
 
 #define EMIT_CID_RECOVER_BOOT() \
 		EMIT_BOOTINFO("CID_RECOVER_BOOT", "0x%02x", cid_recover_boot)
+
+u32 bi_cpu_es_version(void)
+{
+	return omap_rev();
+}
+#define EMIT_CPU_ES_VERSION() \
+		EMIT_BOOTINFO("CPU_ES_VERSION", "0x%08x", cpu_es_version)
 /*
  * get_bootinfo fills in the /proc/bootinfo information.
  * We currently only have the powerup reason.
@@ -242,9 +251,23 @@ static int get_bootinfo(char *buf, char **start,
 	EMIT_FLAT_DEV_TREE_ADDRESS();
 	EMIT_BATTERY_STATUS_AT_BOOT();
 	EMIT_CID_RECOVER_BOOT();
+	EMIT_CPU_ES_VERSION();
 
 	return len;
 }
+
+static int bootinfo_panic(struct notifier_block *this,
+						unsigned long event, void *ptr)
+{
+	printk(KERN_ERR "mbm_version=0x%08x", mbm_version);
+	printk(KERN_ERR "mbm_loader_version=0x%08x", mbm_loader_version);
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block panic_block = {
+	.notifier_call = bootinfo_panic,
+	.priority = 1,
+ };
 
 static struct proc_dir_entry *proc_bootinfo;
 
@@ -252,6 +275,7 @@ int __init bootinfo_init_module(void)
 {
 	proc_bootinfo = &proc_root;
 	create_proc_read_entry("bootinfo", 0, NULL, get_bootinfo, NULL);
+	atomic_notifier_chain_register(&panic_notifier_list, &panic_block);
 	return 0;
 }
 

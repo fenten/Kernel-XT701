@@ -156,6 +156,7 @@ static struct usb_descriptor_header *hs_mtp_descs[] = {
 #define MAX_BULK_RX_REQ_NUM 8
 #define MAX_BULK_TX_REQ_NUM 4
 #define MAX_CTL_RX_REQ_NUM	8
+#define EHOSTRESET 0xFFFE
 
 /*---------------------------------------------------------------------------*/
 struct usb_mtp_context {
@@ -179,6 +180,7 @@ struct usb_mtp_context {
 	int cancel;
 	int ctl_cancel;
 	int intr_in_busy;
+	int reset;
 
 	wait_queue_head_t rx_wq;
 	wait_queue_head_t tx_wq;
@@ -316,7 +318,7 @@ static void mtp_out_complete(struct usb_ep *ep, struct usb_request *req)
 	if (req->status == 0) {
 		req_put(&g_usb_mtp_context.rx_done_reqs, req);
 	} else {
-		mtp_err("status is %d %p len=%d\n",
+		mtp_debug("status is %d %p len=%d\n",
 		req->status, req, req->actual);
 		g_usb_mtp_context.error = 1;
 		if (req->status == -ECONNRESET)
@@ -685,6 +687,17 @@ static void mtp_ctl_write_complete(struct usb_ep *ep, struct usb_request *req)
 	wake_up(&g_usb_mtp_context.ctl_tx_wq);
 }
 
+static int mtp_ctl_open(struct inode *ip, struct file *fp)
+{
+	/*
+	** clear reset variable to prevent
+	** mtp server read last time reset signal
+	*/
+	mtp_debug("---mtp_ctl_open\n");
+	g_usb_mtp_context.reset = 0;
+	return 0;
+}
+
 static ssize_t mtp_ctl_read(struct file *file, char *buf,
 	size_t count, loff_t *pos)
 {
@@ -699,14 +712,27 @@ static ssize_t mtp_ctl_read(struct file *file, char *buf,
 	if (!cur_creq) {
 		ret = wait_event_interruptible(g_usb_mtp_context.ctl_rx_wq,
 		((cur_creq = ctl_req_get(&g_usb_mtp_context.ctl_rx_done_reqs))
-			|| g_usb_mtp_context.ctl_cancel));
+		 || g_usb_mtp_context.ctl_cancel
+		 || g_usb_mtp_context.reset));
 		if (g_usb_mtp_context.ctl_cancel) {
 			mtp_debug("ctl_cancel return in mtp_ctl_read\n");
+			if (cur_creq) {
+				ctl_req_put(&g_usb_mtp_context.ctl_rx_reqs,
+					    cur_creq);
+				if (g_usb_mtp_context.reset)
+					cur_creq = NULL;
+			}
+			g_usb_mtp_context.ctl_cancel = 0;
+			if (!g_usb_mtp_context.reset)
+				return -EINVAL;
+		}
+		if (g_usb_mtp_context.reset) {
+			mtp_debug("ctl_reset return in mtp_ctl_read\n");
 			if (cur_creq)
 				ctl_req_put(&g_usb_mtp_context.ctl_rx_reqs,
-				cur_creq);
-			g_usb_mtp_context.ctl_cancel = 0;
-			return -EINVAL;
+					    cur_creq);
+			g_usb_mtp_context.reset = 0;
+			return -EHOSTRESET;
 		}
 		if (ret < 0) {
 			mtp_err("wait_event_interruptible return %d\n", ret);
@@ -818,6 +844,7 @@ static ssize_t mtp_ctl_write(struct file *file, const char *buf,
 }
 
 static const struct file_operations mtp_ctl_fops = {
+     .open = mtp_ctl_open,
      .read = mtp_ctl_read,
      .write = mtp_ctl_write,
 };
@@ -962,6 +989,7 @@ static void mtp_function_disable(struct usb_function *f)
 	g_usb_mtp_context.cancel = 1;
 	g_usb_mtp_context.ctl_cancel = 1;
 	g_usb_mtp_context.error = 1;
+	g_usb_mtp_context.reset = 1;
 
 	usb_ep_disable(g_usb_mtp_context.bulk_in);
 	usb_ep_disable(g_usb_mtp_context.bulk_out);
@@ -974,6 +1002,8 @@ static void mtp_function_disable(struct usb_function *f)
 	/* drop finished requests */
 	while ((req = req_get(&g_usb_mtp_context.rx_done_reqs)))
 		req_put(&g_usb_mtp_context.rx_reqs, req);
+	while ((req = req_get(&g_usb_mtp_context.ctl_rx_done_reqs)))
+		req_put(&g_usb_mtp_context.ctl_rx_reqs, req);
 
 	/* readers may be blocked waiting for us to go online */
 	wake_up(&g_usb_mtp_context.rx_wq);
