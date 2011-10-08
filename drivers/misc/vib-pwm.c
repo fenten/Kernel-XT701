@@ -1,6 +1,6 @@
 /* drivers/misc/vib-pwm.c
  *
- * Copyright (C) 2009 Motorola, Inc.
+ * Copyright (C) 2009-2010 Motorola, Inc.
  * Copyright (C) 2008 Google, Inc.
  * Author: Mike Lockwood <lockwood@android.com>
  *
@@ -24,26 +24,80 @@
 
 #include "../staging/android/timed_output.h"
 
+#ifdef CONFIG_VIB_PWM_SWEEP
+#define VIB_STATE_IDLE		0
+#define VIB_STATE_SQUARE	1
+#define VIB_STATE_SWEEP		2
+#endif /* CONFIG_VIB_PWM_SWEEP */
+
 struct vib_pwm_data {
 	struct timed_output_dev dev;
 	struct work_struct vib_work;
 	struct hrtimer timer;
 	/* Ensure only one vibration at a time */
-	spinlock_t lock;
+	struct mutex lock;
 
 	struct vib_pwm_platform_data *pdata;
 	int vib_power_state;
 	int vib_state;
+	int value;
 };
 
 static struct vib_pwm_data *misc_data;
 
+
 static void vib_pwm_set(int on)
 {
 	if (on) {
-		if (misc_data->pdata->power_on && !misc_data->vib_power_state) {
-			misc_data->pdata->power_on();
-			misc_data->vib_power_state = 1;
+#ifdef CONFIG_VIB_PWM_SWEEP
+		if ((on == VIB_STATE_SWEEP) && misc_data->pdata->pattern){
+			if(misc_data->vib_power_state != VIB_STATE_SWEEP) {
+				misc_data->pdata->pattern(1);
+				misc_data->vib_power_state = VIB_STATE_SWEEP;
+				if (misc_data->value > 3000) {
+					printk(KERN_ERR "vib err:%x", misc_data->value);
+					misc_data->value = 3000;
+				}
+				
+				hrtimer_start(&misc_data->timer,
+					ktime_set((long)(misc_data->value) / 1000,
+					(unsigned long)(misc_data->value) % 1000 * 1000000),
+					HRTIMER_MODE_REL);
+				return;
+			}	else {
+				
+			
+				hrtimer_cancel(&misc_data->timer);
+
+				if (misc_data->value > 3000) {
+                                        printk(KERN_ERR "vib err:%x", misc_data->value);
+                                        misc_data->value = 3000;
+                                }
+
+				hrtimer_start(&misc_data->timer,
+                                        ktime_set((long)(misc_data->value) / 1000,
+                                        (unsigned long)(misc_data->value) % 1000 * 1000000),
+                                        HRTIMER_MODE_REL);
+				
+				return;
+			}
+		}
+
+		
+#endif /* CONFIG_VIB_PWM_SWEEP */
+		if (misc_data->pdata->power_on) {
+			if (!misc_data->vib_power_state) {
+				misc_data->pdata->power_on();
+				misc_data->vib_power_state = 1;
+			}
+			if (misc_data->value > 3000) {
+                                printk(KERN_ERR "vib enable err:%x", misc_data->value);
+                                misc_data->value = 3000;
+                        }
+			hrtimer_start(&misc_data->timer,
+				ktime_set(misc_data->value / 1000,
+				(misc_data->value) % 1000 * 1000000),
+				HRTIMER_MODE_REL);
 		}
 	} else {
 		if (misc_data->pdata->power_off && misc_data->vib_power_state) {
@@ -82,21 +136,24 @@ static int vib_pwm_get_time(struct timed_output_dev *dev)
 static void vib_pwm_enable(struct timed_output_dev *dev, int value)
 {
 	struct vib_pwm_data *data = container_of(dev, struct vib_pwm_data, dev);
-	unsigned long flags;
 
-	spin_lock_irqsave(&data->lock, flags);
+	mutex_lock(&data->lock);
+#ifdef CONFIG_VIB_PWM_SWEEP
+	if (data->vib_state == VIB_STATE_SWEEP) {
+		mutex_unlock(&data->lock);
+		return;
+	}
+#endif /* CONFIG_VIB_PWM_SWEEP */
 	hrtimer_cancel(&data->timer);
 
 	if (value == 0)
 		data->vib_state = 0;
 	else {
 		data->vib_state = 1;
-		hrtimer_start(&data->timer,
-			      ktime_set(value / 1000, (value % 1000) * 1000000),
-			      HRTIMER_MODE_REL);
+		data->value = value;
 	}
 
-	spin_unlock_irqrestore(&data->lock, flags);
+	mutex_unlock(&data->lock);
 
 	schedule_work(&data->vib_work);
 }
@@ -105,6 +162,46 @@ void pwm_vibrator_haptic_fire(int value)
 {
 	vib_pwm_enable(&misc_data->dev, value);
 }
+
+#ifdef CONFIG_VIB_PWM_SWEEP
+static ssize_t sweep_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
+{
+	struct timed_output_dev *tdev = dev_get_drvdata(dev);
+	int remaining = tdev->get_time(tdev);
+
+	return sprintf(buf, "%d\n", remaining);
+}
+
+static ssize_t sweep_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t size)
+{
+	struct timed_output_dev *tdev = dev_get_drvdata(dev);
+	struct vib_pwm_data *data =
+		container_of(tdev, struct vib_pwm_data, dev);
+	int value;
+
+	if (sscanf(buf, "%d", &value) == 0)
+		return size;
+
+	mutex_lock(&data->lock);
+	if (value <= 0) {
+		data->vib_state = VIB_STATE_IDLE;
+		hrtimer_cancel(&data->timer);
+	} else {
+		
+		data->vib_state = VIB_STATE_SWEEP;
+		data->value = value;
+	}
+	mutex_unlock(&data->lock);
+
+	schedule_work(&data->vib_work);
+
+	return size;
+}
+
+static DEVICE_ATTR(sweep, S_IRUGO | S_IWUSR, sweep_show, sweep_store);
+#endif /* CONFIG_VIB_PWM_SWEEP */
 
 static int vib_pwm_probe(struct platform_device *pdev)
 {
@@ -132,7 +229,7 @@ static int vib_pwm_probe(struct platform_device *pdev)
 	hrtimer_init(&pwm_data->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 
 	pwm_data->timer.function = pwm_timer_func;
-	spin_lock_init(&pwm_data->lock);
+	mutex_init(&pwm_data->lock);
 
 	pwm_data->dev.name = pdata->device_name;
 	pwm_data->dev.get_time = vib_pwm_get_time;
@@ -150,11 +247,23 @@ static int vib_pwm_probe(struct platform_device *pdev)
 		goto err2;
 	}
 
+#ifdef CONFIG_VIB_PWM_SWEEP
+	ret = device_create_file(pwm_data->dev.dev, &dev_attr_sweep);
+	if (ret < 0) {
+		printk(KERN_ERR "lvib. sysfs creating file failed\n");
+		goto err3;
+	}
+#endif /* CONFIG_VIB_PWM_SWEEP */
+
 	misc_data = pwm_data;
 	platform_set_drvdata(pdev, pwm_data);
 
 	printk(KERN_ALERT "vib-pwm probed\n");
 	return 0;
+#ifdef CONFIG_VIB_PWM_SWEEP
+err3:
+	device_remove_file(pwm_data->dev.dev, &dev_attr_sweep);
+#endif /* CONFIG_VIB_PWM_SWEEP */
 err2:
 	timed_output_dev_unregister(&pwm_data->dev);
 err1:
@@ -166,6 +275,10 @@ err0:
 static int vib_pwm_remove(struct platform_device *pdev)
 {
 	struct vib_pwm_data *pwm_data = platform_get_drvdata(pdev);
+
+#ifdef CONFIG_VIB_PWM_SWEEP
+	device_remove_file(pwm_data->dev.dev, &dev_attr_sweep);
+#endif /* CONFIG_VIB_PWM_SWEEP */
 
 	if (pwm_data->pdata->exit)
 		pwm_data->pdata->exit();

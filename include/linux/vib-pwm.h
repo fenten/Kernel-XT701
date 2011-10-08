@@ -1,6 +1,6 @@
 /* include/linux/vib-omap-pwm.h
  *
- * Copyright (C) 2009 Motorola, Inc.
+ * Copyright (C) 2009-2010 Motorola, Inc.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -23,6 +23,9 @@ struct vib_pwm_platform_data {
 	void (*exit) (void);
 	void (*power_on) (void);
 	void (*power_off) (void);
+#ifdef CONFIG_VIB_PWM_SWEEP
+	void (*pattern) (int);
+#endif /* CONFIG_VIB_PWM_SWEEP */
 	char *device_name;
 };
 
