@@ -205,14 +205,14 @@ static int mapphone_reset_keys_up[] = {
 };
 
 static int mapphone_reset_keys_down[] = {
-	KEY_LEFTSHIFT,
-	KEY_RIGHTALT,
-	KEY_BACKSPACE,
+	KEY_VOLUMEUP,
+	KEY_VOLUMEDOWN,
+	KEY_END,
 	0
 };
 
 static struct keyreset_platform_data mapphone_reset_keys_pdata = {
-	.crash_key = KEY_SPACE,
+	.crash_key = KEY_END,
 	.keys_up = mapphone_reset_keys_up,
 	.keys_down = mapphone_reset_keys_down,
 };

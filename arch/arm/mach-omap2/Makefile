@@ -113,6 +113,7 @@ obj-$(CONFIG_MACH_MAPPHONE)             += board-mapphone.o \
                                            board-mapphone-keypad.o \
                                            board-mapphone-wifi.o \
                                            board-mapphone-gpio.o \
+                                           board-mapphone-modem.o \
                                            board-mapphone-mmcprobe.o \
                                            board-mapphone-usb.o
 obj-$(CONFIG_MOT_FEAT_MDTV)             += board-mapphone-mdtv.o

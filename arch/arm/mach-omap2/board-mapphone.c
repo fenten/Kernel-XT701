@@ -1030,6 +1030,8 @@ static struct lm3530_platform_data omap3430_als_light_data = {
 	.upper_curr_sel = 5,
 	.lower_curr_sel = 2,
 	.lens_loss_coeff = 6,
+	.manual_als_config = 0x64,
+	.als_enabled = 1,
 };
 
 static struct lm3554_platform_data mapphone_camera_flash_3554 = {

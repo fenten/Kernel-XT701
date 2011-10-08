@@ -70,7 +70,6 @@ extern struct camise_platform_data mapphone_camise_platform_data;
 
 #define GPIO_MT9P012_STANDBY		58
 #define GPIO_MT9P012_RESET		98
-#define GPIO_SILENCE_KEY		100
 #define GPIO_SLIDER			177
 #if defined(CONFIG_VIDEO_OV8810)
 #define GPIO_OV8810_RESET	98
