@@ -70,8 +70,6 @@ void wakeme_after_rcu(struct rcu_head  *head)
 	complete(&rcu->completion);
 }
 
-#ifndef CONFIG_TINY_RCU
-
 /**
  * synchronize_rcu - wait until a grace period has elapsed.
  *
@@ -95,8 +93,6 @@ void synchronize_rcu(void)
 	wait_for_completion(&rcu.completion);
 }
 EXPORT_SYMBOL_GPL(synchronize_rcu);
-
-#endif /* #ifndef CONFIG_TINY_RCU */
 
 static void rcu_barrier_callback(struct rcu_head *notused)
 {
