@@ -21,7 +21,6 @@
 #include <linux/platform_device.h>
 #include <linux/init.h>
 #include <linux/input.h>
-#include <linux/isl29030.h>
 #include <linux/sfh7743.h>
 #include <linux/bu52014hfv.h>
 #include <linux/lis331dlh.h>
@@ -483,74 +482,6 @@ static void __init mapphone_akm8973_init(void)
 	omap_cfg_reg(AC3_34XX_GPIO175);
 }
 
-static struct regulator *mapphone_isl29030_regulator;
-static void __init mapphone_isl29030_init(void)
-{
-	struct regulator *reg;
-
-	gpio_request(MAPPHONE_PROX_INT_GPIO, "isl29030 proximity int");
-	gpio_direction_input(MAPPHONE_PROX_INT_GPIO);
-
-	reg = regulator_get(NULL, "vsdio");
-	if (IS_ERR(reg))
-		return;
-	mapphone_isl29030_regulator = reg;
-
-	regulator_enable(mapphone_isl29030_regulator);
-}
-
-static int mapphone_isl29030_power_on(void)
-{
-	return 0; /*regulator_enable(mapphone_isl29030_regulator);*/
-}
-
-static int mapphone_isl29030_power_off(void)
-{
-/*	if (mapphone_isl92030_regulator)
-		return regulator_disable(mapphone_isl29030_regulator);*/
-	return 0;
-}
-
-static struct isl29030_als_zone_data als_low_lux_data[] = {
-	{0x00, 0x00, 0x02},
-	{0x21, 0x00, 0x10},
-	{0x01, 0x01, 0x20},
-	{0x01, 0x02, 0x30},
-	{0x01, 0x03, 0x60},
-	{0x01, 0x06, 0x80},
-	{0x01, 0x08, 0xff},
-	{0xff, 0xf1, 0xff},
-};
-
-static struct isl29030_als_zone_data als_high_lux_data[] = {
-	{0x00, 0x00, 0x02},
-	{0x21, 0x00, 0x10},
-	{0x01, 0x01, 0x20},
-	{0x01, 0x02, 0x30},
-	{0x01, 0x03, 0x60},
-	{0x01, 0x06, 0x80},
-	{0x01, 0x08, 0xff},
-	{0xff, 0xf1, 0xff},
-};
-
-struct isl29030_platform_data isl29030_als_ir_data = {
-	.configure = 0x6c,
-	.interrupt_cntrl = 0x40,
-	.prox_lower_threshold = 0x1e,
-	.prox_higher_threshold = 0x32,
-	.als_ir_low_threshold = 0x00,
-	.als_ir_high_low_threshold = 0x00,
-	.als_ir_high_threshold = 0x45,
-	.lens_percent_t = 100,
-	.num_of_low_zones = ARRAY_SIZE(als_low_lux_data),
-	.num_of_high_zones = ARRAY_SIZE(als_high_lux_data),
-	.als_low_lux = als_low_lux_data,
-	.als_high_lux = als_high_lux_data,
-	.power_on = mapphone_isl29030_power_on,
-	.power_off = mapphone_isl29030_power_off,
-};
-
-
 struct platform_device kxtf9_platform_device = {
 	.name = "kxtf9",
 	.id = -1,
@@ -564,14 +495,6 @@ struct platform_device sfh7743_platform_device = {
 	.id = -1,
 	.dev = {
 		.platform_data = &mapphone_sfh7743_data,
-	},
-};
-
-static struct platform_device isl29030_als_ir = {
-	.name	= LD_ISL29030_NAME,
-	.id	= -1,
-	.dev	= {
-		.platform_data  = &isl29030_als_ir_data,
 	},
 };
 
@@ -593,9 +516,6 @@ static struct platform_device *mapphone_sensors[] __initdata = {
 	&kxtf9_platform_device,
 #ifdef CONFIG_INPUT_PROXIMITY_SFH7743
 	&sfh7743_platform_device,
-#endif
-#ifdef CONFIG_INPUT_ALS_IR_ISL29030
-	&isl29030_als_ir,
 #endif
 	&omap3430_hall_effect_dock,
 };
@@ -695,9 +615,6 @@ void __init mapphone_sensors_init(void)
 	mapphone_kxtf9_init();
 #ifdef CONFIG_INPUT_PROXIMITY_SFH7743
 	mapphone_sfh7743_init();
-#endif
-#ifdef CONFIG_INPUT_ALS_IR_ISL29030
-	mapphone_isl29030_init();
 #endif
 	mapphone_hall_effect_init();
 	mapphone_akm8973_init();
