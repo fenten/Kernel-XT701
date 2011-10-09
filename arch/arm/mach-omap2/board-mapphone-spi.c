@@ -234,8 +234,7 @@ static struct regulator_init_data cpcap_regulator[CPCAP_NUM_REGULATORS] = {
 		.constraints = {
 			.min_uV			= 1200000,
 			.max_uV			= 1875000,
-			.valid_ops_mask		= REGULATOR_CHANGE_VOLTAGE,
-			.apply_uV		= 1,
+			.valid_ops_mask		= 0,
 		},
 	},
 	[CPCAP_VFUSE] = {
@@ -282,9 +281,7 @@ static struct regulator_init_data cpcap_regulator[CPCAP_NUM_REGULATORS] = {
 		.constraints = {
 			.min_uV			= 2500000,
 			.max_uV			= 2775000,
-			.valid_ops_mask		= (REGULATOR_CHANGE_VOLTAGE |
-						REGULATOR_CHANGE_STATUS),
-			.apply_uV		= 1,
+			.valid_ops_mask		= 0,
 		},
 		.num_consumer_supplies	= ARRAY_SIZE(cpcap_vrf1_consumers),
 		.consumer_supplies	= cpcap_vrf1_consumers,
@@ -316,8 +313,7 @@ static struct regulator_init_data cpcap_regulator[CPCAP_NUM_REGULATORS] = {
 		.constraints = {
 			.min_uV			= 3000000,
 			.max_uV			= 3000000,
-			.valid_ops_mask		= REGULATOR_CHANGE_STATUS |
-						REGULATOR_CHANGE_VOLTAGE,
+			.valid_ops_mask		= REGULATOR_CHANGE_STATUS,
 			.apply_uV		= 1,
 		},
 		.num_consumer_supplies	= ARRAY_SIZE(cpcap_vwlan2_consumers),
@@ -617,7 +613,7 @@ static void __init cpcap_of_init(void)
 		of_node_put(bp_node);
 	}
 
-	if ((strcmp(cpcap_bp_model, "UMTS") >= 0) || (strcmp(cpcap_bp_model, "CG") >= 0)) {
+	if (strcmp(cpcap_bp_model, "UMTS") >= 0) {
 		mapphone_cpcap_data.is_umts = 1;
 		mapphone_umts_model = 1;
 	}

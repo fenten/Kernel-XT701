@@ -87,7 +87,7 @@ static struct plat_serialomap_port serial_platform_data[] = {
 		.irq		= 72,
 		.regshift	= 2,
 #ifdef CONFIG_SERIAL_OMAP3430_HW_FLOW_CONTROL
-		.ctsrts		= UART_EFR_RTS,
+		.ctsrts		= UART_EFR_CTS | UART_EFR_RTS,
 #endif
 		.flags		= UPF_BOOT_AUTOCONF,
 	},
@@ -105,7 +105,7 @@ static struct plat_serialomap_port serial_platform_data[] = {
 		.irq		= 74,
 		.regshift	= 2,
 #ifdef CONFIG_SERIAL_OMAP3430_HW_FLOW_CONTROL
-		.ctsrts		= UART_EFR_CTS | UART_EFR_RTS,
+		.ctsrts		= UART_EFR_RTS,
 #endif
 		.flags		= UPF_BOOT_AUTOCONF,
 	},
@@ -422,7 +422,7 @@ void omap_uart_prepare_idle(int num)
 			 * data could still be on the way to the
 			 * fifo. This delay is ~1 byte time @ 115.2k
 			 */
-			if (uart->num == 2)
+			if (uart->num == 0)
 				udelay(80);
 
 #ifdef CONFIG_SERIAL_OMAP
@@ -529,13 +529,13 @@ static void omap_uart_rtspad_init(struct omap_uart_state *uart)
 		return;
 	switch(uart->num) {
 	case 0:
-/*		uart->rts_padconf = 0x17e;*/
+		uart->rts_padconf = 0x17e;
 		break;
 	case 1:
 		uart->rts_padconf = 0x176;
 		break;
 	case 2:
-		uart->rts_padconf = 0x19c;
+/*		uart->rts_padconf = 0x19c; */
 		break;
 	default:
 		uart->rts_padconf = 0;

@@ -32,8 +32,8 @@
 #include "clock.h"
 
 
-#define MAPPHONE_BP_READY2_AP_GPIO      114
-#define MAPPHONE_IPC_USB_SUSP_GPIO	55
+#define MAPPHONE_BP_READY2_AP_GPIO      59
+#define MAPPHONE_IPC_USB_SUSP_GPIO	142
 #define DIE_ID_REG_BASE			(L4_WK_34XX_PHYS + 0xA000)
 #define DIE_ID_REG_OFFSET		0x218
 #define MAX_USB_SERIAL_NUM		17
@@ -608,18 +608,18 @@ void __init mapphone_ehci_init(void)
 	omap_cfg_reg(AC1_3430_USB3FS_PHY_MM3_TXEN_N);
 	omap_cfg_reg(AE1_3430_USB3FS_PHY_MM3_TXSE0);
 
-	if (1)
+	if (is_cdma_phone())
 		mapphone_init_modem_interface();
 
 #if defined(CONFIG_USB_EHCI_HCD) || defined(CONFIG_USB_EHCI_HCD_MODULE)
-	if (1) {
+	if (!is_cdma_phone()) {
 		usb_platform_data.port_data[2].mode =
 			EHCI_HCD_OMAP_MODE_ULPI_TLL_SDR;
 		platform_device_register(&ehci_device);
 	}
 #endif
 #if defined(CONFIG_USB_OHCI_HCD) || defined(CONFIG_USB_OHCI_HCD_MODULE)
-	if (1)
+	if (is_cdma_phone())
 		platform_device_register(&ohci_device);
 #endif
 }

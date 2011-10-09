@@ -205,14 +205,14 @@ static int mapphone_reset_keys_up[] = {
 };
 
 static int mapphone_reset_keys_down[] = {
-	KEY_VOLUMEUP,
-	KEY_VOLUMEDOWN,
-	KEY_END,
+	KEY_LEFTSHIFT,
+	KEY_RIGHTALT,
+	KEY_BACKSPACE,
 	0
 };
 
 static struct keyreset_platform_data mapphone_reset_keys_pdata = {
-	.crash_key = KEY_END,
+	.crash_key = KEY_SPACE,
 	.keys_up = mapphone_reset_keys_up,
 	.keys_down = mapphone_reset_keys_down,
 };
@@ -375,13 +375,24 @@ static int __init mapphone_init_keypad(void)
 #endif
 
 	/* keypad rows */
+	omap_cfg_reg(N4_34XX_GPIO34);
+	omap_cfg_reg(M4_34XX_GPIO35);
+	omap_cfg_reg(L4_34XX_GPIO36);
 	omap_cfg_reg(K4_34XX_GPIO37);
+	omap_cfg_reg(T3_34XX_GPIO38);
 	omap_cfg_reg(R3_34XX_GPIO39);
+	omap_cfg_reg(N3_34XX_GPIO40);
+	omap_cfg_reg(M3_34XX_GPIO41);
 
 	/* keypad columns */
 	omap_cfg_reg(K3_34XX_GPIO43_OUT);
+	omap_cfg_reg(V8_34XX_GPIO53_OUT);
+	omap_cfg_reg(U8_34XX_GPIO54_OUT);
+	omap_cfg_reg(T8_34XX_GPIO55_OUT);
 	omap_cfg_reg(R8_34XX_GPIO56_OUT);
 	omap_cfg_reg(P8_34XX_GPIO57_OUT);
+	omap_cfg_reg(N8_34XX_GPIO58_OUT);
+	omap_cfg_reg(L8_34XX_GPIO63_OUT);
 
 	/* switches */
 	omap_cfg_reg(AB2_34XX_GPIO177);

@@ -30,8 +30,6 @@
 #include <plat/dispsw.h>
 #include <media/tda19989_platform.h>
 
-/*#define DEBUG*/
-
 #ifdef DEBUG
 #define PANELDBG(format, ...) \
 	printk(KERN_DEBUG "board_panel: " format, \
@@ -135,9 +133,8 @@ static int mapphone_panel_enable(struct omap_dss_device *dssdev)
 	}
 
 	regulator_enable(display_regulator);
-	msleep(10);
 	gpio_set_value(mapphone_lcd_device.reset_gpio, 0);
-	msleep(10);
+	msleep(1);
 	gpio_set_value(mapphone_lcd_device.reset_gpio, 1);
 	msleep(10);
 
@@ -303,8 +300,14 @@ static int mapphone_dt_get_tda19989_info(void)
 		mapphone_tda19989_data.int_gpio = *(u32 *)panel_prop;
 
 	panel_prop = of_get_property(panel_node, "cec_reg_name", NULL);
-	if (panel_prop != NULL)
-		strcpy(mapphone_tda19989_data.cec_reg_name, (char *)panel_prop);
+	if (panel_prop != NULL) {
+		strncpy(mapphone_tda19989_data.cec_reg_name,
+				(char *)panel_prop,
+				(TDA19989_CEC_REGULATOR_NAME_SIZE - 1));
+		mapphone_tda19989_data.cec_reg_name \
+			[TDA19989_CEC_REGULATOR_NAME_SIZE - 1] = '\0';
+	}
+
 	return 0;
 }
 
@@ -389,6 +392,7 @@ void panel_print(void)
 			mapphone_lcd_device.reset_gpio,
 			mapphone_lcd_device.phy.dsi.xfer_mode,
 			mapphone_lcd_device.panel.panel_id);
+
 #if 0
 		PANELDBG(" DT: width= %d height= %d\n",
 			dt_panel_timings.x_res, dt_panel_timings.y_res);

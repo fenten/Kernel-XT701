@@ -86,8 +86,6 @@ static int hsmmc_late_init(struct device *dev)
 		ret = PTR_ERR(hsmmc_regulator);
 		goto err2;
 	}
-	regulator_enable(hsmmc_regulator);
-	msleep(3000);
 
 	return ret;
 err2:

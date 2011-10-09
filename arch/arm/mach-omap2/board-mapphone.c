@@ -2147,7 +2147,7 @@ static void __init mapphone_init(void)
 	mapphone_padconf_init();
 	mapphone_gpio_mapping_init();
 	mapphone_ramconsole_init();
-	//mapphone_omap_mdm_ctrl_init();
+	mapphone_omap_mdm_ctrl_init();
 	mapphone_spi_init();
 	mapphone_cpcap_client_init();
 	mapphone_flash_init();
