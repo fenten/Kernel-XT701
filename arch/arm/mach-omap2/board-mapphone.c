@@ -88,6 +88,10 @@
 #if defined(CONFIG_VIDEO_OV5650) || defined(CONFIG_VIDEO_OV5650_MODULE)
 #include <media/ov5650.h>
 #endif
+#if defined(CONFIG_VIDEO_CAM_ISE) || defined(CONFIG_VIDEO_CAM_ISE_MODULE)
+#include <media/camise.h>
+#endif
+
 
 #if defined(CONFIG_LEDS_BD7885)
 #include <linux/leds-bd7885.h>
@@ -116,12 +120,7 @@
 #define MAPPHONE_AKM8973_INT_GPIO	175
 #define MAPPHONE_AKM8975_INT_GPIO	175
 #define MAPPHONE_AUDIO_PATH_GPIO	143
-#define MAPPHONE_BP_READY_AP_GPIO	141
 #define MAPPHONE_BP_READY2_AP_GPIO	59
-#define MAPPHONE_BP_RESOUT_GPIO		139
-#define MAPPHONE_BP_PWRON_GPIO		137
-#define MAPPHONE_AP_TO_BP_PSHOLD_GPIO	138
-#define MAPPHONE_AP_TO_BP_FLASH_EN_GPIO	157
 #define MAPPHONE_POWER_OFF_GPIO		176
 #define MAPPHONE_BPWAKE_STROBE_GPIO	157
 #define MAPPHONE_APWAKE_TRIGGER_GPIO	141
@@ -148,7 +147,7 @@
 #define I2C_MAX_DEV_NAME_LEN 16
 #define I2C_BUS_PROP_NAME_LEN 12
 
-char *bp_model = "UMTS";
+char *bp_model = "CDMA";
 
 static struct omap_opp mapphone_omap3430_mpu_rate_table[] = {
 	{0, 0, 0, 0},
@@ -161,7 +160,7 @@ static struct omap_opp mapphone_omap3430_mpu_rate_table[] = {
 	/*OPP4*/
 	{S550M, VDD1_OPP4, 0x38, 0x0},
 	/*OPP5*/
-	{S600M, VDD1_OPP5, 0x3E, 0x0},
+	{S720M, VDD1_OPP5, 0x3E, 0x0},
 };
 
 #define S80M 80000000
@@ -188,41 +187,45 @@ static struct omap_opp mapphone_omap3430_dsp_rate_table[] = {
 	/*OPP4*/
 	{S400M, VDD1_OPP4, 0x38, 0x0},
 	/*OPP5*/
-	{S430M, VDD1_OPP5, 0x3E, 0x0},
+	{S520M, VDD1_OPP5, 0x3E, 0x0},
 };
 
 static struct omap_opp mapphone_omap3630_mpu_rate_table[] = {
 	{0, 0, 0, 0},
 	/*Add headroom for CPCAP IR drop*/
-	/*OPP1,CPCAP 1.0v*/
-	{S300M, VDD1_OPP1, 0x20, 0x0},
-	/*OPP2,CPCAP 1.15v*/
-	{S600M, VDD1_OPP2, 0x2C, 0x0},
-	/*OPP3,CPCAP 1.3v*/
-	{S800M, VDD1_OPP3, 0x39, 0x0},
-	/*OPP4,CPCAP 1.425v*/
-	{S1000M, VDD1_OPP4, 0x42, 0x0},
+	/*OPP1,CPCAP 1.0125v*/
+	{S300M, VDD1_OPP1, 0x21, 0x0},
+	/*OPP2,CPCAP 1.2v*/
+	{S600M, VDD1_OPP2, 0x30, 0x0},
+	/*OPP3,CPCAP 1.325v*/
+	{S800M, VDD1_OPP3, 0x3A, 0x0},
+	/*OPP4,CPCAP 1.375v*/
+	{S1000M, VDD1_OPP4, 0x3E, 0x0},
+	/*OPP5,CPCAP 1.375v*/
+	{S1200M, VDD1_OPP5, 0x3E, 0x0},
 };
 
 
 static struct omap_opp mapphone_omap3630_l3_rate_table[] = {
 	{0, 0, 0, 0},
 	/*OPP1*/
-	{S100M, VDD2_OPP1, 0x1C, 0x0},
+	{S100M, VDD2_OPP1, 0x20, 0x0},
 	/*OPP2*/
-	{S200M, VDD2_OPP2, 0x2B, 0x0},
+	{S200M, VDD2_OPP2, 0x30, 0x0},
 };
 
 static struct omap_opp mapphone_omap3630_dsp_rate_table[] = {
 	{0, 0, 0, 0},
-	/*OPP1,CPCAP 1.0v*/
-	{S260M, VDD1_OPP1, 0x20, 0x0},
-	/*OPP2,CPCAP 1.15v*/
-	{S520M, VDD1_OPP2, 0x2C, 0x0},
-	/*OPP3,CPCAP 1.3v*/
-	{S660M, VDD1_OPP3, 0x39, 0x0},
-	/*OPP4,CPCAP 1.425v*/
-	{S800M, VDD1_OPP4, 0x42, 0x0},
+	/*OPP1,CPCAP 1.0125v*/
+	{S260M, VDD1_OPP1, 0x21, 0x0},
+	/*OPP2,CPCAP 1.2v*/
+	{S520M, VDD1_OPP2, 0x30, 0x0},
+	/*OPP3,CPCAP 1.325v*/
+	{S660M, VDD1_OPP3, 0x3A, 0x0},
+	/*OPP4,CPCAP 1.375v*/
+	{S800M, VDD1_OPP4, 0x3E, 0x0},
+	/*OPP5,CPCAP 1.375v*/
+	{S65M, VDD1_OPP5, 0x3E, 0x0},
 };
 
 static struct cpuidle_params mapphone_cpuidle_params_table[] = {
@@ -372,12 +375,18 @@ static struct omap_board_config_kernel mapphone_config[] __initdata = {
 
 static int mapphone_touch_reset(void)
 {
+	int touch_pwr_en_gpio = 0;
+#ifdef CONFIG_ARM_OF
+	touch_pwr_en_gpio = get_gpio_by_name("touch_pwr_en");
+#endif
 	gpio_direction_output(MAPPHONE_TOUCH_RESET_N_GPIO, 1);
 	msleep(1);
 	gpio_set_value(MAPPHONE_TOUCH_RESET_N_GPIO, 0);
-	msleep(20);
+	msleep(QTM_OBP_SLEEP_RESET_HOLD);
+	if (touch_pwr_en_gpio >= 0)
+		gpio_set_value(touch_pwr_en_gpio, 1);
 	gpio_set_value(MAPPHONE_TOUCH_RESET_N_GPIO, 1);
-	msleep(45);
+	msleep(QTM_OBP_SLEEP_WAIT_FOR_HW_RESET);
 
 	return 0;
 }
